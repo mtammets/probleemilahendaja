@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="et">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Probleemide lahendaja</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Plus+Jakarta+Sans:wght@600;700;800&display=swap"
+        rel="stylesheet">
+    <link rel="stylesheet" href="styles.css">
+</head>
+
+<body data-state="idle">
+    <main class="app-shell">
+        <section class="container panel">
+            <div class="panel__frame">
+                <h1>Probleemilahendaja</h1>
+                <p class="tagline">Kui probleem vajab lahendust</p>
+                <div class="counter-line" aria-label="Lahendatud probleemide ülevaade">
+                    <span class="counter-line__label">Kokku lahendatud probleeme</span>
+                    <strong id="solvedCount" class="counter-line__value">1 284 320</strong>
+                </div>
+                <textarea id="problemInput" placeholder="Kirjuta oma probleem siia..."></textarea>
+                <button id="solveButton">Lahenda probleem!</button>
+            </div>
+        </section>
+        <section id="loading" class="loading panel panel--status" style="display:none;" aria-live="polite">
+            <div class="panel__frame panel__frame--status">
+                <div class="spinner"></div>
+                <p>Probleemi lahendamine...</p>
+                <div class="loading-progress" aria-hidden="true">
+                    <div id="loadingProgressBar" class="loading-progress__bar"></div>
+                </div>
+                <span id="loadingProgressValue" class="loading-progress__value">0%</span>
+            </div>
+        </section>
+        <section id="solution" class="solution panel panel--status" style="display:none;" aria-live="polite">
+            <div class="panel__frame panel__frame--status">
+                <p>Probleem lahendatud!</p>
+                <div class="solution-actions">
+                    <button id="reportButton">Vaata raportit</button>
+                    <button id="resetButton" class="button--secondary">Lahenda veel probleeme</button>
+                </div>
+            </div>
+        </section>
+        <section id="report" class="report panel" style="display:none;">
+            <div class="panel__frame report__frame">
+                <div class="report__header">
+                    <span class="report__eyebrow">Probleemi lahenduse raport</span>
+                    <h2 id="reportTitle">Raport on valmis</h2>
+                    <p id="reportLead" class="report__lead">
+                        Sisestatud olukorra põhjal valmis kokkuvõte, mis kirjeldab probleemi tuuma ja
+                        kinnitab lahenduse tulemust.
+                    </p>
+                </div>
+                <div class="report__overview">
+                    <article class="report-card report-card--status">
+                        <span class="report-card__label">Staatus</span>
+                        <strong id="reportStatusValue" class="report-card__value">Lahendatud</strong>
+                        <p id="reportStatusMeta" class="report-card__meta">
+                            Olukord jõudis selge tulemuseni ning probleem loetakse lahendatuks.
+                        </p>
+                    </article>
+                    <article class="report-card">
+                        <span class="report-card__label">Probleemi tüüp</span>
+                        <strong id="reportTypeValue" class="report-card__value">Üldine olukord</strong>
+                        <p id="reportTypeMeta" class="report-card__meta">
+                            Olukorra tuum sai selge kuju ning lahendus kujunes positiivseks.
+                        </p>
+                    </article>
+                    <article class="report-card">
+                        <span class="report-card__label">Lahenduse tulemus</span>
+                        <strong id="reportClarityValue" class="report-card__value">Positiivne</strong>
+                        <p id="reportClarityMeta" class="report-card__meta">
+                            Ka lühike kirjeldus võimaldab anda selge ja lõpetatud kokkuvõtte.
+                        </p>
+                    </article>
+                </div>
+                <div class="report__sections">
+                    <section class="report__section">
+                        <span class="report__section-label">Probleemi kirjeldus</span>
+                        <p id="reportOriginalProblem" class="report__quote"></p>
+                    </section>
+                    <section class="report__section">
+                        <span class="report__section-label">Milles oli probleem</span>
+                        <p id="reportProblemAnalysis"></p>
+                    </section>
+                    <section class="report__section">
+                        <span class="report__section-label">Kas see sai lahendatud?</span>
+                        <p id="reportResolution"></p>
+                    </section>
+                    <section class="report__section">
+                        <span class="report__section-label">Lahenduse kokkuvõte</span>
+                        <p id="reportSummary"></p>
+                    </section>
+                </div>
+                <div class="report__footer">
+                    <section class="rating-panel" aria-labelledby="ratingTitle">
+                        <span id="ratingTitle" class="report__section-label">Kas jäid tulemusega rahule?</span>
+                        <div class="rating-panel__scale" role="radiogroup" aria-label="Tulemusega rahulolu">
+                            <button type="button" class="rating-panel__button" data-rating="1" aria-pressed="false">1</button>
+                            <button type="button" class="rating-panel__button" data-rating="2" aria-pressed="false">2</button>
+                            <button type="button" class="rating-panel__button" data-rating="3" aria-pressed="false">3</button>
+                            <button type="button" class="rating-panel__button" data-rating="4" aria-pressed="false">4</button>
+                            <button type="button" class="rating-panel__button" data-rating="5" aria-pressed="false">5</button>
+                        </div>
+                        <p id="ratingFeedback" class="rating-panel__feedback" aria-live="polite">
+                            Vali hinnang 1 kuni 5.
+                        </p>
+                    </section>
+                    <div class="report__actions">
+                        <button id="reportBackButton" class="button--ghost">Tagasi</button>
+                        <button id="reportResetButton" class="button--secondary">Lahenda veel probleeme</button>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </main>
+    <script type="module" src="./script.js"></script>
+</body>
+
+</html>
