@@ -34,8 +34,8 @@ const reportResolution = document.getElementById("reportResolution");
 const reportSummary = document.getElementById("reportSummary");
 const ratingButtons = Array.from(document.querySelectorAll(".rating-panel__button"));
 const ratingFeedback = document.getElementById("ratingFeedback");
+const ratingPanel = document.querySelector(".rating-panel");
 
-let solveTimer;
 let solvedCountTimer;
 let solvedCountSyncTimer;
 let loadingProgressFrame;
@@ -46,10 +46,12 @@ let currentReportId = null;
 let pendingReportSave = null;
 let selectedRating = 0;
 let remoteSolvedCount = null;
+let isGeneratingReport = false;
 
 const COUNTER_BASE = 1284320;
 const COUNTER_EPOCH = Date.UTC(2026, 0, 1, 9, 0, 0);
-const SOLVE_DURATION = 5000;
+const MIN_SOLVE_DURATION = 3200;
+const LOADING_PROGRESS_CAP = 0.92;
 const REMOTE_METRICS_REFRESH_INTERVAL = 15000;
 const numberFormatter = new Intl.NumberFormat("et-EE");
 const sections = [container, loadingDiv, solutionDiv, reportDiv];
@@ -57,47 +59,67 @@ const sections = [container, loadingDiv, solutionDiv, reportDiv];
 const CATEGORY_RULES = [
     {
         label: "Töö ja vastutus",
-        meta: "Peamine surve on seotud ootuste, vastutuse või tähtajaga.",
+        meta: "Tööga seotud pinge on vaibunud ja koormus on taas paigas.",
         keywords: ["töö", "projekt", "tähtaeg", "klient", "boss", "juht", "koosolek", "kolleeg", "karjäär"],
-        analysis: "Probleemi keskmes on tööalane pinge, kus ootused või prioriteedid vajasid selgemat järjestust.",
-        summary: "Olukord stabiliseerus, prioriteedid muutusid selgemaks ning tööalane pinge taandus juhitavale tasemele."
+        resolved: "Lahenes tööga seotud surve, mis venitas tähelepanu ja sisemist rahu.",
+        state: "Töö on taas kontrolli all ja päev tundub selgem.",
+        summary: "Tööteema ei paina enam ja fookus on tagasi."
     },
     {
         label: "Raha ja kohustused",
-        meta: "Peamine pinge tuleb kuludest, kohustustest või rahalisest ebakindlusest.",
+        meta: "Rahaline olukord on stabiilsem ja igapäevane pinge on taandunud.",
         keywords: ["raha", "palk", "eelarve", "võlg", "laen", "arve", "kulud", "sissetulek", "makse"],
-        analysis: "Probleemi keskmes on rahaline surve, kus selgus pidi tulema numbritest, piiridest ja otsustusjärjekorrast.",
-        summary: "Rahaga seotud ebakindlus vähenes, olukord muutus arusaadavamaks ning kontrollitunne taastus."
+        resolved: "Lahenes rahaline pinge, mis tekitas nappuse või kohustuste survet.",
+        state: "Rahaline seis on rahulikum, kindlam ja tasakaalus.",
+        summary: "Raha ei mõju enam pideva probleemina."
     },
     {
         label: "Suhted ja suhtlus",
-        meta: "Pinge tuleb inimestevahelisest ebaselgusest, konfliktist või ootuste erinevusest.",
+        meta: "Suhtlus on pehmem, lähedus on taastunud ja pinge on taandunud.",
         keywords: ["suhe", "partner", "sõber", "pere", "ema", "isa", "abikaasa", "tüli", "konflikt", "suhtlus"],
-        analysis: "Probleemi keskmes oli suhe või suhtlus, kus lahendus nõudis esmalt selget sõnastust ja rahulikumat vaadet.",
-        summary: "Suhtluses tekkis suurem selgus, pinge vähenes ning olukord liikus tasakaalukama tulemuse suunas."
+        resolved: "Lahenes suhte või suhtluse ümber olnud pinge.",
+        state: "Suhe on soojem, vastastikune ja tasakaalus.",
+        summary: "See suheteema ei hoia enam midagi kinni."
     },
     {
         label: "Tervis ja koormus",
-        meta: "Pinge viitab ülekoormusele, taastumise puudusele või sisemisele pingele.",
+        meta: "Koormus on leevenenud ja sisemine rahu on tagasi.",
         keywords: ["stress", "ärevus", "väsimus", "tervis", "uni", "läbipõlemine", "kurnatus", "pinge", "depressioon"],
-        analysis: "Probleemi keskmes oli koormus või sisemine pinge, mis vajas esmalt stabiliseerimist ja rahunemist.",
-        summary: "Koormus sai selgema kuju, pinge vähenes ning olukord muutus rahulikumaks ja paremini juhitavaks."
+        resolved: "Lahenes pinge või ülekoormuse osa, mis kurnas kõige rohkem.",
+        state: "Enesetunne on ühtlasem ja olukord ei rõhu enam.",
+        summary: "See teema ei koorma enam samal viisil."
     },
     {
         label: "Otsus ja suunavalik",
-        meta: "Põhiküsimus on valikus, suunamuutuses või otsustusjulguses.",
+        meta: "Suund on selge ja sisemine kõhklus on taandunud.",
         keywords: ["otsus", "valik", "valima", "kas", "kolida", "lahkuda", "jääda", "suund", "variant"],
-        analysis: "Probleemi keskmes oli otsus, kus pinge ei tulenenud valikute puudumisest, vaid sellest, et suund polnud veel piisavalt selge.",
-        summary: "Otsuse suund muutus selgemaks, ebakindlus taandus ning olukord jõudis kindlama lahenduseni."
+        resolved: "Lahenes valiku ümber olnud ebaselgus.",
+        state: "Otsus on paigas ja edasi liikumine on lihtsam.",
+        summary: "See küsimus ei ripu enam õhus."
     }
 ];
 
 const RATING_MESSAGES = {
-    1: "Tagasiside salvestatud. Tulemus ei vastanud ootusele.",
+    1: "Tagasiside salvestatud. Tulemus ei olnud seekord sinu jaoks piisav.",
     2: "Tagasiside salvestatud. Tulemus jäi pigem nõrgaks.",
-    3: "Tagasiside salvestatud. Tulemus oli rahuldav.",
-    4: "Tagasiside salvestatud. Tulemus oli tugev ja selge.",
-    5: "Tagasiside salvestatud. Tulemus vastas väga hästi ootusele."
+    3: "Tagasiside salvestatud. Tulemus oli täiesti okei.",
+    4: "Tagasiside salvestatud. Tulemus jättis tugeva mulje.",
+    5: "Tagasiside salvestatud. Tulemus tabas väga hästi märki."
+};
+
+const REPORT_FIELD_LIMITS = {
+    title: 56,
+    lead: 96,
+    statusValue: 28,
+    statusMeta: 64,
+    typeValue: 34,
+    typeMeta: 72,
+    clarityValue: 24,
+    clarityMeta: 64,
+    originalProblem: 140,
+    analysis: 132,
+    resolution: 96,
+    summary: 124
 };
 
 function sanitizeProblemText(text) {
@@ -110,6 +132,32 @@ function truncate(text, maxLength) {
     }
 
     return text.slice(0, maxLength - 1).trimEnd() + "…";
+}
+
+function clampReportFields(report) {
+    const limitedReport = { ...report };
+
+    Object.entries(REPORT_FIELD_LIMITS).forEach(function ([key, maxLength]) {
+        if (typeof limitedReport[key] === "string") {
+            limitedReport[key] = truncate(sanitizeProblemText(limitedReport[key]), maxLength);
+        }
+    });
+
+    return limitedReport;
+}
+
+function capitalizeFirst(text) {
+    if (!text) {
+        return text;
+    }
+
+    return text.charAt(0).toLocaleUpperCase("et-EE") + text.slice(1);
+}
+
+function isGenericMeta(value, genericValues) {
+    const normalizedValue = sanitizeProblemText(value || "").toLocaleLowerCase("et-EE");
+
+    return genericValues.includes(normalizedValue);
 }
 
 function getFallbackSolvedCountAt(timestamp) {
@@ -222,10 +270,12 @@ function startLoadingProgress() {
     setLoadingProgress(0);
 
     function frame(now) {
-        const progress = Math.min(1, (now - startTime) / SOLVE_DURATION);
+        const elapsed = now - startTime;
+        const progress = Math.min(LOADING_PROGRESS_CAP, (elapsed / MIN_SOLVE_DURATION) * LOADING_PROGRESS_CAP);
+
         setLoadingProgress(progress);
 
-        if (progress < 1) {
+        if (progress < LOADING_PROGRESS_CAP) {
             loadingProgressFrame = window.requestAnimationFrame(frame);
         }
     }
@@ -251,9 +301,10 @@ function detectCategory(problemText) {
         });
     }) || {
         label: "Üldine olukord",
-        meta: "Olukorra tuum sai selge kuju ning lahendus kujunes positiivseks.",
-        analysis: "Probleemi keskmes oli ebaselgus või kuhjunud pinge, mis vajas struktureerimist ja rahulikumat vaadet.",
-        summary: "Algne segadus taandus, olukord muutus arusaadavamaks ning tulemus jõudis selgema tasakaaluni."
+        meta: "Varasem ebaselgus on taandunud ja olukord mõjub kindlamalt.",
+        resolved: "Lahenes pinge või ebaselguse osa, mis hoidis teemat lahtisena.",
+        state: "Olukord on nüüd selgem, rahulikum ja lõpetatud.",
+        summary: "Algne segadus on läbi ja tunne on kindlam."
     };
 }
 
@@ -262,44 +313,117 @@ function getClarity(problemText) {
 
     if (wordCount >= 22) {
         return {
-            value: "Väga hea",
-            meta: "Kirjeldus oli piisavalt konkreetne ning kokkuvõte mõjub veenva ja kindlana."
+            value: "Lõppenud",
+            meta: "Küsimus on läbi ja pinge on kadunud."
         };
     }
 
     if (wordCount >= 10) {
         return {
-            value: "Hea",
-            meta: "Probleem oli piisavalt selge, et kokkuvõte saaks olla kindel ja terviklik."
+            value: "Selge",
+            meta: "Lõpptulemus mõjub kindla ja lõpetatuna."
         };
     }
 
     return {
-        value: "Positiivne",
-        meta: "Ka lühike kirjeldus võimaldas anda selge ja lõpetatud kokkuvõtte."
+        value: "Rahulik",
+        meta: "Teema ei häiri enam."
     };
 }
 
-function buildReport(problemText) {
+function buildFallbackReport(problemText) {
     const cleanProblem = sanitizeProblemText(problemText);
     const category = detectCategory(cleanProblem);
     const clarity = getClarity(cleanProblem);
     const shortProblem = truncate(cleanProblem, 220);
 
-    return {
-        title: "Raport on valmis",
-        lead: "Sisestatud olukorra põhjal valmis kokkuvõte, mis kirjeldab probleemi tuuma ja kinnitab lahenduse tulemust.",
+    return clampReportFields({
+        title: category.label + " on lõpetatud",
+        lead: "Lühike ülevaade sellest, mis on nüüd korras ja mis enam ei rõhu.",
         statusValue: "Lahendatud",
-        statusMeta: "Olukord jõudis selge tulemuseni ning probleem loetakse lahendatuks.",
+        statusMeta: "Teema on lõpetatud ja varasem pinge ei juhi enam olukorda.",
         typeValue: category.label,
         typeMeta: category.meta,
         clarityValue: clarity.value,
         clarityMeta: clarity.meta,
         originalProblem: shortProblem,
-        analysis: category.analysis + " Lahenduse tugevus seisnes selles, et olukorra põhjus muutus selgelt nähtavaks.",
-        resolution: "Jah. Probleem on lahendatud ning olukord on liikunud selgema, rahulikuma ja positiivsema tulemuse suunas.",
+        analysis: category.resolved,
+        resolution: category.state,
         summary: category.summary
-    };
+    });
+}
+
+function normalizeGeneratedReport(problemText, report) {
+    const fallbackReport = buildFallbackReport(problemText);
+
+    if (!report || typeof report !== "object") {
+        return fallbackReport;
+    }
+
+    const normalizedReport = { ...fallbackReport };
+
+    Object.keys(fallbackReport).forEach(function (key) {
+        if (typeof report[key] === "string") {
+            const cleanValue = sanitizeProblemText(report[key]);
+
+            if (cleanValue !== "") {
+                normalizedReport[key] = cleanValue;
+            }
+        }
+    });
+
+    normalizedReport.originalProblem = normalizedReport.originalProblem || fallbackReport.originalProblem;
+    normalizedReport.statusValue = "Lahendatud";
+    normalizedReport.typeValue = capitalizeFirst(normalizedReport.typeValue);
+    normalizedReport.clarityValue = capitalizeFirst(normalizedReport.clarityValue);
+
+    if (isGenericMeta(normalizedReport.statusMeta, ["staatus", "status", "olek", "olek paigas"])) {
+        normalizedReport.statusMeta = fallbackReport.statusMeta;
+    }
+
+    if (isGenericMeta(normalizedReport.typeMeta, ["tüüp", "teema", "kategooria"])) {
+        normalizedReport.typeMeta = fallbackReport.typeMeta;
+    }
+
+    if (isGenericMeta(normalizedReport.clarityMeta, ["täpsus", "selgus", "seis", "selge seis"])) {
+        normalizedReport.clarityMeta = fallbackReport.clarityMeta;
+    }
+
+    return clampReportFields(normalizedReport);
+}
+
+async function fetchGeneratedReport(problemText) {
+    try {
+        const response = await fetch("/api/report", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+                problemText
+            })
+        });
+
+        if (!response.ok) {
+            let errorMessage = "OpenAI raporti päring ebaõnnestus.";
+
+            try {
+                const payload = await response.json();
+                errorMessage = payload.error || errorMessage;
+            } catch (_error) {
+                // Ignore JSON parsing failure and keep the generic error.
+            }
+
+            throw new Error(errorMessage);
+        }
+
+        const payload = await response.json();
+
+        return normalizeGeneratedReport(problemText, payload.report);
+    } catch (error) {
+        console.error("Failed to generate report via API.", error);
+        return buildFallbackReport(problemText);
+    }
 }
 
 function populateReport(report) {
@@ -319,17 +443,20 @@ function populateReport(report) {
 
 function resetRating() {
     selectedRating = 0;
+    ratingPanel?.removeAttribute("data-selected-rating");
 
     ratingButtons.forEach(function (button) {
         button.classList.remove("is-selected");
         button.setAttribute("aria-pressed", "false");
     });
 
-    ratingFeedback.textContent = "Vali hinnang 1 kuni 5.";
+    ratingFeedback.hidden = true;
+    ratingFeedback.textContent = "";
 }
 
 function setRating(rating) {
     selectedRating = rating;
+    ratingPanel?.setAttribute("data-selected-rating", String(rating));
 
     ratingButtons.forEach(function (button) {
         const buttonRating = Number(button.dataset.rating);
@@ -339,6 +466,7 @@ function setRating(rating) {
         button.setAttribute("aria-pressed", String(isSelected));
     });
 
+    ratingFeedback.hidden = false;
     ratingFeedback.textContent = RATING_MESSAGES[rating];
 }
 
@@ -436,9 +564,9 @@ async function persistRatingSelection(rating) {
 }
 
 function resetApp() {
-    window.clearTimeout(solveTimer);
     stopLoadingProgress();
     setLoadingProgress(0);
+    isGeneratingReport = false;
     currentProblemText = "";
     currentReportId = null;
     pendingReportSave = null;
@@ -448,7 +576,11 @@ function resetApp() {
     problemInput.focus();
 }
 
-solveButton.addEventListener("click", function () {
+solveButton.addEventListener("click", async function () {
+    if (isGeneratingReport) {
+        return;
+    }
+
     const problemText = sanitizeProblemText(problemInput.value);
 
     if (problemText === "") {
@@ -456,22 +588,29 @@ solveButton.addEventListener("click", function () {
         return;
     }
 
-    const report = buildReport(problemText);
-
+    isGeneratingReport = true;
     currentProblemText = problemText;
-    populateReport(report);
     resetRating();
-    queueReportPersistence(report);
-    window.clearTimeout(solveTimer);
     showPanel(loadingDiv, "loading");
     startLoadingProgress();
 
-    solveTimer = window.setTimeout(async function () {
+    try {
+        const [report] = await Promise.all([
+            fetchGeneratedReport(problemText),
+            new Promise(function (resolve) {
+                window.setTimeout(resolve, MIN_SOLVE_DURATION);
+            })
+        ]);
+
         stopLoadingProgress();
         setLoadingProgress(1);
+        populateReport(report);
+        queueReportPersistence(report);
         await settleReportSaveAfterLoading();
         showPanel(solutionDiv, "done");
-    }, SOLVE_DURATION);
+    } finally {
+        isGeneratingReport = false;
+    }
 });
 
 reportButton.addEventListener("click", function () {

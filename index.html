@@ -17,7 +17,15 @@
     <main class="app-shell">
         <section class="container panel">
             <div class="panel__frame">
-                <h1>Probleemilahendaja</h1>
+                <div class="brand-lockup">
+                    <img
+                        src="./assets/probleemilahendaja-logo.svg"
+                        alt=""
+                        class="brand-lockup__mark"
+                        aria-hidden="true"
+                    >
+                    <h1>Probleemilahendaja</h1>
+                </div>
                 <p class="tagline">Kui probleem vajab lahendust</p>
                 <div class="counter-line" aria-label="Lahendatud probleemide ülevaade">
                     <span class="counter-line__label">Kokku lahendatud probleeme</span>
@@ -48,68 +56,148 @@
         </section>
         <section id="report" class="report panel" style="display:none;">
             <div class="panel__frame report__frame">
-                <div class="report__header">
-                    <span class="report__eyebrow">Probleemi lahenduse raport</span>
-                    <h2 id="reportTitle">Raport on valmis</h2>
-                    <p id="reportLead" class="report__lead">
-                        Sisestatud olukorra põhjal valmis kokkuvõte, mis kirjeldab probleemi tuuma ja
-                        kinnitab lahenduse tulemust.
-                    </p>
-                </div>
-                <div class="report__overview">
-                    <article class="report-card report-card--status">
-                        <span class="report-card__label">Staatus</span>
-                        <strong id="reportStatusValue" class="report-card__value">Lahendatud</strong>
-                        <p id="reportStatusMeta" class="report-card__meta">
-                            Olukord jõudis selge tulemuseni ning probleem loetakse lahendatuks.
+                <header class="report__hero">
+                    <div class="report__seal" aria-hidden="true">
+                        <img
+                            src="./assets/probleemilahendaja-logo.svg"
+                            alt=""
+                            class="report__seal-logo"
+                            aria-hidden="true"
+                        >
+                    </div>
+                    <div class="report__hero-copy">
+                        <span class="report__eyebrow">Probleemi lahenduse raport</span>
+                        <h2 id="reportTitle">Raport on valmis</h2>
+                        <p id="reportLead" class="report__lead">
+                            Lühike ülevaade sellest, mis on nüüd korras ja miks see probleem on lõppenud.
                         </p>
-                    </article>
-                    <article class="report-card">
-                        <span class="report-card__label">Probleemi tüüp</span>
-                        <strong id="reportTypeValue" class="report-card__value">Üldine olukord</strong>
-                        <p id="reportTypeMeta" class="report-card__meta">
-                            Olukorra tuum sai selge kuju ning lahendus kujunes positiivseks.
+                    </div>
+                </header>
+                <section class="report__outcome">
+                    <div class="report__outcome-main">
+                        <span class="report__section-label">Praegune seis</span>
+                        <p id="reportResolution" class="report__outcome-text">
+                            Praegune seis on rahulik ja lõpetatud ning varasem probleem ei mõjuta enam tervikpilti.
                         </p>
+                    </div>
+                    <div class="report__signals" aria-label="Olukorra põhinäitajad">
+                        <article class="report-signal report-signal--status">
+                            <span class="report-signal__icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24">
+                                    <path d="M12 3L19 6V11C19 15.2 16.5 18.5 12 21C7.5 18.5 5 15.2 5 11V6L12 3Z" />
+                                    <path d="M9 11.7L11.1 13.8L15 9.9" />
+                                </svg>
+                            </span>
+                            <div class="report-signal__body">
+                                <span class="report-signal__label">Staatus</span>
+                                <strong id="reportStatusValue" class="report-signal__value">Lahendatud</strong>
+                                <p id="reportStatusMeta" class="report-signal__meta">
+                                    Teema on lõpetatud ning varasem pinge ei määra enam olukorra kulgu.
+                                </p>
+                            </div>
+                        </article>
+                        <article class="report-signal report-signal--topic">
+                            <span class="report-signal__icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24">
+                                    <path d="M6 17L10 13L13 16L19 10" />
+                                    <path d="M15 10H19V14" />
+                                </svg>
+                            </span>
+                            <div class="report-signal__body">
+                                <span class="report-signal__label">Teema</span>
+                                <strong id="reportTypeValue" class="report-signal__value">Üldine olukord</strong>
+                                <p id="reportTypeMeta" class="report-signal__meta">
+                                    See teema on nüüd rahunenud ning lõpptulemus mõjub kindlalt.
+                                </p>
+                            </div>
+                        </article>
+                        <article class="report-signal report-signal--clarity">
+                            <span class="report-signal__icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24">
+                                    <path d="M5 14C5 9.6 8.1 7 12 7C15.9 7 19 9.6 19 14" />
+                                    <path d="M8.5 14.5C9.4 15.6 10.6 16.2 12 16.2C13.4 16.2 14.6 15.6 15.5 14.5" />
+                                    <path d="M9 10.5H9.01" />
+                                    <path d="M15 10.5H15.01" />
+                                </svg>
+                            </span>
+                            <div class="report-signal__body">
+                                <span class="report-signal__label">Tunne nüüd</span>
+                                <strong id="reportClarityValue" class="report-signal__value">Rahulik</strong>
+                                <p id="reportClarityMeta" class="report-signal__meta">
+                                    Praegune seis jätab selge mulje, et probleem on läbi.
+                                </p>
+                            </div>
+                        </article>
+                    </div>
+                </section>
+                <section class="report__story">
+                    <article class="report-note report-note--before">
+                        <span class="report-note__icon" aria-hidden="true">
+                            <svg viewBox="0 0 24 24">
+                                <path d="M7 16H17" />
+                                <path d="M7 12H13" />
+                                <path d="M7 8H15" />
+                            </svg>
+                        </span>
+                        <div class="report-note__body">
+                            <span class="report__section-label">Enne</span>
+                            <p id="reportOriginalProblem" class="report__quote"></p>
+                        </div>
                     </article>
-                    <article class="report-card">
-                        <span class="report-card__label">Lahenduse tulemus</span>
-                        <strong id="reportClarityValue" class="report-card__value">Positiivne</strong>
-                        <p id="reportClarityMeta" class="report-card__meta">
-                            Ka lühike kirjeldus võimaldab anda selge ja lõpetatud kokkuvõtte.
-                        </p>
+                    <article class="report-note report-note--now">
+                        <span class="report-note__icon" aria-hidden="true">
+                            <svg viewBox="0 0 24 24">
+                                <path d="M4 12H20" />
+                                <path d="M12 4V20" />
+                            </svg>
+                        </span>
+                        <div class="report-note__body">
+                            <span class="report__section-label">Nüüd on korras</span>
+                            <p id="reportProblemAnalysis"></p>
+                        </div>
                     </article>
-                </div>
-                <div class="report__sections">
-                    <section class="report__section">
-                        <span class="report__section-label">Probleemi kirjeldus</span>
-                        <p id="reportOriginalProblem" class="report__quote"></p>
-                    </section>
-                    <section class="report__section">
-                        <span class="report__section-label">Milles oli probleem</span>
-                        <p id="reportProblemAnalysis"></p>
-                    </section>
-                    <section class="report__section">
-                        <span class="report__section-label">Kas see sai lahendatud?</span>
-                        <p id="reportResolution"></p>
-                    </section>
-                    <section class="report__section">
-                        <span class="report__section-label">Lahenduse kokkuvõte</span>
-                        <p id="reportSummary"></p>
-                    </section>
-                </div>
+                    <article class="report-note report-note--summary">
+                        <span class="report-note__icon" aria-hidden="true">
+                            <svg viewBox="0 0 24 24">
+                                <path d="M4 15C6.2 12.8 8.7 11.7 11.5 11.7C14.4 11.7 16.9 12.8 20 15" />
+                                <path d="M7 9.5L12 4L17 9.5" />
+                            </svg>
+                        </span>
+                        <div class="report-note__body">
+                            <span class="report__section-label">Lõpptulemus</span>
+                            <p id="reportSummary"></p>
+                        </div>
+                    </article>
+                </section>
                 <div class="report__footer">
                     <section class="rating-panel" aria-labelledby="ratingTitle">
-                        <span id="ratingTitle" class="report__section-label">Kas jäid tulemusega rahule?</span>
-                        <div class="rating-panel__scale" role="radiogroup" aria-label="Tulemusega rahulolu">
-                            <button type="button" class="rating-panel__button" data-rating="1" aria-pressed="false">1</button>
-                            <button type="button" class="rating-panel__button" data-rating="2" aria-pressed="false">2</button>
-                            <button type="button" class="rating-panel__button" data-rating="3" aria-pressed="false">3</button>
-                            <button type="button" class="rating-panel__button" data-rating="4" aria-pressed="false">4</button>
-                            <button type="button" class="rating-panel__button" data-rating="5" aria-pressed="false">5</button>
+                        <div class="rating-panel__intro">
+                            <span class="rating-panel__eyebrow">Sinu hinnang</span>
+                            <span id="ratingTitle" class="rating-panel__title">Kas jäid tulemusega rahule?</span>
                         </div>
-                        <p id="ratingFeedback" class="rating-panel__feedback" aria-live="polite">
-                            Vali hinnang 1 kuni 5.
-                        </p>
+                        <div class="rating-panel__scale" role="radiogroup" aria-label="Tulemusega rahulolu">
+                            <button type="button" class="rating-panel__button" data-rating="1" aria-pressed="false">
+                                <span class="rating-panel__score">1</span>
+                                <span class="rating-panel__label">Ei jäänud</span>
+                            </button>
+                            <button type="button" class="rating-panel__button" data-rating="2" aria-pressed="false">
+                                <span class="rating-panel__score">2</span>
+                                <span class="rating-panel__label">Pigem mitte</span>
+                            </button>
+                            <button type="button" class="rating-panel__button" data-rating="3" aria-pressed="false">
+                                <span class="rating-panel__score">3</span>
+                                <span class="rating-panel__label">Normaalne</span>
+                            </button>
+                            <button type="button" class="rating-panel__button" data-rating="4" aria-pressed="false">
+                                <span class="rating-panel__score">4</span>
+                                <span class="rating-panel__label">Jäin rahule</span>
+                            </button>
+                            <button type="button" class="rating-panel__button" data-rating="5" aria-pressed="false">
+                                <span class="rating-panel__score">5</span>
+                                <span class="rating-panel__label">Väga rahul</span>
+                            </button>
+                        </div>
+                        <p id="ratingFeedback" class="rating-panel__feedback" aria-live="polite" hidden></p>
                     </section>
                     <div class="report__actions">
                         <button id="reportBackButton" class="button--ghost">Tagasi</button>
