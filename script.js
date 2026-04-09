@@ -4,6 +4,7 @@ import {
     fetchSolvedReportsTotal,
     getOrCreateSessionId,
     isSupabaseConfigured,
+    subscribeToReportInserts,
     submitProblemRating
 } from "./supabase.js";
 
@@ -38,12 +39,12 @@ const ratingButtons = Array.from(document.querySelectorAll(".rating-panel__butto
 const ratingFeedback = document.getElementById("ratingFeedback");
 const ratingPanel = document.querySelector(".rating-panel");
 
-let solvedCountTimer;
 let solvedCountSyncTimer;
+let solvedCountRealtimeCleanup = null;
 let loadingProgressFrame;
 let currentSolvedCount = 0;
-let fallbackSolvedBoost = 0;
 let currentProblemText = "";
+let currentPublicProblemText = "";
 let currentReportId = null;
 let pendingReportSave = null;
 let recentProblems = [];
@@ -52,8 +53,6 @@ let selectedRating = 0;
 let remoteSolvedCount = null;
 let isGeneratingReport = false;
 
-const COUNTER_BASE = 1284320;
-const COUNTER_EPOCH = Date.UTC(2026, 0, 1, 9, 0, 0);
 const MIN_SOLVE_DURATION = 3200;
 const LOADING_PROGRESS_CAP = 0.92;
 const REMOTE_METRICS_REFRESH_INTERVAL = 15000;
@@ -173,18 +172,6 @@ function isGenericMeta(value, genericValues) {
     return genericValues.includes(normalizedValue);
 }
 
-function getFallbackSolvedCountAt(timestamp) {
-    const elapsedSeconds = Math.max(0, Math.floor((timestamp - COUNTER_EPOCH) / 1000));
-
-    return COUNTER_BASE
-        + elapsedSeconds
-        + Math.floor(elapsedSeconds / 6)
-        + Math.floor(elapsedSeconds / 17) * 2
-        + Math.floor(elapsedSeconds / 43) * 5
-        + Math.floor(elapsedSeconds / 173) * 9
-        + fallbackSolvedBoost;
-}
-
 function animateValue(element, start, end, duration) {
     const safeStart = Number.isFinite(start) ? start : 0;
     const safeEnd = Number.isFinite(end) ? end : 0;
@@ -215,14 +202,8 @@ function animateValue(element, start, end, duration) {
     element._counterFrame = window.requestAnimationFrame(frame);
 }
 
-function getDisplayedSolvedCount() {
-    return typeof remoteSolvedCount === "number"
-        ? remoteSolvedCount
-        : getFallbackSolvedCountAt(Date.now());
-}
-
 function renderSolvedCount() {
-    const total = getDisplayedSolvedCount();
+    const total = typeof remoteSolvedCount === "number" ? remoteSolvedCount : 0;
 
     animateValue(solvedCount, currentSolvedCount, total, 420);
     currentSolvedCount = total;
@@ -237,6 +218,7 @@ function setRemoteSolvedCount(total) {
 
 async function refreshSolvedCountFromSupabase() {
     if (!isSupabaseConfigured) {
+        setRemoteSolvedCount(0);
         return;
     }
 
@@ -250,14 +232,24 @@ async function refreshSolvedCountFromSupabase() {
 
 function startSolvedCountSync() {
     renderSolvedCount();
-    solvedCountTimer = window.setInterval(renderSolvedCount, 1000);
 
     if (isSupabaseConfigured) {
-        refreshSolvedCountFromSupabase();
+        if (solvedCountSyncTimer) {
+            window.clearInterval(solvedCountSyncTimer);
+        }
+
+        if (typeof solvedCountRealtimeCleanup === "function") {
+            solvedCountRealtimeCleanup();
+        }
+
+        void refreshSolvedCountFromSupabase();
         solvedCountSyncTimer = window.setInterval(
             refreshSolvedCountFromSupabase,
             REMOTE_METRICS_REFRESH_INTERVAL
         );
+        solvedCountRealtimeCleanup = subscribeToReportInserts(function () {
+            void refreshSolvedCountFromSupabase();
+        });
     }
 }
 
@@ -687,10 +679,16 @@ async function fetchGeneratedReport(problemText) {
 
         const payload = await response.json();
 
-        return normalizeGeneratedReport(problemText, payload.report);
+        return {
+            report: normalizeGeneratedReport(problemText, payload.report),
+            publicProblemText: sanitizeProblemText(payload.publicProblemText || problemText) || problemText
+        };
     } catch (error) {
         console.error("Failed to generate report via API.", error);
-        return buildFallbackReport(problemText);
+        return {
+            report: buildFallbackReport(problemText),
+            publicProblemText: problemText
+        };
     } finally {
         window.clearTimeout(timeoutId);
     }
@@ -775,6 +773,7 @@ function queueReportPersistence(report) {
     pendingReportSave = createProblemReport({
         sessionId,
         problemText: currentProblemText,
+        publicProblemText: currentPublicProblemText || currentProblemText,
         problemType: report.typeValue,
         status: report.statusValue,
         clarityLevel: report.clarityValue,
@@ -807,8 +806,6 @@ function queueReportPersistenceInBackground(report) {
 
 async function settleReportSaveAfterLoading() {
     if (!pendingReportSave) {
-        fallbackSolvedBoost += 1;
-        renderSolvedCount();
         return;
     }
 
@@ -821,10 +818,7 @@ async function settleReportSaveAfterLoading() {
         })
     ]);
 
-    if (!result && typeof remoteSolvedCount !== "number") {
-        fallbackSolvedBoost += 1;
-        renderSolvedCount();
-    }
+    void result;
 }
 
 async function refreshRecentProblemsFromSupabase() {
@@ -902,6 +896,7 @@ function resetApp() {
     setLoadingProgress(0);
     isGeneratingReport = false;
     currentProblemText = "";
+    currentPublicProblemText = "";
     currentReportId = null;
     pendingReportSave = null;
     problemInput.value = "";
@@ -943,7 +938,7 @@ solveButton.addEventListener("click", async function () {
     startLoadingProgress();
 
     try {
-        const [report] = await Promise.all([
+        const [{ report, publicProblemText }] = await Promise.all([
             fetchGeneratedReport(problemText),
             new Promise(function (resolve) {
                 window.setTimeout(resolve, MIN_SOLVE_DURATION);
@@ -952,9 +947,10 @@ solveButton.addEventListener("click", async function () {
 
         stopLoadingProgress();
         setLoadingProgress(1);
+        currentPublicProblemText = publicProblemText;
         populateReport(report);
         pushRecentProblem({
-            problemText,
+            problemText: publicProblemText,
             problemType: report.typeValue,
             status: report.statusValue,
             createdAt: new Date().toISOString()

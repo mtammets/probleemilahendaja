@@ -49,7 +49,7 @@ export function getOrCreateSessionId() {
 
 export async function fetchSolvedReportsTotal() {
     if (!supabase) {
-        return null;
+        return 0;
     }
 
     const { data, error } = await supabase.rpc("get_public_metrics");
@@ -60,7 +60,34 @@ export async function fetchSolvedReportsTotal() {
 
     const row = normalizeRpcSingleResult(data);
 
-    return row?.solved_reports_total ?? null;
+    return row?.solved_reports_total ?? 0;
+}
+
+export function subscribeToReportInserts(onInsert) {
+    if (!supabase || typeof onInsert !== "function") {
+        return function () {
+            // No-op cleanup when Supabase or callback is unavailable.
+        };
+    }
+
+    const channel = supabase
+        .channel("reports-insert-counter")
+        .on(
+            "postgres_changes",
+            {
+                event: "INSERT",
+                schema: "public",
+                table: "reports"
+            },
+            function () {
+                onInsert();
+            }
+        )
+        .subscribe();
+
+    return function () {
+        void supabase.removeChannel(channel);
+    };
 }
 
 export async function fetchRecentProblemReports(limit = 6) {
@@ -97,6 +124,7 @@ export async function createProblemReport(report) {
     const { data, error } = await supabase.rpc("create_problem_report", {
         p_session_id: report.sessionId,
         p_problem_text: report.problemText,
+        p_public_problem_text: report.publicProblemText,
         p_problem_type: report.problemType,
         p_status: report.status,
         p_clarity_level: report.clarityLevel,

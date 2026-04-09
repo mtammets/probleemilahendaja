@@ -10,10 +10,14 @@ const app = express();
 const isProduction = process.argv.includes("--production");
 const port = Number(process.env.PORT || 8787);
 const openAiModel = process.env.OPENAI_MODEL?.trim() || "gpt-5-mini";
+const publicFeedModel = process.env.OPENAI_PUBLIC_FEED_MODEL?.trim() || openAiModel;
 const openAiApiKey = process.env.OPENAI_API_KEY?.trim() || "";
 const client = openAiApiKey ? new OpenAI({ apiKey: openAiApiKey }) : null;
 const recentProblemReports = [];
 const RECENT_PROBLEMS_LIMIT = 6;
+const PUBLIC_FEED_TEXT_LIMIT = 180;
+const PUBLIC_FEED_FALLBACK_TEXT = "Üks terava sõnastusega probleem sai lahendatud.";
+const PUBLIC_FEED_PROFANITY_REGEX = /\b(?:pers(?:e|se|es|et|ed|ega|ele|el|esse|est|i)?|t(?:ü|y)r(?:a|ad|aga|ale|al|ast|i)?|munn(?:i|e|id|idega|ile|il|ist)?|vitt(?:u|i|e|ud|idega|ile|is|a)?|niku(?:da|n|d|b|s|tud|ga|le)?|pask(?:a|e|i|aks|aga|ale|as|ast|u)?|sit(?:t|a|ad|ane|ase|aks|aga|ale|as|ast)?|hui(?:a|i|d|ga|le|s)?|fuck(?:ing|ed|er|s)?|shit(?:ty|ted|ting|s)?)\b/giu;
 
 const REPORT_SYSTEM_PROMPT = [
     "Sa koostad eestikeelse meelelahutusliku probleemilahenduse raporti.",
@@ -59,6 +63,19 @@ const REPORT_JSON_SCHEMA = {
         analysis: { type: "string" },
         resolution: { type: "string" },
         summary: { type: "string" }
+    }
+};
+
+const PUBLIC_FEED_JSON_SCHEMA = {
+    type: "object",
+    additionalProperties: false,
+    required: ["publicText", "visibility"],
+    properties: {
+        publicText: { type: "string" },
+        visibility: {
+            type: "string",
+            enum: ["original", "sanitized", "hidden"]
+        }
     }
 };
 
@@ -112,6 +129,106 @@ function normalizeField(value, fallback, maxLength) {
     return maxLength ? truncate(cleaned, maxLength) : cleaned;
 }
 
+function maskProfanity(text) {
+    return String(text || "").replace(PUBLIC_FEED_PROFANITY_REGEX, function (matchedText) {
+        return "•".repeat(Math.max(4, Math.min(matchedText.length, 10)));
+    });
+}
+
+function normalizePublicFeedProblemText(value) {
+    const cleaned = sanitizeProblemText(value || "");
+    const safeText = truncate(cleaned, PUBLIC_FEED_TEXT_LIMIT);
+
+    if (!safeText) {
+        return PUBLIC_FEED_FALLBACK_TEXT;
+    }
+
+    return maskProfanity(safeText);
+}
+
+function buildModerationSummary(moderationResult) {
+    if (!moderationResult || typeof moderationResult !== "object") {
+        return "Moderation result unavailable.";
+    }
+
+    const flaggedCategories = Object.entries(moderationResult.categories || {})
+        .filter(function ([, isFlagged]) {
+            return Boolean(isFlagged);
+        })
+        .map(function ([category]) {
+            return category;
+        });
+
+    return JSON.stringify({
+        flagged: Boolean(moderationResult.flagged),
+        flaggedCategories,
+        categoryScores: moderationResult.category_scores || {}
+    });
+}
+
+async function createPublicFeedProblemText(problemText) {
+    const fallbackPublicText = normalizePublicFeedProblemText(problemText);
+
+    if (!client) {
+        return fallbackPublicText;
+    }
+
+    try {
+        const moderationResponse = await client.moderations.create({
+            model: "omni-moderation-latest",
+            input: problemText
+        });
+
+        const moderationResult = moderationResponse.results?.[0] ?? null;
+        const moderationSummary = buildModerationSummary(moderationResult);
+        const aiResponse = await client.responses.create({
+            model: publicFeedModel,
+            max_output_tokens: 220,
+            reasoning: {
+                effort: "low"
+            },
+            instructions: [
+                "Sa otsustad, milline lühike tekst sobib avalikku 'viimati lahendatud probleemid' loendisse.",
+                "Eesmärk on näidata probleemi sisu lühidalt, aga turvaliselt ja viisakalt.",
+                "Kui originaalis on roppused, solvangud, labasused, ähvardused, seksuaalne otsekõne või muu avalikku loendisse sobimatu sõnastus, kirjuta see ümber pehmemaks või üldisemaks.",
+                "Ära kasuta vastuses roppusi ega solvangulist sõnastust isegi siis, kui need olid sisendis olemas.",
+                "Kui sisu saab turvaliselt lühidalt ümber sõnastada, kasuta visibility='sanitized'.",
+                "Kui tekst on juba avalikuks näitamiseks sobiv, kasuta visibility='original'.",
+                "Kui sisend on nii räige või sobimatu, et seda ei ole mõistlik isegi ümber sõnastada, kasuta visibility='hidden' ja anna neutraalne üldistus.",
+                "publicText peab olema eestikeelne, maksimaalselt umbes 18 sõna ja ühe lühikese lausena või fraasina.",
+                "Tagasta ainult puhas JSON."
+            ].join(" "),
+            input: [
+                "Originaalne probleem:",
+                problemText,
+                "",
+                "Moderatsiooni kokkuvõte:",
+                moderationSummary
+            ].join("\n"),
+            text: {
+                verbosity: "low",
+                format: {
+                    type: "json_schema",
+                    name: "public_feed_problem",
+                    strict: true,
+                    schema: PUBLIC_FEED_JSON_SCHEMA
+                }
+            }
+        });
+
+        const payload = extractJsonObject(aiResponse.output_text);
+
+        if (payload.visibility === "hidden") {
+            return PUBLIC_FEED_FALLBACK_TEXT;
+        }
+
+        return normalizePublicFeedProblemText(payload.publicText);
+    } catch (error) {
+        console.error("Failed to create public feed problem text.", error);
+        return fallbackPublicText;
+    }
+}
+
 function normalizeReport(problemText, payload) {
     const safeProblem = truncate(problemText, 220);
 
@@ -159,9 +276,9 @@ function normalizeReport(problemText, payload) {
     };
 }
 
-function pushRecentProblemReport(problemText, report) {
+function pushRecentProblemReport(publicProblemText, report) {
     recentProblemReports.unshift({
-        problemText: truncate(sanitizeProblemText(problemText), 180),
+        problemText: normalizePublicFeedProblemText(publicProblemText),
         problemType: truncate(sanitizeProblemText(report?.typeValue || "Üldine olukord"), 40),
         status: truncate(sanitizeProblemText(report?.statusValue || "Lahendatud"), 24),
         createdAt: new Date().toISOString()
@@ -202,50 +319,54 @@ app.post("/api/report", async function (request, response) {
     }
 
     try {
-        const openAiResponse = await client.responses.create({
-            model: openAiModel,
-            max_output_tokens: 1400,
-            reasoning: {
-                effort: "low"
-            },
-            instructions: REPORT_SYSTEM_PROMPT,
-            input: [
-                "Koosta selle sisendi põhjal üks professionaalne ja positiivne raport.",
-                "Oluline:",
-                "- title peab olema lühike, lööv ja 2 kuni 5 sõna pikk",
-                "- lead peab olema üks lühike lause, umbes kuni 12 sõna",
-                "- statusValue peab olema täpselt 'Lahendatud'",
-                "- typeValue peab olema lühike, selge ja mitte liiga tehniline",
-                "- statusMeta, typeMeta ja clarityMeta peavad olema lühikesed kõrvalread, mitte pikad selgitused",
-                "- clarityValue peab olema väga lühike, eelistatult 1 kuni 2 sõna",
-                "- resolution peab kirjeldama ainult praegust lõppseisu, olema väga kompaktne ja umbes 6 kuni 10 sõna piires",
-                "- analysis peab ütlema ühes lühikeses lauses, mis täpselt sai lahendatud",
-                "- summary peab olema üks lühike lause, mis jätab mulje, et see teema enam ei ole päriselt probleem",
-                "- originalProblem peab olema kasutaja sisendi lühike või täpne eestikeelne kuju",
-                "- kõik väljad peavad olema eestikeelsed",
-                "- ära kirjelda protsessi, lahenduskäiku, tegevusplaani ega seda, mida täpselt tehti",
-                "- toon peab jääma professionaalseks, rahulikuks ja kindlaks",
-                "",
-                "Kasutaja probleem:",
-                problemText
-            ].join("\n"),
-            text: {
-                verbosity: "low",
-                format: {
-                    type: "json_schema",
-                    name: "problem_report",
-                    strict: true,
-                    schema: REPORT_JSON_SCHEMA
+        const [openAiResponse, publicProblemText] = await Promise.all([
+            client.responses.create({
+                model: openAiModel,
+                max_output_tokens: 1400,
+                reasoning: {
+                    effort: "low"
+                },
+                instructions: REPORT_SYSTEM_PROMPT,
+                input: [
+                    "Koosta selle sisendi põhjal üks professionaalne ja positiivne raport.",
+                    "Oluline:",
+                    "- title peab olema lühike, lööv ja 2 kuni 5 sõna pikk",
+                    "- lead peab olema üks lühike lause, umbes kuni 12 sõna",
+                    "- statusValue peab olema täpselt 'Lahendatud'",
+                    "- typeValue peab olema lühike, selge ja mitte liiga tehniline",
+                    "- statusMeta, typeMeta ja clarityMeta peavad olema lühikesed kõrvalread, mitte pikad selgitused",
+                    "- clarityValue peab olema väga lühike, eelistatult 1 kuni 2 sõna",
+                    "- resolution peab kirjeldama ainult praegust lõppseisu, olema väga kompaktne ja umbes 6 kuni 10 sõna piires",
+                    "- analysis peab ütlema ühes lühikeses lauses, mis täpselt sai lahendatud",
+                    "- summary peab olema üks lühike lause, mis jätab mulje, et see teema enam ei ole päriselt probleem",
+                    "- originalProblem peab olema kasutaja sisendi lühike või täpne eestikeelne kuju",
+                    "- kõik väljad peavad olema eestikeelsed",
+                    "- ära kirjelda protsessi, lahenduskäiku, tegevusplaani ega seda, mida täpselt tehti",
+                    "- toon peab jääma professionaalseks, rahulikuks ja kindlaks",
+                    "",
+                    "Kasutaja probleem:",
+                    problemText
+                ].join("\n"),
+                text: {
+                    verbosity: "low",
+                    format: {
+                        type: "json_schema",
+                        name: "problem_report",
+                        strict: true,
+                        schema: REPORT_JSON_SCHEMA
+                    }
                 }
-            }
-        });
+            }),
+            createPublicFeedProblemText(problemText)
+        ]);
 
         const payload = extractJsonObject(openAiResponse.output_text);
         const report = normalizeReport(problemText, payload);
-        pushRecentProblemReport(problemText, report);
+        pushRecentProblemReport(publicProblemText, report);
 
         response.json({
             report,
+            publicProblemText,
             model: openAiModel
         });
     } catch (error) {
