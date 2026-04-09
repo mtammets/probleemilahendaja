@@ -20,10 +20,12 @@
                 <div class="intake-shell">
                     <header class="intake-hero">
                         <div class="brand-lockup">
-                            <h1 class="brand-wordmark brand-wordmark--hero" aria-label="Probleemilahendaja">
-                                <span class="brand-wordmark__name">Probleemilahendaja</span>
-                            </h1>
-                            <p class="tagline">Kui probleem vajab lahendamist</p>
+                            <div class="brand-lockup__copy">
+                                <h1 class="brand-wordmark brand-wordmark--hero" aria-label="Probleemilahendaja">
+                                    <span class="brand-wordmark__name">Probleemilahendaja</span>
+                                </h1>
+                                <p class="tagline">Kui probleem vajab lahendamist</p>
+                            </div>
                         </div>
                         <div class="counter-line" aria-label="Lahendatud probleemide ülevaade">
                             <span class="counter-line__label">Kokku lahendatud</span>
@@ -205,6 +207,37 @@
                 </div>
             </div>
         </section>
+        <section id="newsletter" class="newsletter panel" aria-labelledby="newsletterTitle">
+            <div class="panel__frame newsletter__frame">
+                <div class="newsletter__copy">
+                    <span class="newsletter__eyebrow">Uudiskiri</span>
+                    <h2 id="newsletterTitle">Liitu uudiskirjaga ja võida probleemide vaba aasta!</h2>
+                    <p class="newsletter__note">Jäta oma e-post.</p>
+                </div>
+                <div class="newsletter__aside">
+                    <div class="newsletter__prize" aria-hidden="true">
+                        <span class="newsletter__prize-label">Peaauhind</span>
+                        <strong class="newsletter__prize-value">1 aasta</strong>
+                        <span class="newsletter__prize-meta">probleemideta</span>
+                    </div>
+                    <div class="newsletter__form-shell">
+                        <form id="newsletterForm" class="newsletter__form" novalidate>
+                            <input
+                                id="newsletterEmail"
+                                class="newsletter__input"
+                                type="email"
+                                inputmode="email"
+                                autocomplete="email"
+                                placeholder="Sinu e-post"
+                                aria-label="E-posti aadress"
+                            >
+                            <button id="newsletterSubmitButton" class="newsletter__button" type="submit">Liitun loosiga</button>
+                        </form>
+                        <p id="newsletterFeedback" class="newsletter__feedback" aria-live="polite" hidden></p>
+                    </div>
+                </div>
+            </div>
+        </section>
         <section id="recentProblems" class="recent-feed panel" aria-labelledby="recentProblemsTitle">
             <div class="panel__frame recent-feed__frame">
                 <div class="recent-feed__header">
@@ -222,22 +255,12 @@
         <section id="dailyArticles" class="science-feed panel" aria-labelledby="scienceFeedTitle">
             <div class="panel__frame science-feed__frame">
                 <div class="science-feed__header">
-                    <div class="science-feed__copy">
-                        <span class="science-feed__eyebrow">Miks see loeb</span>
-                        <h2 id="scienceFeedTitle">Probleemide väärtus</h2>
-                        <p class="science-feed__lead">
-                            Lühikesed tekstid sellest, mida lõpetatud küsimus teeb tähelepanu, pinge ja otsustusvõimega.
-                        </p>
-                    </div>
+                    <h2 id="scienceFeedTitle">Veel lugeda</h2>
                 </div>
                 <div class="science-feed__layout">
                     <article id="scienceArticleFeatured" class="science-article" aria-live="polite"></article>
                     <div class="science-feed__rail">
-                        <div class="science-feed__rail-head">
-                            <span class="science-feed__rail-label">Veel tekste</span>
-                            <span class="science-feed__rail-note">Arhiiv</span>
-                        </div>
-                        <div id="scienceArticleList" class="science-feed__list" role="listbox" aria-label="Lood"></div>
+                        <div id="scienceArticleList" class="science-feed__list" role="listbox" aria-label="Artiklid"></div>
                     </div>
                 </div>
             </div>

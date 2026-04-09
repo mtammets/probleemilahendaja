@@ -22,6 +22,11 @@ const resetButton = document.getElementById("resetButton");
 const reportBackButton = document.getElementById("reportBackButton");
 const reportResetButton = document.getElementById("reportResetButton");
 const solvedCount = document.getElementById("solvedCount");
+const newsletterSection = document.getElementById("newsletter");
+const newsletterForm = document.getElementById("newsletterForm");
+const newsletterEmail = document.getElementById("newsletterEmail");
+const newsletterSubmitButton = document.getElementById("newsletterSubmitButton");
+const newsletterFeedback = document.getElementById("newsletterFeedback");
 const recentProblemsList = document.getElementById("recentProblemsList");
 const scienceArticleFeatured = document.getElementById("scienceArticleFeatured");
 const scienceArticleList = document.getElementById("scienceArticleList");
@@ -54,6 +59,7 @@ let recentProblemsSyncTimer;
 let dailyArticles = [];
 let dailyArticlesSyncTimer;
 let selectedDailyArticleId = "";
+let isSubmittingNewsletter = false;
 let selectedRating = 0;
 let remoteSolvedCount = null;
 let isGeneratingReport = false;
@@ -68,6 +74,7 @@ const RECENT_PROBLEM_EQUIVALENT_WINDOW_MS = 15000;
 const RECENT_PROBLEMS_REFRESH_INTERVAL = 10000;
 const DAILY_ARTICLES_LIMIT = 4;
 const DAILY_ARTICLES_REFRESH_INTERVAL = 60 * 60 * 1000;
+const NEWSLETTER_EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/i;
 const PUBLIC_FEED_PROFANITY_REGEX = /\b(?:pers(?:e|se|es|et|ed|ega|ele|el|esse|est|i)?|t(?:ü|y)r(?:a|ad|aga|ale|al|ast|i)?|munn(?:i|e|id|idega|ile|il|ist)?|vitt(?:u|i|e|ud|idega|ile|is|a)?|niku(?:da|n|d|b|s|tud|ga|le)?|pask(?:a|e|i|aks|aga|ale|as|ast|u)?|sit(?:t|a|ad|ane|ase|aks|aga|ale|as|ast)?|hui(?:a|i|d|ga|le|s)?|fuck(?:ing|ed|er|s)?|shit(?:ty|ted|ting|s)?)\b/giu;
 const numberFormatter = new Intl.NumberFormat("et-EE");
 const relativeTimeFormatter = new Intl.RelativeTimeFormat("et-EE", {
@@ -219,6 +226,42 @@ function renderSolvedCount() {
 
     animateValue(solvedCount, currentSolvedCount, total, 420);
     currentSolvedCount = total;
+}
+
+function normalizeEmailAddress(value) {
+    return sanitizeProblemText(String(value || "")).toLocaleLowerCase("en-US");
+}
+
+function isValidNewsletterEmail(value) {
+    return NEWSLETTER_EMAIL_REGEX.test(value) && value.length <= 254;
+}
+
+function setNewsletterFeedback(message, state = "") {
+    if (!newsletterFeedback) {
+        return;
+    }
+
+    newsletterFeedback.hidden = !message;
+    newsletterFeedback.textContent = message || "";
+
+    if (state) {
+        newsletterFeedback.dataset.state = state;
+        newsletterSection?.setAttribute("data-newsletter-state", state);
+    } else {
+        delete newsletterFeedback.dataset.state;
+        newsletterSection?.removeAttribute("data-newsletter-state");
+    }
+}
+
+function setNewsletterSubmitting(isSubmitting) {
+    isSubmittingNewsletter = isSubmitting;
+
+    if (newsletterSubmitButton) {
+        newsletterSubmitButton.disabled = isSubmitting;
+        newsletterSubmitButton.textContent = isSubmitting ? "Liitun..." : "Liitun loosiga";
+    }
+
+    newsletterForm?.classList.toggle("is-submitting", isSubmitting);
 }
 
 function setRemoteSolvedCount(total) {
@@ -767,13 +810,10 @@ function getSelectedDailyArticle() {
 function createSciencePlaceholder() {
     const fragment = document.createDocumentFragment();
     const title = document.createElement("h3");
-    const note = document.createElement("p");
 
     title.className = "science-article__title";
-    note.className = "science-article__lead";
-    title.textContent = "Järgmine tekst on teel.";
-    note.textContent = "Siia tuleb järgmine vaade.";
-    fragment.append(title, note);
+    title.textContent = "Laadimine";
+    fragment.append(title);
 
     return fragment;
 }
@@ -792,13 +832,6 @@ function renderFeaturedDailyArticle(article) {
     scienceArticleFeatured.classList.remove("science-article--empty");
 
     const fragment = document.createDocumentFragment();
-    const top = document.createElement("div");
-    const eyebrowRow = document.createElement("div");
-    const eyebrow = document.createElement("span");
-    const readingTime = document.createElement("span");
-    const metaRow = document.createElement("div");
-    const theme = document.createElement("span");
-    const date = document.createElement("span");
     const title = document.createElement("h3");
     const lead = document.createElement("p");
     const highlight = document.createElement("blockquote");
@@ -806,13 +839,6 @@ function renderFeaturedDailyArticle(article) {
     const tags = document.createElement("div");
     const takeaways = document.createElement("div");
 
-    top.className = "science-article__top";
-    eyebrowRow.className = "science-article__eyebrow-row";
-    eyebrow.className = "science-article__eyebrow";
-    readingTime.className = "science-article__reading-time";
-    metaRow.className = "science-article__meta-row";
-    theme.className = "science-article__theme";
-    date.className = "science-article__date";
     title.className = "science-article__title";
     lead.className = "science-article__lead";
     highlight.className = "science-article__highlight";
@@ -820,10 +846,6 @@ function renderFeaturedDailyArticle(article) {
     tags.className = "science-article__lenses";
     takeaways.className = "science-article__takeaways";
 
-    eyebrow.textContent = "Vaade";
-    readingTime.textContent = article.readingTime;
-    theme.textContent = article.theme;
-    date.textContent = articleDateFormatter.format(new Date(article.publishedAt));
     title.textContent = article.title;
     lead.textContent = article.lead;
     highlight.textContent = article.highlight;
@@ -848,10 +870,7 @@ function renderFeaturedDailyArticle(article) {
         takeaways.append(pill);
     });
 
-    eyebrowRow.append(eyebrow, readingTime);
-    metaRow.append(theme, date);
-    top.append(eyebrowRow, metaRow);
-    fragment.append(top, title, lead, highlight, tags, body, takeaways);
+    fragment.append(title, lead, highlight, tags, body, takeaways);
     scienceArticleFeatured.replaceChildren(fragment);
 }
 
@@ -904,7 +923,7 @@ function renderDailyArticles() {
     if (dailyArticles.length === 0) {
         const emptyItem = document.createElement("div");
         emptyItem.className = "science-feed__list-empty";
-        emptyItem.textContent = "Tekstid jõuavad siia.";
+        emptyItem.textContent = "Laadimine";
         scienceArticleList.replaceChildren(emptyItem);
         return;
     }
@@ -1176,6 +1195,32 @@ async function fetchDailyArticlesFromServer() {
     }
 }
 
+async function submitNewsletterSignup(email) {
+    const response = await fetch("/api/newsletter-signups", {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+            email
+        })
+    });
+
+    let payload = null;
+
+    try {
+        payload = await response.json();
+    } catch (_error) {
+        payload = null;
+    }
+
+    if (!response.ok) {
+        throw new Error(payload?.error || "Liitumine ebaõnnestus.");
+    }
+
+    return payload;
+}
+
 async function refreshRecentProblems() {
     const [serverProblems, remoteProblems] = await Promise.all([
         fetchRecentProblemsFromServer(),
@@ -1263,6 +1308,51 @@ function initializeDailyArticles() {
     }, DAILY_ARTICLES_REFRESH_INTERVAL);
 }
 
+function initializeNewsletterForm() {
+    if (!newsletterForm || !newsletterEmail) {
+        return;
+    }
+
+    newsletterForm.addEventListener("submit", async function (event) {
+        event.preventDefault();
+
+        if (isSubmittingNewsletter) {
+            return;
+        }
+
+        const email = normalizeEmailAddress(newsletterEmail.value);
+
+        if (!isValidNewsletterEmail(email)) {
+            setNewsletterFeedback("Sisesta korrektne e-post.", "error");
+            newsletterEmail.focus();
+            return;
+        }
+
+        setNewsletterFeedback("", "");
+        setNewsletterSubmitting(true);
+
+        try {
+            const payload = await submitNewsletterSignup(email);
+
+            newsletterEmail.value = "";
+            setNewsletterFeedback(
+                payload?.status === "existing" ? "See e-post on juba kirjas." : "Oled loosis kirjas.",
+                "success"
+            );
+        } catch (error) {
+            setNewsletterFeedback(error.message || "Liitumine ebaõnnestus.", "error");
+        } finally {
+            setNewsletterSubmitting(false);
+        }
+    });
+
+    newsletterEmail.addEventListener("input", function () {
+        if (newsletterFeedback?.dataset.state === "error") {
+            setNewsletterFeedback("", "");
+        }
+    });
+}
+
 solveButton.addEventListener("click", async function () {
     if (isGeneratingReport) {
         return;
@@ -1331,4 +1421,5 @@ setLoadingProgress(0);
 resetRating();
 initializeRecentProblems();
 initializeDailyArticles();
+initializeNewsletterForm();
 startSolvedCountSync();

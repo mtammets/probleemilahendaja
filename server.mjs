@@ -18,10 +18,12 @@ const openAiApiKey = process.env.OPENAI_API_KEY?.trim() || "";
 const client = openAiApiKey ? new OpenAI({ apiKey: openAiApiKey }) : null;
 const recentProblemReports = [];
 const dailyArticleCachePath = path.join(__dirname, ".cache", "daily-articles.json");
+const newsletterSignupsCachePath = path.join(__dirname, ".cache", "newsletter-signups.json");
 const RECENT_PROBLEMS_LIMIT = 6;
 const DAILY_ARTICLE_ARCHIVE_LIMIT = 10;
 const DAILY_ARTICLE_PUBLIC_LIMIT = 4;
 const DAILY_ARTICLE_STYLE_VERSION = 3;
+const NEWSLETTER_EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/i;
 const PUBLIC_FEED_TEXT_LIMIT = 180;
 const PUBLIC_FEED_FALLBACK_TEXT = "Üks terava sõnastusega probleem sai lahendatud.";
 const PUBLIC_FEED_PROFANITY_REGEX = /\b(?:pers(?:e|se|es|et|ed|ega|ele|el|esse|est|i)?|t(?:ü|y)r(?:a|ad|aga|ale|al|ast|i)?|munn(?:i|e|id|idega|ile|il|ist)?|vitt(?:u|i|e|ud|idega|ile|is|a)?|niku(?:da|n|d|b|s|tud|ga|le)?|pask(?:a|e|i|aks|aga|ale|as|ast|u)?|sit(?:t|a|ad|ane|ase|aks|aga|ale|as|ast)?|hui(?:a|i|d|ga|le|s)?|fuck(?:ing|ed|er|s)?|shit(?:ty|ted|ting|s)?)\b/giu;
@@ -29,6 +31,9 @@ const DAILY_ARTICLE_SOFT_LANGUAGE_REGEX = /\b(?:teekond|hingetõmme|kergus|maagi
 let dailyArticles = [];
 let dailyArticlesLoaded = false;
 let dailyArticleGenerationPromise = null;
+let newsletterSignups = [];
+let newsletterSignupsLoaded = false;
+let newsletterSignupsWritePromise = Promise.resolve();
 
 const DAILY_ARTICLE_THEMES = [
     {
@@ -158,6 +163,14 @@ app.use(express.json({ limit: "1mb" }));
 
 function sanitizeProblemText(text) {
     return String(text || "").replace(/\s+/g, " ").trim();
+}
+
+function normalizeEmailAddress(value) {
+    return sanitizeProblemText(String(value || "")).toLocaleLowerCase("en-US");
+}
+
+function isValidNewsletterEmail(email) {
+    return NEWSLETTER_EMAIL_REGEX.test(email) && email.length <= 254;
 }
 
 function truncate(text, maxLength) {
@@ -444,6 +457,93 @@ async function saveDailyArticles() {
     );
 }
 
+function normalizeStoredNewsletterSignup(record) {
+    if (!record || typeof record !== "object") {
+        return null;
+    }
+
+    const email = normalizeEmailAddress(record.email);
+
+    if (!isValidNewsletterEmail(email)) {
+        return null;
+    }
+
+    return {
+        email,
+        createdAt: new Date(parseTimestamp(record.createdAt || record.created_at) || Date.now()).toISOString()
+    };
+}
+
+async function loadNewsletterSignups() {
+    if (newsletterSignupsLoaded) {
+        return newsletterSignups;
+    }
+
+    try {
+        const raw = await readFile(newsletterSignupsCachePath, "utf8");
+        const payload = JSON.parse(raw);
+
+        newsletterSignups = Array.isArray(payload?.signups)
+            ? payload.signups.map(normalizeStoredNewsletterSignup).filter(Boolean)
+            : [];
+    } catch (error) {
+        if (error?.code !== "ENOENT") {
+            console.error("Failed to load newsletter signups.", error);
+        }
+
+        newsletterSignups = [];
+    }
+
+    newsletterSignupsLoaded = true;
+    return newsletterSignups;
+}
+
+async function saveNewsletterSignups() {
+    await mkdir(path.dirname(newsletterSignupsCachePath), { recursive: true });
+    await writeFile(
+        newsletterSignupsCachePath,
+        JSON.stringify({ signups: newsletterSignups }, null, 2),
+        "utf8"
+    );
+}
+
+async function addNewsletterSignup(email) {
+    await loadNewsletterSignups();
+
+    const normalizedEmail = normalizeEmailAddress(email);
+
+    if (!isValidNewsletterEmail(normalizedEmail)) {
+        return {
+            status: "invalid"
+        };
+    }
+
+    const existingSignup = newsletterSignups.find(function (signup) {
+        return signup.email === normalizedEmail;
+    });
+
+    if (existingSignup) {
+        return {
+            status: "existing",
+            signup: existingSignup
+        };
+    }
+
+    const signup = {
+        email: normalizedEmail,
+        createdAt: new Date().toISOString()
+    };
+
+    newsletterSignups.unshift(signup);
+    newsletterSignupsWritePromise = newsletterSignupsWritePromise.then(saveNewsletterSignups);
+    await newsletterSignupsWritePromise;
+
+    return {
+        status: "created",
+        signup
+    };
+}
+
 async function generateDailyArticle(dateKey) {
     const fallbackArticle = buildFallbackDailyArticle(dateKey);
     const theme = getThemeForDate(dateKey);
@@ -703,6 +803,30 @@ app.get("/api/recent-problems", function (_request, response) {
     response.json({
         problems: recentProblemReports
     });
+});
+
+app.post("/api/newsletter-signups", async function (request, response) {
+    const email = normalizeEmailAddress(request.body?.email);
+
+    if (!isValidNewsletterEmail(email)) {
+        response.status(400).json({
+            error: "Sisesta korrektne e-post."
+        });
+        return;
+    }
+
+    try {
+        const result = await addNewsletterSignup(email);
+
+        response.status(result.status === "created" ? 201 : 200).json({
+            status: result.status
+        });
+    } catch (error) {
+        console.error("Failed to save newsletter signup.", error);
+        response.status(500).json({
+            error: "Liitumine ebaõnnestus."
+        });
+    }
 });
 
 app.get("/api/daily-articles", async function (_request, response) {
