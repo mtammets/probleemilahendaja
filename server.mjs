@@ -1,6 +1,7 @@
 import "dotenv/config";
 import express from "express";
 import OpenAI from "openai";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -11,13 +12,56 @@ const isProduction = process.argv.includes("--production");
 const port = Number(process.env.PORT || 8787);
 const openAiModel = process.env.OPENAI_MODEL?.trim() || "gpt-5-mini";
 const publicFeedModel = process.env.OPENAI_PUBLIC_FEED_MODEL?.trim() || openAiModel;
+const articleModel = process.env.OPENAI_ARTICLE_MODEL?.trim() || openAiModel;
+const appTimeZone = process.env.APP_TIMEZONE?.trim() || "Europe/Tallinn";
 const openAiApiKey = process.env.OPENAI_API_KEY?.trim() || "";
 const client = openAiApiKey ? new OpenAI({ apiKey: openAiApiKey }) : null;
 const recentProblemReports = [];
+const dailyArticleCachePath = path.join(__dirname, ".cache", "daily-articles.json");
 const RECENT_PROBLEMS_LIMIT = 6;
+const DAILY_ARTICLE_ARCHIVE_LIMIT = 10;
+const DAILY_ARTICLE_PUBLIC_LIMIT = 4;
+const DAILY_ARTICLE_STYLE_VERSION = 3;
 const PUBLIC_FEED_TEXT_LIMIT = 180;
 const PUBLIC_FEED_FALLBACK_TEXT = "Üks terava sõnastusega probleem sai lahendatud.";
 const PUBLIC_FEED_PROFANITY_REGEX = /\b(?:pers(?:e|se|es|et|ed|ega|ele|el|esse|est|i)?|t(?:ü|y)r(?:a|ad|aga|ale|al|ast|i)?|munn(?:i|e|id|idega|ile|il|ist)?|vitt(?:u|i|e|ud|idega|ile|is|a)?|niku(?:da|n|d|b|s|tud|ga|le)?|pask(?:a|e|i|aks|aga|ale|as|ast|u)?|sit(?:t|a|ad|ane|ase|aks|aga|ale|as|ast)?|hui(?:a|i|d|ga|le|s)?|fuck(?:ing|ed|er|s)?|shit(?:ty|ted|ting|s)?)\b/giu;
+const DAILY_ARTICLE_SOFT_LANGUAGE_REGEX = /\b(?:teekond|hingetõmme|kergus|maagia|pehme|õrn|soe|inspireer|lohut|sisemine|eneseusk|päriselt|päris|hing|süda|hell)\b/iu;
+let dailyArticles = [];
+let dailyArticlesLoaded = false;
+let dailyArticleGenerationPromise = null;
+
+const DAILY_ARTICLE_THEMES = [
+    {
+        label: "Kognitiivne koormus",
+        prompt: "miks lahendamata probleemid hoiavad tähelepanu kinni ja võtavad vaimset tööruumi",
+        lenses: ["Tähelepanu", "Mälukoormus", "Selgus"]
+    },
+    {
+        label: "Kontrollitunne",
+        prompt: "miks probleemiga tegelemine taastab mõju, suutlikkuse ja sisemise kontrollitunde",
+        lenses: ["Mõju", "Enesetõhusus", "Hoog"]
+    },
+    {
+        label: "Stressi vähenemine",
+        prompt: "miks lõpetatud probleem langetab pingefooni ja aitab kehal ning mõtetel rahuneda",
+        lenses: ["Stress", "Taastumine", "Kergus"]
+    },
+    {
+        label: "Otsustusjõud",
+        prompt: "miks lahendatud takistus vabastab otsustusruumi järgmiste sammude jaoks",
+        lenses: ["Valikud", "Suund", "Fookus"]
+    },
+    {
+        label: "Suhted ja usaldus",
+        prompt: "miks probleemide lahendamine hoiab usaldust, koostööd ja suhteid tervemana",
+        lenses: ["Usaldus", "Koostöö", "Turvatunne"]
+    },
+    {
+        label: "Harjumused ja hoog",
+        prompt: "miks isegi väikesed lahendused kasvatavad tegutsemisharjumust ja eneseusku",
+        lenses: ["Harjumus", "Tegutsemine", "Eneseusk"]
+    }
+];
 
 const REPORT_SYSTEM_PROMPT = [
     "Sa koostad eestikeelse meelelahutusliku probleemilahenduse raporti.",
@@ -79,6 +123,37 @@ const PUBLIC_FEED_JSON_SCHEMA = {
     }
 };
 
+const DAILY_ARTICLE_JSON_SCHEMA = {
+    type: "object",
+    additionalProperties: false,
+    required: ["theme", "title", "lead", "highlight", "paragraphs", "takeaways", "lenses", "readingTime"],
+    properties: {
+        theme: { type: "string" },
+        title: { type: "string" },
+        lead: { type: "string" },
+        highlight: { type: "string" },
+        paragraphs: {
+            type: "array",
+            minItems: 3,
+            maxItems: 3,
+            items: { type: "string" }
+        },
+        takeaways: {
+            type: "array",
+            minItems: 3,
+            maxItems: 3,
+            items: { type: "string" }
+        },
+        lenses: {
+            type: "array",
+            minItems: 3,
+            maxItems: 3,
+            items: { type: "string" }
+        },
+        readingTime: { type: "string" }
+    }
+};
+
 app.use(express.json({ limit: "1mb" }));
 
 function sanitizeProblemText(text) {
@@ -129,6 +204,53 @@ function normalizeField(value, fallback, maxLength) {
     return maxLength ? truncate(cleaned, maxLength) : cleaned;
 }
 
+function normalizeTextList(values, fallbackValues, maxItems, maxLength) {
+    const normalizedValues = (Array.isArray(values) ? values : [])
+        .map(function (value) {
+            return normalizeField(value, "", maxLength);
+        })
+        .filter(Boolean)
+        .slice(0, maxItems);
+
+    if (normalizedValues.length > 0) {
+        return normalizedValues;
+    }
+
+    return fallbackValues
+        .map(function (value) {
+            return normalizeField(value, "", maxLength);
+        })
+        .filter(Boolean)
+        .slice(0, maxItems);
+}
+
+function compactLabel(value, fallback, maxLength) {
+    const cleaned = sanitizeProblemText(value || fallback || "");
+
+    if (!cleaned) {
+        return "";
+    }
+
+    if (cleaned.length <= maxLength) {
+        return cleaned;
+    }
+
+    const words = cleaned.split(" ");
+    let result = "";
+
+    for (const word of words) {
+        const candidate = result ? `${result} ${word}` : word;
+
+        if (candidate.length > maxLength) {
+            break;
+        }
+
+        result = candidate;
+    }
+
+    return result || cleaned.slice(0, maxLength).trim();
+}
+
 function maskProfanity(text) {
     return String(text || "").replace(PUBLIC_FEED_PROFANITY_REGEX, function (matchedText) {
         return "•".repeat(Math.max(4, Math.min(matchedText.length, 10)));
@@ -144,6 +266,288 @@ function normalizePublicFeedProblemText(value) {
     }
 
     return maskProfanity(safeText);
+}
+
+function getDatePartMap(date) {
+    return new Intl.DateTimeFormat("en-CA", {
+        timeZone: appTimeZone,
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit"
+    }).formatToParts(date).reduce(function (parts, part) {
+        if (part.type !== "literal") {
+            parts[part.type] = part.value;
+        }
+
+        return parts;
+    }, {});
+}
+
+function getLocalDateKey(date = new Date()) {
+    const parts = getDatePartMap(date);
+    return `${parts.year}-${parts.month}-${parts.day}`;
+}
+
+function getThemeForDate(dateKey) {
+    const numericKey = Number(String(dateKey).replaceAll("-", "")) || 0;
+    return DAILY_ARTICLE_THEMES[numericKey % DAILY_ARTICLE_THEMES.length];
+}
+
+function parseTimestamp(value) {
+    const timestamp = new Date(value || "").getTime();
+
+    return Number.isFinite(timestamp) ? timestamp : 0;
+}
+
+function buildFallbackDailyArticle(dateKey) {
+    const theme = getThemeForDate(dateKey);
+
+    return {
+        id: dateKey,
+        dateKey,
+        styleVersion: DAILY_ARTICLE_STYLE_VERSION,
+        publishedAt: new Date().toISOString(),
+        theme: theme.label,
+        title: "Miks lõpetatud probleem vähendab vaimset koormust",
+        lead: "Lahendamata küsimus jääb tähelepanu külge. Kui teema saab lõpetatud, väheneb hajus koormus ja järgmised otsused muutuvad lihtsamaks.",
+        highlight: "Lõpetatud teema võtab vähem tähelepanu.",
+        paragraphs: [
+            "Lõpetamata probleemid jäävad töömälu ja tähelepanu külge ka siis, kui inimene tegeleb juba millegi muuga. See tähendab, et osa vaimsest ressursist on kogu aeg broneeritud lahtise teema jaoks.",
+            "Kui küsimus saab otsuse või lahenduse, langeb vajadus seda peas uuesti läbi mängida. Tulemuseks ei ole tingimata hea tuju, vaid pigem väiksem taustakoormus ja selgem järgmine samm.",
+            "Sellepärast on probleemide lahendamine praktiline viis vähendada vaimset müra. Vähem lahtisi otsi tähendab vähem hajumist, vähem pingeid ja täpsemat keskendumist."
+        ],
+        takeaways: [
+            "Vähem taustamüra",
+            "Rohkem otsustusruumi",
+            "Selgem järgmine samm"
+        ],
+        lenses: theme.lenses,
+        readingTime: "3 min lugemine"
+    };
+}
+
+function isDailyArticleTooSoft(article) {
+    const compactText = [article.title, article.lead, article.highlight].join(" ");
+
+    if (DAILY_ARTICLE_SOFT_LANGUAGE_REGEX.test(compactText)) {
+        return true;
+    }
+
+    if (article.highlight.includes(":")) {
+        return true;
+    }
+
+    if (article.title.split(/\s+/).filter(Boolean).length > 10) {
+        return true;
+    }
+
+    if (article.lead.split(/\s+/).filter(Boolean).length > 24) {
+        return true;
+    }
+
+    return false;
+}
+
+function normalizeDailyArticlePayload(dateKey, payload, publishedAt = new Date().toISOString()) {
+    const fallbackArticle = buildFallbackDailyArticle(dateKey);
+    const fallbackTakeaways = fallbackArticle.takeaways;
+    const fallbackLenses = fallbackArticle.lenses;
+
+    const normalizedArticle = {
+        id: dateKey,
+        dateKey,
+        styleVersion: DAILY_ARTICLE_STYLE_VERSION,
+        publishedAt,
+        theme: normalizeField(payload.theme, fallbackArticle.theme, 42),
+        title: normalizeField(payload.title, fallbackArticle.title, 98),
+        lead: normalizeField(payload.lead, fallbackArticle.lead, 180),
+        highlight: normalizeField(payload.highlight, fallbackArticle.highlight, 210),
+        paragraphs: normalizeTextList(payload.paragraphs, fallbackArticle.paragraphs, 3, 360),
+        takeaways: normalizeTextList(payload.takeaways, fallbackTakeaways, 3, 52).map(function (value, index) {
+            return compactLabel(value, fallbackTakeaways[index], 34);
+        }),
+        lenses: normalizeTextList(payload.lenses, fallbackLenses, 3, 28).map(function (value, index) {
+            return compactLabel(value, fallbackLenses[index], 18);
+        }),
+        readingTime: normalizeField(payload.readingTime, fallbackArticle.readingTime, 24)
+    };
+
+    if (isDailyArticleTooSoft(normalizedArticle)) {
+        return {
+            ...fallbackArticle,
+            publishedAt
+        };
+    }
+
+    return normalizedArticle;
+}
+
+function normalizeStoredDailyArticle(record) {
+    if (!record || typeof record !== "object") {
+        return null;
+    }
+
+    if ((record.styleVersion ?? 0) !== DAILY_ARTICLE_STYLE_VERSION) {
+        return null;
+    }
+
+    const publishedAt = new Date(parseTimestamp(record.publishedAt || record.published_at) || Date.now()).toISOString();
+
+    return normalizeDailyArticlePayload(normalizeField(record.dateKey || record.id, getLocalDateKey(), 20), {
+            theme: record.theme,
+            title: record.title,
+            lead: record.lead,
+            highlight: record.highlight,
+            paragraphs: record.paragraphs,
+            takeaways: record.takeaways,
+            lenses: record.lenses,
+            readingTime: record.readingTime
+        }, publishedAt);
+}
+
+async function loadDailyArticles() {
+    if (dailyArticlesLoaded) {
+        return dailyArticles;
+    }
+
+    try {
+        const raw = await readFile(dailyArticleCachePath, "utf8");
+        const payload = JSON.parse(raw);
+
+        dailyArticles = Array.isArray(payload?.articles)
+            ? payload.articles.map(normalizeStoredDailyArticle).filter(Boolean)
+            : [];
+    } catch (error) {
+        if (error?.code !== "ENOENT") {
+            console.error("Failed to load daily article archive.", error);
+        }
+
+        dailyArticles = [];
+    }
+
+    dailyArticles.sort(function (firstArticle, secondArticle) {
+        return parseTimestamp(secondArticle.publishedAt || secondArticle.dateKey)
+            - parseTimestamp(firstArticle.publishedAt || firstArticle.dateKey);
+    });
+    dailyArticles = dailyArticles.slice(0, DAILY_ARTICLE_ARCHIVE_LIMIT);
+    dailyArticlesLoaded = true;
+
+    return dailyArticles;
+}
+
+async function saveDailyArticles() {
+    await mkdir(path.dirname(dailyArticleCachePath), { recursive: true });
+    await writeFile(
+        dailyArticleCachePath,
+        JSON.stringify({ articles: dailyArticles.slice(0, DAILY_ARTICLE_ARCHIVE_LIMIT) }, null, 2),
+        "utf8"
+    );
+}
+
+async function generateDailyArticle(dateKey) {
+    const fallbackArticle = buildFallbackDailyArticle(dateKey);
+    const theme = getThemeForDate(dateKey);
+
+    if (!client) {
+        return fallbackArticle;
+    }
+
+    try {
+        const aiResponse = await client.responses.create({
+            model: articleModel,
+            max_output_tokens: 1100,
+            reasoning: {
+                effort: "low"
+            },
+            instructions: [
+                "Sa kirjutad eestikeelse päevase miniartikli probleemide lahendamise väärtusest.",
+                "Artikkel peab tunduma tark, täpne, rahulik ja usutav.",
+                "Toetu üldisele teadmisele käitumisteadusest, stressipsühholoogiast, tähelepanu uurimisest, otsustuspsühholoogiast või sotsiaalpsühholoogiast.",
+                "Ära mõtle välja konkreetseid uuringuid, teadlasi, ülikoole, aastaarve ega täpseid protsente.",
+                "Kui põhjendad midagi teaduspõhiselt, tee seda kontseptsioonide tasemel, mitte väljamõeldud viidetega.",
+                "Ära kirjuta tervisealaseid lubadusi, diagnoose ega teraapiasoovitusi.",
+                "Kirjuta nagu hea ajakirjanduslik lühitekst: selge, otse, ilma loosungite ja ilustamiseta.",
+                "Ära ole poeetiline, inspireeriv, terapeutiline, lohutav ega sentimentaalne.",
+                "Ära kasuta metafoore, kujundeid, loosungeid ega sõnamänge.",
+                "Väldi sõnastusi nagu 'päriselt', 'teekond', 'sisemine kindlus', 'kergus', 'hoog', 'hingetõmme' või muud pehmet müügikeelt.",
+                "Eelista põhjus-tagajärg lauseid ja konkreetset keelt.",
+                "title peab olema lühike ja konkreetne, kuni umbes 8 sõna.",
+                "lead peab olema kuni umbes 22 sõna.",
+                "highlight peab olema üks lühike, kuiv lause ilma koolonita.",
+                "paragraphs peab sisaldama täpselt 3 lühikest, sisukat lõiku.",
+                "takeaways peab sisaldama täpselt 3 lühikest meeldejäävat rida, igaüks maksimaalselt umbes 4 sõna.",
+                "lenses peab sisaldama täpselt 3 lühikest märksõna või vaatenurka, igaüks maksimaalselt umbes 2 sõna.",
+                "theme peab olema väga lühike, umbes 2 kuni 4 sõna.",
+                "readingTime peab olema lühike eestikeelne lugemisaja märge kujul '3 min lugemine'.",
+                "Tagasta ainult puhas JSON."
+            ].join(" "),
+            input: [
+                `Kuupäev: ${dateKey}`,
+                `Tänane vaatenurk: ${theme.prompt}`,
+                "Selgita, miks probleemi lahendamine vähendab vaimset koormust, muudab otsustamise lihtsamaks ja jätab vähem lahtisi otsi."
+            ].join("\n"),
+            text: {
+                verbosity: "low",
+                format: {
+                    type: "json_schema",
+                    name: "daily_science_article",
+                    strict: true,
+                    schema: DAILY_ARTICLE_JSON_SCHEMA
+                }
+            }
+        });
+
+        const payload = extractJsonObject(aiResponse.output_text);
+        return normalizeDailyArticlePayload(dateKey, payload);
+    } catch (error) {
+        console.error("Failed to generate daily article.", error);
+        return fallbackArticle;
+    }
+}
+
+async function ensureDailyArticleForToday() {
+    const todayKey = getLocalDateKey();
+    await loadDailyArticles();
+
+    const existingArticle = dailyArticles.find(function (article) {
+        return article.dateKey === todayKey || article.id === todayKey;
+    });
+
+    if (existingArticle) {
+        return existingArticle;
+    }
+
+    if (!dailyArticleGenerationPromise) {
+        dailyArticleGenerationPromise = (async function () {
+            const article = await generateDailyArticle(todayKey);
+
+            dailyArticles = [
+                article,
+                ...dailyArticles.filter(function (existing) {
+                    return existing.id !== article.id && existing.dateKey !== article.dateKey;
+                })
+            ].slice(0, DAILY_ARTICLE_ARCHIVE_LIMIT);
+
+            await saveDailyArticles();
+            return article;
+        }()).finally(function () {
+            dailyArticleGenerationPromise = null;
+        });
+    }
+
+    return dailyArticleGenerationPromise;
+}
+
+async function getDailyArticleArchive() {
+    await ensureDailyArticleForToday();
+
+    return dailyArticles
+        .slice()
+        .sort(function (firstArticle, secondArticle) {
+            return parseTimestamp(secondArticle.publishedAt || secondArticle.dateKey)
+                - parseTimestamp(firstArticle.publishedAt || firstArticle.dateKey);
+        })
+        .slice(0, DAILY_ARTICLE_PUBLIC_LIMIT);
 }
 
 function buildModerationSummary(moderationResult) {
@@ -299,6 +703,22 @@ app.get("/api/recent-problems", function (_request, response) {
     response.json({
         problems: recentProblemReports
     });
+});
+
+app.get("/api/daily-articles", async function (_request, response) {
+    try {
+        const articles = await getDailyArticleArchive();
+
+        response.json({
+            date: getLocalDateKey(),
+            articles
+        });
+    } catch (error) {
+        console.error("Failed to prepare daily articles.", error);
+        response.status(500).json({
+            error: "Päeva artikli laadimine ebaõnnestus."
+        });
+    }
 });
 
 app.post("/api/report", async function (request, response) {

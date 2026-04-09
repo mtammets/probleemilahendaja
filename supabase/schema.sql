@@ -139,7 +139,7 @@ begin
         raise exception 'problem_text is required';
     end if;
 
-    insert into public.reports (
+    insert into public.reports as reports (
         session_id,
         problem_text,
         public_problem_text,
@@ -162,11 +162,11 @@ begin
         trim(coalesce(p_resolution, ''))
     )
     returning
-        id,
-        public_problem_text,
-        problem_type,
-        status,
-        created_at
+        reports.id,
+        reports.public_problem_text,
+        reports.problem_type,
+        reports.status,
+        reports.created_at
     into
         v_report_id,
         v_problem_text,

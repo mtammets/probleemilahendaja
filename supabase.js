@@ -25,6 +25,22 @@ function normalizeRpcSingleResult(data) {
     return data ?? null;
 }
 
+function normalizeInteger(value) {
+    if (typeof value === "number" && Number.isFinite(value)) {
+        return value;
+    }
+
+    if (typeof value === "string" && value.trim() !== "") {
+        const parsed = Number(value);
+
+        if (Number.isFinite(parsed)) {
+            return parsed;
+        }
+    }
+
+    return 0;
+}
+
 export function getOrCreateSessionId() {
     try {
         const existingSessionId = window.localStorage.getItem(SESSION_STORAGE_KEY);
@@ -60,7 +76,7 @@ export async function fetchSolvedReportsTotal() {
 
     const row = normalizeRpcSingleResult(data);
 
-    return row?.solved_reports_total ?? 0;
+    return normalizeInteger(row?.solved_reports_total);
 }
 
 export function subscribeToReportInserts(onInsert) {
@@ -142,7 +158,7 @@ export async function createProblemReport(report) {
     return row
         ? {
             reportId: row.report_id,
-            solvedReportsTotal: row.solved_reports_total,
+            solvedReportsTotal: normalizeInteger(row.solved_reports_total),
             recentProblem: row.problem_text
                 ? {
                     reportId: row.report_id ?? null,

@@ -23,6 +23,8 @@ const reportBackButton = document.getElementById("reportBackButton");
 const reportResetButton = document.getElementById("reportResetButton");
 const solvedCount = document.getElementById("solvedCount");
 const recentProblemsList = document.getElementById("recentProblemsList");
+const scienceArticleFeatured = document.getElementById("scienceArticleFeatured");
+const scienceArticleList = document.getElementById("scienceArticleList");
 const reportTitle = document.getElementById("reportTitle");
 const reportLead = document.getElementById("reportLead");
 const reportStatusValue = document.getElementById("reportStatusValue");
@@ -49,6 +51,9 @@ let currentReportId = null;
 let pendingReportSave = null;
 let recentProblems = [];
 let recentProblemsSyncTimer;
+let dailyArticles = [];
+let dailyArticlesSyncTimer;
+let selectedDailyArticleId = "";
 let selectedRating = 0;
 let remoteSolvedCount = null;
 let isGeneratingReport = false;
@@ -61,10 +66,17 @@ const RECENT_PROBLEMS_LIMIT = 6;
 const RECENT_PROBLEMS_STORAGE_KEY = "probleemilahendaja_recent_problems";
 const RECENT_PROBLEM_EQUIVALENT_WINDOW_MS = 15000;
 const RECENT_PROBLEMS_REFRESH_INTERVAL = 10000;
+const DAILY_ARTICLES_LIMIT = 4;
+const DAILY_ARTICLES_REFRESH_INTERVAL = 60 * 60 * 1000;
 const PUBLIC_FEED_PROFANITY_REGEX = /\b(?:pers(?:e|se|es|et|ed|ega|ele|el|esse|est|i)?|t(?:ü|y)r(?:a|ad|aga|ale|al|ast|i)?|munn(?:i|e|id|idega|ile|il|ist)?|vitt(?:u|i|e|ud|idega|ile|is|a)?|niku(?:da|n|d|b|s|tud|ga|le)?|pask(?:a|e|i|aks|aga|ale|as|ast|u)?|sit(?:t|a|ad|ane|ase|aks|aga|ale|as|ast)?|hui(?:a|i|d|ga|le|s)?|fuck(?:ing|ed|er|s)?|shit(?:ty|ted|ting|s)?)\b/giu;
 const numberFormatter = new Intl.NumberFormat("et-EE");
 const relativeTimeFormatter = new Intl.RelativeTimeFormat("et-EE", {
     numeric: "auto"
+});
+const articleDateFormatter = new Intl.DateTimeFormat("et-EE", {
+    day: "numeric",
+    month: "long",
+    year: "numeric"
 });
 const sections = [container, loadingDiv, solutionDiv, reportDiv];
 
@@ -403,6 +415,114 @@ function parseDateToTimestamp(value) {
     return Number.isFinite(timestamp) ? timestamp : Date.now();
 }
 
+function normalizeTextArray(values, fallbackValues, maxItems, maxLength) {
+    const normalizedValues = (Array.isArray(values) ? values : [])
+        .map(function (value) {
+            return truncate(sanitizeProblemText(value || ""), maxLength);
+        })
+        .filter(Boolean)
+        .slice(0, maxItems);
+
+    if (normalizedValues.length > 0) {
+        return normalizedValues;
+    }
+
+    return fallbackValues
+        .map(function (value) {
+            return truncate(sanitizeProblemText(value || ""), maxLength);
+        })
+        .filter(Boolean)
+        .slice(0, maxItems);
+}
+
+function compactLabel(value, fallback, maxLength) {
+    const cleaned = sanitizeProblemText(value || fallback || "");
+
+    if (!cleaned) {
+        return "";
+    }
+
+    if (cleaned.length <= maxLength) {
+        return cleaned;
+    }
+
+    const words = cleaned.split(" ");
+    let result = "";
+
+    for (const word of words) {
+        const candidate = result ? `${result} ${word}` : word;
+
+        if (candidate.length > maxLength) {
+            break;
+        }
+
+        result = candidate;
+    }
+
+    return result || cleaned.slice(0, maxLength).trim();
+}
+
+function normalizeDailyArticle(record, index) {
+    if (!record || typeof record !== "object") {
+        return null;
+    }
+
+    const title = truncate(sanitizeProblemText(record.title || ""), 98);
+
+    if (!title) {
+        return null;
+    }
+
+    const publishedAt = new Date(parseDateToTimestamp(record.publishedAt || record.published_at)).toISOString();
+    const fallbackLead = "Lahendatud probleemid vabastavad tähelepanu, vähendavad pinget ja aitavad elu uuesti liikuma.";
+
+    return {
+        id: sanitizeProblemText(record.id || record.dateKey || record.date_key || String(index + 1)),
+        theme: capitalizeFirst(truncate(sanitizeProblemText(record.theme || "Päeva vaade"), 42)),
+        title,
+        lead: truncate(sanitizeProblemText(record.lead || fallbackLead), 180),
+        highlight: truncate(
+            sanitizeProblemText(
+                record.highlight
+                || "Lahendamine ei vähenda ainult segadust, vaid annab tagasi vaimse ruumi järgmisteks asjadeks."
+            ),
+            210
+        ),
+        paragraphs: normalizeTextArray(
+            record.paragraphs,
+            [
+                fallbackLead,
+                "Kui probleem jääb õhku, jääb õhku ka osa tähelepanust ja sisemisest energiast.",
+                "Kui see saab lõpetatud, vabaneb ruumi keskendumiseks, taastumiseks ja järgmisteks otsusteks."
+            ],
+            3,
+            340
+        ),
+        takeaways: normalizeTextArray(
+            record.takeaways,
+            ["Vähem kognitiivset müra", "Rohkem kontrollitunnet", "Kergem edasi liikuda"],
+            3,
+            44
+        ).map(function (value, index) {
+            return compactLabel(
+                value,
+                ["Vähem kognitiivset müra", "Rohkem kontrollitunnet", "Kergem edasi liikuda"][index],
+                34
+            );
+        }),
+        lenses: normalizeTextArray(
+            record.lenses,
+            ["Tähelepanu", "Stress", "Kontrollitunne"],
+            3,
+            24
+        ).map(function (value, index) {
+            return capitalizeFirst(compactLabel(value, ["Tähelepanu", "Stress", "Kontrollitunne"][index], 18));
+        }),
+        readingTime: truncate(sanitizeProblemText(record.readingTime || record.reading_time || "3 min lugemine"), 24),
+        publishedAt
+    };
+}
+
 function normalizeRecentProblem(record) {
     if (!record || typeof record !== "object") {
         return null;
@@ -634,6 +754,186 @@ function renderRecentProblems() {
     recentProblemsList.replaceChildren(fragment);
 }
 
+function getSelectedDailyArticle() {
+    if (dailyArticles.length === 0) {
+        return null;
+    }
+
+    return dailyArticles.find(function (article) {
+        return article.id === selectedDailyArticleId;
+    }) || dailyArticles[0];
+}
+
+function createSciencePlaceholder() {
+    const fragment = document.createDocumentFragment();
+    const title = document.createElement("h3");
+    const note = document.createElement("p");
+
+    title.className = "science-article__title";
+    note.className = "science-article__lead";
+    title.textContent = "Järgmine tekst on teel.";
+    note.textContent = "Siia tuleb järgmine vaade.";
+    fragment.append(title, note);
+
+    return fragment;
+}
+
+function renderFeaturedDailyArticle(article) {
+    if (!scienceArticleFeatured) {
+        return;
+    }
+
+    if (!article) {
+        scienceArticleFeatured.classList.add("science-article--empty");
+        scienceArticleFeatured.replaceChildren(createSciencePlaceholder());
+        return;
+    }
+
+    scienceArticleFeatured.classList.remove("science-article--empty");
+
+    const fragment = document.createDocumentFragment();
+    const top = document.createElement("div");
+    const eyebrowRow = document.createElement("div");
+    const eyebrow = document.createElement("span");
+    const readingTime = document.createElement("span");
+    const metaRow = document.createElement("div");
+    const theme = document.createElement("span");
+    const date = document.createElement("span");
+    const title = document.createElement("h3");
+    const lead = document.createElement("p");
+    const highlight = document.createElement("blockquote");
+    const body = document.createElement("div");
+    const tags = document.createElement("div");
+    const takeaways = document.createElement("div");
+
+    top.className = "science-article__top";
+    eyebrowRow.className = "science-article__eyebrow-row";
+    eyebrow.className = "science-article__eyebrow";
+    readingTime.className = "science-article__reading-time";
+    metaRow.className = "science-article__meta-row";
+    theme.className = "science-article__theme";
+    date.className = "science-article__date";
+    title.className = "science-article__title";
+    lead.className = "science-article__lead";
+    highlight.className = "science-article__highlight";
+    body.className = "science-article__body";
+    tags.className = "science-article__lenses";
+    takeaways.className = "science-article__takeaways";
+
+    eyebrow.textContent = "Vaade";
+    readingTime.textContent = article.readingTime;
+    theme.textContent = article.theme;
+    date.textContent = articleDateFormatter.format(new Date(article.publishedAt));
+    title.textContent = article.title;
+    lead.textContent = article.lead;
+    highlight.textContent = article.highlight;
+
+    article.lenses.forEach(function (label) {
+        const pill = document.createElement("span");
+        pill.className = "science-article__lens";
+        pill.textContent = label;
+        tags.append(pill);
+    });
+
+    article.paragraphs.forEach(function (paragraphText) {
+        const paragraph = document.createElement("p");
+        paragraph.textContent = paragraphText;
+        body.append(paragraph);
+    });
+
+    article.takeaways.forEach(function (takeawayText) {
+        const pill = document.createElement("span");
+        pill.className = "science-article__takeaway";
+        pill.textContent = takeawayText;
+        takeaways.append(pill);
+    });
+
+    eyebrowRow.append(eyebrow, readingTime);
+    metaRow.append(theme, date);
+    top.append(eyebrowRow, metaRow);
+    fragment.append(top, title, lead, highlight, tags, body, takeaways);
+    scienceArticleFeatured.replaceChildren(fragment);
+}
+
+function createDailyArticleListItem(article) {
+    const button = document.createElement("button");
+    const meta = document.createElement("div");
+    const date = document.createElement("span");
+    const theme = document.createElement("span");
+    const title = document.createElement("strong");
+    const lead = document.createElement("span");
+    const isSelected = article.id === getSelectedDailyArticle()?.id;
+
+    button.type = "button";
+    button.className = "science-feed__list-item";
+    button.setAttribute("role", "option");
+    button.setAttribute("aria-selected", String(isSelected));
+    button.classList.toggle("is-selected", isSelected);
+
+    meta.className = "science-feed__list-meta";
+    date.className = "science-feed__list-date";
+    theme.className = "science-feed__list-theme";
+    title.className = "science-feed__list-title";
+    lead.className = "science-feed__list-lead";
+
+    date.textContent = articleDateFormatter.format(new Date(article.publishedAt));
+    theme.textContent = article.theme;
+    title.textContent = article.title;
+    lead.textContent = article.lead;
+
+    meta.append(date, theme);
+    button.append(meta, title, lead);
+    button.addEventListener("click", function () {
+        selectedDailyArticleId = article.id;
+        renderDailyArticles();
+    });
+
+    return button;
+}
+
+function renderDailyArticles() {
+    if (!scienceArticleFeatured || !scienceArticleList) {
+        return;
+    }
+
+    const selectedArticle = getSelectedDailyArticle();
+    const listFragment = document.createDocumentFragment();
+
+    renderFeaturedDailyArticle(selectedArticle);
+
+    if (dailyArticles.length === 0) {
+        const emptyItem = document.createElement("div");
+        emptyItem.className = "science-feed__list-empty";
+        emptyItem.textContent = "Tekstid jõuavad siia.";
+        scienceArticleList.replaceChildren(emptyItem);
+        return;
+    }
+
+    dailyArticles.forEach(function (article) {
+        listFragment.append(createDailyArticleListItem(article));
+    });
+
+    scienceArticleList.replaceChildren(listFragment);
+}
+
+function setDailyArticles(nextArticles) {
+    dailyArticles = nextArticles
+        .map(normalizeDailyArticle)
+        .filter(Boolean)
+        .sort(function (firstArticle, secondArticle) {
+            return parseDateToTimestamp(secondArticle.publishedAt) - parseDateToTimestamp(firstArticle.publishedAt);
+        })
+        .slice(0, DAILY_ARTICLES_LIMIT);
+
+    if (!dailyArticles.some(function (article) {
+        return article.id === selectedDailyArticleId;
+    })) {
+        selectedDailyArticleId = dailyArticles[0]?.id || "";
+    }
+
+    renderDailyArticles();
+}
+
 function setRecentProblems(nextProblems) {
     recentProblems = mergeRecentProblems(nextProblems);
     persistRecentProblems();
@@ -855,6 +1155,27 @@ async function fetchRecentProblemsFromServer() {
     }
 }
 
+async function fetchDailyArticlesFromServer() {
+    try {
+        const response = await fetch("/api/daily-articles", {
+            headers: {
+                "Accept": "application/json"
+            }
+        });
+
+        if (!response.ok) {
+            throw new Error("Daily articles request failed.");
+        }
+
+        const payload = await response.json();
+
+        return Array.isArray(payload?.articles) ? payload.articles : [];
+    } catch (error) {
+        console.error("Failed to fetch daily articles from local server.", error);
+        return [];
+    }
+}
+
 async function refreshRecentProblems() {
     const [serverProblems, remoteProblems] = await Promise.all([
         fetchRecentProblemsFromServer(),
@@ -862,6 +1183,16 @@ async function refreshRecentProblems() {
     ]);
 
     setRecentProblems(mergeRecentProblems(serverProblems, remoteProblems, recentProblems));
+}
+
+async function refreshDailyArticles() {
+    const articles = await fetchDailyArticlesFromServer();
+
+    if (articles.length > 0) {
+        setDailyArticles(articles);
+    } else if (dailyArticles.length === 0) {
+        renderDailyArticles();
+    }
 }
 
 async function persistRatingSelection(rating) {
@@ -917,6 +1248,19 @@ function initializeRecentProblems() {
     recentProblemsSyncTimer = window.setInterval(function () {
         void refreshRecentProblems();
     }, RECENT_PROBLEMS_REFRESH_INTERVAL);
+}
+
+function initializeDailyArticles() {
+    renderDailyArticles();
+
+    if (dailyArticlesSyncTimer) {
+        window.clearInterval(dailyArticlesSyncTimer);
+    }
+
+    void refreshDailyArticles();
+    dailyArticlesSyncTimer = window.setInterval(function () {
+        void refreshDailyArticles();
+    }, DAILY_ARTICLES_REFRESH_INTERVAL);
 }
 
 solveButton.addEventListener("click", async function () {
@@ -986,4 +1330,5 @@ ratingButtons.forEach(function (button) {
 setLoadingProgress(0);
 resetRating();
 initializeRecentProblems();
+initializeDailyArticles();
 startSolvedCountSync();
