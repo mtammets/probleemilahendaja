@@ -4,11 +4,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Probleemide lahendaja</title>
+    <title>Probleemilahendaja</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link
-        href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Plus+Jakarta+Sans:wght@600;700;800&display=swap"
+        href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,600;0,700;1,700&family=Manrope:wght@400;500;600;700;800&family=Plus+Jakarta+Sans:wght@600;700;800&display=swap"
         rel="stylesheet">
     <link rel="stylesheet" href="styles.css">
 </head>
@@ -17,22 +17,26 @@
     <main class="app-shell">
         <section class="container panel">
             <div class="panel__frame">
-                <div class="brand-lockup">
-                    <img
-                        src="./assets/probleemilahendaja-logo.svg"
-                        alt=""
-                        class="brand-lockup__mark"
-                        aria-hidden="true"
-                    >
-                    <h1>Probleemilahendaja</h1>
+                <div class="intake-shell">
+                    <header class="intake-hero">
+                        <div class="brand-lockup">
+                            <h1 class="brand-wordmark brand-wordmark--hero" aria-label="Probleemilahendaja">
+                                <span class="brand-wordmark__name">Probleemilahendaja</span>
+                            </h1>
+                            <p class="tagline">Kui probleem vajab lahendamist</p>
+                        </div>
+                        <div class="counter-line" aria-label="Lahendatud probleemide ülevaade">
+                            <span class="counter-line__label">Kokku lahendatud</span>
+                            <strong id="solvedCount" class="counter-line__value">1 284 320</strong>
+                        </div>
+                    </header>
+                    <div class="intake-stage">
+                        <div class="intake-stage__frame">
+                            <textarea id="problemInput" placeholder="Kirjuta oma probleem siia..."></textarea>
+                            <button id="solveButton">Lahenda probleem!</button>
+                        </div>
+                    </div>
                 </div>
-                <p class="tagline">Kui probleem vajab lahendust</p>
-                <div class="counter-line" aria-label="Lahendatud probleemide ülevaade">
-                    <span class="counter-line__label">Kokku lahendatud probleeme</span>
-                    <strong id="solvedCount" class="counter-line__value">1 284 320</strong>
-                </div>
-                <textarea id="problemInput" placeholder="Kirjuta oma probleem siia..."></textarea>
-                <button id="solveButton">Lahenda probleem!</button>
             </div>
         </section>
         <section id="loading" class="loading panel panel--status" style="display:none;" aria-live="polite">
@@ -57,15 +61,10 @@
         <section id="report" class="report panel" style="display:none;">
             <div class="panel__frame report__frame">
                 <header class="report__hero">
-                    <div class="report__seal" aria-hidden="true">
-                        <img
-                            src="./assets/probleemilahendaja-logo.svg"
-                            alt=""
-                            class="report__seal-logo"
-                            aria-hidden="true"
-                        >
-                    </div>
                     <div class="report__hero-copy">
+                        <span class="brand-wordmark brand-wordmark--report" aria-hidden="true">
+                            <span class="brand-wordmark__name">Probleemilahendaja</span>
+                        </span>
                         <span class="report__eyebrow">Probleemi lahenduse raport</span>
                         <h2 id="reportTitle">Raport on valmis</h2>
                         <p id="reportLead" class="report__lead">
@@ -204,6 +203,20 @@
                         <button id="reportResetButton" class="button--secondary">Lahenda veel probleeme</button>
                     </div>
                 </div>
+            </div>
+        </section>
+        <section id="recentProblems" class="recent-feed panel" aria-labelledby="recentProblemsTitle">
+            <div class="panel__frame recent-feed__frame">
+                <div class="recent-feed__header">
+                    <div class="recent-feed__copy">
+                        <span class="recent-feed__eyebrow">Probleemide arhiiv</span>
+                        <h2 id="recentProblemsTitle">Viimati lahendatud probleemid</h2>
+                        <p class="recent-feed__lead">
+                            Värske voog teemadest, mis said just korda ja enam ei kriibi.
+                        </p>
+                    </div>
+                </div>
+                <div id="recentProblemsList" class="recent-feed__grid" aria-live="polite"></div>
             </div>
         </section>
     </main>

@@ -63,6 +63,32 @@ export async function fetchSolvedReportsTotal() {
     return row?.solved_reports_total ?? null;
 }
 
+export async function fetchRecentProblemReports(limit = 6) {
+    if (!supabase) {
+        return [];
+    }
+
+    const { data, error } = await supabase.rpc("get_recent_problem_reports", {
+        p_limit: limit
+    });
+
+    if (error) {
+        throw error;
+    }
+
+    return Array.isArray(data)
+        ? data.map(function (row) {
+            return {
+                reportId: row.report_id ?? null,
+                problemText: row.problem_text ?? "",
+                problemType: row.problem_type ?? "Üldine olukord",
+                status: row.status ?? "Lahendatud",
+                createdAt: row.created_at ?? null
+            };
+        })
+        : [];
+}
+
 export async function createProblemReport(report) {
     if (!supabase) {
         return null;
@@ -88,7 +114,16 @@ export async function createProblemReport(report) {
     return row
         ? {
             reportId: row.report_id,
-            solvedReportsTotal: row.solved_reports_total
+            solvedReportsTotal: row.solved_reports_total,
+            recentProblem: row.problem_text
+                ? {
+                    reportId: row.report_id ?? null,
+                    problemText: row.problem_text,
+                    problemType: row.problem_type ?? report.problemType,
+                    status: row.status ?? report.status,
+                    createdAt: row.created_at ?? null
+                }
+                : null
         }
         : null;
 }

@@ -75,6 +75,8 @@ as $$
     where public.app_metrics.id = true;
 $$;
 
+drop function if exists public.create_problem_report(uuid, text, text, text, text, text, text, text);
+
 create or replace function public.create_problem_report(
     p_session_id uuid,
     p_problem_text text,
@@ -87,7 +89,11 @@ create or replace function public.create_problem_report(
 )
 returns table (
     report_id uuid,
-    solved_reports_total bigint
+    solved_reports_total bigint,
+    problem_text text,
+    problem_type text,
+    status text,
+    created_at timestamptz
 )
 language plpgsql
 security definer
@@ -96,6 +102,10 @@ as $$
 declare
     v_report_id uuid;
     v_solved_reports_total bigint;
+    v_problem_text text;
+    v_problem_type text;
+    v_status text;
+    v_created_at timestamptz;
 begin
     if p_session_id is null then
         raise exception 'session_id is required';
@@ -129,7 +139,18 @@ begin
         trim(coalesce(p_analysis, '')),
         trim(coalesce(p_resolution, ''))
     )
-    returning id into v_report_id;
+    returning
+        id,
+        left(regexp_replace(problem_text, '\s+', ' ', 'g'), 180),
+        problem_type,
+        status,
+        created_at
+    into
+        v_report_id,
+        v_problem_text,
+        v_problem_type,
+        v_status,
+        v_created_at;
 
     update public.app_metrics as metrics
     set
@@ -139,8 +160,31 @@ begin
     returning metrics.solved_reports_total into v_solved_reports_total;
 
     return query
-    select v_report_id, v_solved_reports_total;
+    select v_report_id, v_solved_reports_total, v_problem_text, v_problem_type, v_status, v_created_at;
 end;
+$$;
+
+create or replace function public.get_recent_problem_reports(p_limit integer default 6)
+returns table (
+    report_id uuid,
+    problem_text text,
+    problem_type text,
+    status text,
+    created_at timestamptz
+)
+language sql
+security definer
+set search_path = public
+as $$
+    select
+        reports.id as report_id,
+        left(regexp_replace(reports.problem_text, '\s+', ' ', 'g'), 180) as problem_text,
+        reports.problem_type,
+        reports.status,
+        reports.created_at
+    from public.reports as reports
+    order by reports.created_at desc
+    limit least(greatest(coalesce(p_limit, 6), 1), 12);
 $$;
 
 create or replace function public.submit_report_rating(
@@ -186,4 +230,5 @@ $$;
 grant usage on schema public to anon, authenticated;
 grant execute on function public.get_public_metrics() to anon, authenticated;
 grant execute on function public.create_problem_report(uuid, text, text, text, text, text, text, text) to anon, authenticated;
+grant execute on function public.get_recent_problem_reports(integer) to anon, authenticated;
 grant execute on function public.submit_report_rating(uuid, uuid, smallint) to anon, authenticated;

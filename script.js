@@ -1,5 +1,6 @@
 import {
     createProblemReport,
+    fetchRecentProblemReports,
     fetchSolvedReportsTotal,
     getOrCreateSessionId,
     isSupabaseConfigured,
@@ -20,6 +21,7 @@ const resetButton = document.getElementById("resetButton");
 const reportBackButton = document.getElementById("reportBackButton");
 const reportResetButton = document.getElementById("reportResetButton");
 const solvedCount = document.getElementById("solvedCount");
+const recentProblemsList = document.getElementById("recentProblemsList");
 const reportTitle = document.getElementById("reportTitle");
 const reportLead = document.getElementById("reportLead");
 const reportStatusValue = document.getElementById("reportStatusValue");
@@ -44,6 +46,8 @@ let fallbackSolvedBoost = 0;
 let currentProblemText = "";
 let currentReportId = null;
 let pendingReportSave = null;
+let recentProblems = [];
+let recentProblemsSyncTimer;
 let selectedRating = 0;
 let remoteSolvedCount = null;
 let isGeneratingReport = false;
@@ -54,7 +58,15 @@ const MIN_SOLVE_DURATION = 3200;
 const LOADING_PROGRESS_CAP = 0.92;
 const REMOTE_METRICS_REFRESH_INTERVAL = 15000;
 const REPORT_REQUEST_TIMEOUT = 18000;
+const RECENT_PROBLEMS_LIMIT = 6;
+const RECENT_PROBLEMS_STORAGE_KEY = "probleemilahendaja_recent_problems";
+const RECENT_PROBLEM_EQUIVALENT_WINDOW_MS = 15000;
+const RECENT_PROBLEMS_REFRESH_INTERVAL = 10000;
+const PUBLIC_FEED_PROFANITY_REGEX = /\b(?:pers(?:e|se|es|et|ed|ega|ele|el|esse|est|i)?|t(?:ü|y)r(?:a|ad|aga|ale|al|ast|i)?|munn(?:i|e|id|idega|ile|il|ist)?|vitt(?:u|i|e|ud|idega|ile|is|a)?|niku(?:da|n|d|b|s|tud|ga|le)?|pask(?:a|e|i|aks|aga|ale|as|ast|u)?|sit(?:t|a|ad|ane|ase|aks|aga|ale|as|ast)?|hui(?:a|i|d|ga|le|s)?|fuck(?:ing|ed|er|s)?|shit(?:ty|ted|ting|s)?)\b/giu;
 const numberFormatter = new Intl.NumberFormat("et-EE");
+const relativeTimeFormatter = new Intl.RelativeTimeFormat("et-EE", {
+    numeric: "auto"
+});
 const sections = [container, loadingDiv, solutionDiv, reportDiv];
 
 const CATEGORY_RULES = [
@@ -393,6 +405,255 @@ function normalizeGeneratedReport(problemText, report) {
     return clampReportFields(normalizedReport);
 }
 
+function parseDateToTimestamp(value) {
+    const timestamp = new Date(value || "").getTime();
+
+    return Number.isFinite(timestamp) ? timestamp : Date.now();
+}
+
+function normalizeRecentProblem(record) {
+    if (!record || typeof record !== "object") {
+        return null;
+    }
+
+    const problemText = sanitizeProblemText(record.problemText || record.problem_text || "");
+
+    if (!problemText) {
+        return null;
+    }
+
+    const problemType = sanitizeProblemText(record.problemType || record.problem_type || "Üldine olukord")
+        || "Üldine olukord";
+    const status = sanitizeProblemText(record.status || "Lahendatud") || "Lahendatud";
+    const createdAt = new Date(parseDateToTimestamp(record.createdAt || record.created_at)).toISOString();
+
+    return {
+        reportId: record.reportId || record.report_id || null,
+        problemText: truncate(problemText, 180),
+        problemType: truncate(problemType, 40),
+        status: truncate(status, 24),
+        createdAt
+    };
+}
+
+function areRecentProblemsEquivalent(firstProblem, secondProblem) {
+    if (!firstProblem || !secondProblem) {
+        return false;
+    }
+
+    if (
+        firstProblem.reportId
+        && secondProblem.reportId
+        && firstProblem.reportId === secondProblem.reportId
+    ) {
+        return true;
+    }
+
+    const firstText = sanitizeProblemText(firstProblem.problemText).toLocaleLowerCase("et-EE");
+    const secondText = sanitizeProblemText(secondProblem.problemText).toLocaleLowerCase("et-EE");
+
+    if (firstText === "" || firstText !== secondText) {
+        return false;
+    }
+
+    return Math.abs(parseDateToTimestamp(firstProblem.createdAt) - parseDateToTimestamp(secondProblem.createdAt))
+        <= RECENT_PROBLEM_EQUIVALENT_WINDOW_MS;
+}
+
+function mergeRecentProblems() {
+    const merged = [];
+    const collections = Array.from(arguments);
+
+    collections
+        .flat()
+        .map(normalizeRecentProblem)
+        .filter(Boolean)
+        .sort(function (firstProblem, secondProblem) {
+            return parseDateToTimestamp(secondProblem.createdAt) - parseDateToTimestamp(firstProblem.createdAt);
+        })
+        .forEach(function (problem) {
+            const existingIndex = merged.findIndex(function (existingProblem) {
+                return areRecentProblemsEquivalent(existingProblem, problem);
+            });
+
+            if (existingIndex === -1) {
+                merged.push(problem);
+                return;
+            }
+
+            if (!merged[existingIndex].reportId && problem.reportId) {
+                merged[existingIndex] = problem;
+            }
+        });
+
+    return merged.slice(0, RECENT_PROBLEMS_LIMIT);
+}
+
+function persistRecentProblems() {
+    try {
+        window.localStorage.setItem(RECENT_PROBLEMS_STORAGE_KEY, JSON.stringify(recentProblems));
+    } catch (_error) {
+        // Ignore storage failures and keep the in-memory list.
+    }
+}
+
+function loadRecentProblems() {
+    try {
+        const raw = window.localStorage.getItem(RECENT_PROBLEMS_STORAGE_KEY);
+
+        if (!raw) {
+            return [];
+        }
+
+        const parsed = JSON.parse(raw);
+
+        return Array.isArray(parsed) ? parsed : [];
+    } catch (_error) {
+        return [];
+    }
+}
+
+function formatRecentProblemTime(createdAt) {
+    const timestamp = parseDateToTimestamp(createdAt);
+    const diffInMinutes = Math.round((timestamp - Date.now()) / 60000);
+    const absoluteMinutes = Math.abs(diffInMinutes);
+
+    if (absoluteMinutes < 1) {
+        return "äsja";
+    }
+
+    if (absoluteMinutes < 60) {
+        return relativeTimeFormatter.format(diffInMinutes, "minute");
+    }
+
+    const diffInHours = Math.round(diffInMinutes / 60);
+
+    if (Math.abs(diffInHours) < 24) {
+        return relativeTimeFormatter.format(diffInHours, "hour");
+    }
+
+    const diffInDays = Math.round(diffInHours / 24);
+    return relativeTimeFormatter.format(diffInDays, "day");
+}
+
+function maskProfanity(word) {
+    return "•".repeat(Math.max(4, Math.min(word.length, 10)));
+}
+
+function appendPublicProblemText(container, text) {
+    const safeText = truncate(text, 112);
+    const regex = new RegExp(PUBLIC_FEED_PROFANITY_REGEX.source, PUBLIC_FEED_PROFANITY_REGEX.flags);
+    let lastIndex = 0;
+    let hasMatch = false;
+
+    container.replaceChildren();
+
+    for (const match of safeText.matchAll(regex)) {
+        const matchedText = match[0];
+        const matchIndex = match.index ?? 0;
+
+        if (matchIndex > lastIndex) {
+            container.append(document.createTextNode(safeText.slice(lastIndex, matchIndex)));
+        }
+
+        const censoredWord = document.createElement("span");
+        censoredWord.className = "recent-problem__censored";
+        censoredWord.textContent = maskProfanity(matchedText);
+        censoredWord.setAttribute("aria-label", "Peidetud sõna");
+        censoredWord.title = "Peidetud sõna";
+        container.append(censoredWord);
+
+        lastIndex = matchIndex + matchedText.length;
+        hasMatch = true;
+    }
+
+    if (lastIndex < safeText.length) {
+        container.append(document.createTextNode(safeText.slice(lastIndex)));
+    }
+
+    if (!hasMatch) {
+        container.textContent = safeText;
+    }
+}
+
+function createRecentProblemCard(problem) {
+    const article = document.createElement("article");
+    article.className = "recent-problem";
+
+    const meta = document.createElement("div");
+    meta.className = "recent-problem__meta";
+
+    const status = document.createElement("span");
+    status.className = "recent-problem__status";
+    status.textContent = problem.status || "Lahendatud";
+
+    const time = document.createElement("span");
+    time.className = "recent-problem__time";
+    time.textContent = formatRecentProblemTime(problem.createdAt);
+
+    const text = document.createElement("p");
+    text.className = "recent-problem__text";
+    appendPublicProblemText(text, problem.problemText);
+
+    const footer = document.createElement("div");
+    footer.className = "recent-problem__footer";
+
+    const type = document.createElement("span");
+    type.className = "recent-problem__type";
+    type.textContent = problem.problemType || "Üldine olukord";
+
+    const state = document.createElement("span");
+    state.className = "recent-problem__state";
+    state.textContent = "Nüüd korras";
+
+    meta.append(status, time);
+    footer.append(type, state);
+    article.append(meta, text, footer);
+
+    return article;
+}
+
+function renderRecentProblems() {
+    if (!recentProblemsList) {
+        return;
+    }
+
+    const fragment = document.createDocumentFragment();
+
+    if (recentProblems.length === 0) {
+        const emptyCard = document.createElement("article");
+        const emptyTitle = document.createElement("p");
+        const emptyNote = document.createElement("p");
+
+        emptyCard.className = "recent-problem recent-problem--empty";
+        emptyTitle.className = "recent-problem__text";
+        emptyNote.className = "recent-problem__note";
+        emptyTitle.textContent = "Järgmine lahendatud probleem võib olla juba sinu oma.";
+        emptyNote.textContent = "Kui esimene teema saab lahendatud, ilmub see siia kohe lühikese, lõpetatud kaardina.";
+
+        emptyCard.append(emptyTitle, emptyNote);
+        fragment.append(emptyCard);
+    } else {
+        recentProblems.forEach(function (problem) {
+            fragment.append(createRecentProblemCard(problem));
+        });
+    }
+
+    recentProblemsList.replaceChildren(fragment);
+}
+
+function setRecentProblems(nextProblems) {
+    recentProblems = mergeRecentProblems(nextProblems);
+    persistRecentProblems();
+    renderRecentProblems();
+}
+
+function pushRecentProblem(problem) {
+    recentProblems = mergeRecentProblems([problem], recentProblems);
+    persistRecentProblems();
+    renderRecentProblems();
+}
+
 async function fetchGeneratedReport(problemText) {
     const controller = new AbortController();
     const timeoutId = window.setTimeout(function () {
@@ -491,6 +752,14 @@ function applyPersistedReport(persistedReport) {
     if (typeof persistedReport.solvedReportsTotal === "number") {
         setRemoteSolvedCount(persistedReport.solvedReportsTotal);
     }
+
+    if (persistedReport.recentProblem) {
+        pushRecentProblem(persistedReport.recentProblem);
+    } else {
+        void refreshRecentProblems().catch(function (error) {
+            console.error("Failed to refresh recent problems.", error);
+        });
+    }
 }
 
 function queueReportPersistence(report) {
@@ -558,6 +827,49 @@ async function settleReportSaveAfterLoading() {
     }
 }
 
+async function refreshRecentProblemsFromSupabase() {
+    if (!isSupabaseConfigured) {
+        return [];
+    }
+
+    try {
+        return await fetchRecentProblemReports(RECENT_PROBLEMS_LIMIT);
+    } catch (error) {
+        console.error("Failed to sync recent problems from Supabase.", error);
+        return [];
+    }
+}
+
+async function fetchRecentProblemsFromServer() {
+    try {
+        const response = await fetch("/api/recent-problems", {
+            headers: {
+                "Accept": "application/json"
+            }
+        });
+
+        if (!response.ok) {
+            throw new Error("Recent problems request failed.");
+        }
+
+        const payload = await response.json();
+
+        return Array.isArray(payload?.problems) ? payload.problems : [];
+    } catch (error) {
+        console.error("Failed to fetch recent problems from local server.", error);
+        return [];
+    }
+}
+
+async function refreshRecentProblems() {
+    const [serverProblems, remoteProblems] = await Promise.all([
+        fetchRecentProblemsFromServer(),
+        refreshRecentProblemsFromSupabase()
+    ]);
+
+    setRecentProblems(mergeRecentProblems(serverProblems, remoteProblems, recentProblems));
+}
+
 async function persistRatingSelection(rating) {
     if (!isSupabaseConfigured) {
         return;
@@ -598,6 +910,20 @@ function resetApp() {
     problemInput.focus();
 }
 
+function initializeRecentProblems() {
+    recentProblems = mergeRecentProblems(loadRecentProblems());
+    renderRecentProblems();
+
+    if (recentProblemsSyncTimer) {
+        window.clearInterval(recentProblemsSyncTimer);
+    }
+
+    void refreshRecentProblems();
+    recentProblemsSyncTimer = window.setInterval(function () {
+        void refreshRecentProblems();
+    }, RECENT_PROBLEMS_REFRESH_INTERVAL);
+}
+
 solveButton.addEventListener("click", async function () {
     if (isGeneratingReport) {
         return;
@@ -627,6 +953,12 @@ solveButton.addEventListener("click", async function () {
         stopLoadingProgress();
         setLoadingProgress(1);
         populateReport(report);
+        pushRecentProblem({
+            problemText,
+            problemType: report.typeValue,
+            status: report.statusValue,
+            createdAt: new Date().toISOString()
+        });
         showPanel(solutionDiv, "done");
         queueReportPersistenceInBackground(report);
     } finally {
@@ -657,4 +989,5 @@ ratingButtons.forEach(function (button) {
 
 setLoadingProgress(0);
 resetRating();
+initializeRecentProblems();
 startSolvedCountSync();

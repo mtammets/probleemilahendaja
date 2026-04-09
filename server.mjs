@@ -12,6 +12,8 @@ const port = Number(process.env.PORT || 8787);
 const openAiModel = process.env.OPENAI_MODEL?.trim() || "gpt-5-mini";
 const openAiApiKey = process.env.OPENAI_API_KEY?.trim() || "";
 const client = openAiApiKey ? new OpenAI({ apiKey: openAiApiKey }) : null;
+const recentProblemReports = [];
+const RECENT_PROBLEMS_LIMIT = 6;
 
 const REPORT_SYSTEM_PROMPT = [
     "Sa koostad eestikeelse meelelahutusliku probleemilahenduse raporti.",
@@ -157,11 +159,28 @@ function normalizeReport(problemText, payload) {
     };
 }
 
+function pushRecentProblemReport(problemText, report) {
+    recentProblemReports.unshift({
+        problemText: truncate(sanitizeProblemText(problemText), 180),
+        problemType: truncate(sanitizeProblemText(report?.typeValue || "Üldine olukord"), 40),
+        status: truncate(sanitizeProblemText(report?.statusValue || "Lahendatud"), 24),
+        createdAt: new Date().toISOString()
+    });
+
+    recentProblemReports.splice(RECENT_PROBLEMS_LIMIT);
+}
+
 app.get("/api/health", function (_request, response) {
     response.json({
         ok: true,
         openAiConfigured: Boolean(client),
         model: openAiModel
+    });
+});
+
+app.get("/api/recent-problems", function (_request, response) {
+    response.json({
+        problems: recentProblemReports
     });
 });
 
@@ -223,6 +242,7 @@ app.post("/api/report", async function (request, response) {
 
         const payload = extractJsonObject(openAiResponse.output_text);
         const report = normalizeReport(problemText, payload);
+        pushRecentProblemReport(problemText, report);
 
         response.json({
             report,
