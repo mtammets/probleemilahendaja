@@ -14,6 +14,7 @@ const loadingDiv = document.getElementById("loading");
 const solutionDiv = document.getElementById("solution");
 const reportDiv = document.getElementById("report");
 const problemInput = document.getElementById("problemInput");
+const problemFeedback = document.getElementById("problemFeedback");
 const solveButton = document.getElementById("solveButton");
 const loadingProgressBar = document.getElementById("loadingProgressBar");
 const loadingProgressValue = document.getElementById("loadingProgressValue");
@@ -45,6 +46,7 @@ const reportSummary = document.getElementById("reportSummary");
 const ratingButtons = Array.from(document.querySelectorAll(".rating-panel__button"));
 const ratingFeedback = document.getElementById("ratingFeedback");
 const ratingPanel = document.querySelector(".rating-panel");
+const intakeStage = document.querySelector(".intake-stage");
 
 let solvedCountSyncTimer;
 let solvedCountRealtimeCleanup = null;
@@ -268,6 +270,31 @@ function setRemoteSolvedCount(total) {
     if (typeof total === "number" && Number.isFinite(total)) {
         remoteSolvedCount = total;
         renderSolvedCount();
+    }
+}
+
+function setProblemFeedback(message, state = "") {
+    if (!problemFeedback) {
+        return;
+    }
+
+    problemFeedback.hidden = !message;
+    problemFeedback.textContent = message || "";
+
+    if (state) {
+        problemFeedback.dataset.state = state;
+        intakeStage?.setAttribute("data-state", state);
+    } else {
+        delete problemFeedback.dataset.state;
+        intakeStage?.removeAttribute("data-state");
+    }
+
+    if (problemInput) {
+        if (state === "error") {
+            problemInput.setAttribute("aria-invalid", "true");
+        } else {
+            problemInput.removeAttribute("aria-invalid");
+        }
     }
 }
 
@@ -1361,10 +1388,12 @@ solveButton.addEventListener("click", async function () {
     const problemText = sanitizeProblemText(problemInput.value);
 
     if (problemText === "") {
-        alert("Palun kirjuta oma probleem.");
+        setProblemFeedback("Sisesta enne probleem, mida lahendada.", "error");
+        problemInput.focus();
         return;
     }
 
+    setProblemFeedback("", "");
     isGeneratingReport = true;
     currentProblemText = problemText;
     resetRating();
@@ -1393,6 +1422,12 @@ solveButton.addEventListener("click", async function () {
         queueReportPersistenceInBackground(report);
     } finally {
         isGeneratingReport = false;
+    }
+});
+
+problemInput.addEventListener("input", function () {
+    if (problemFeedback?.dataset.state === "error") {
+        setProblemFeedback("", "");
     }
 });
 

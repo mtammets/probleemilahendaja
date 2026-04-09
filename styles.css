@@ -448,6 +448,28 @@ h2 {
         inset 0 1px 0 rgba(255, 255, 255, 0.92);
 }
 
+.intake-feedback {
+    margin: -0.15rem 0 0;
+    min-height: 1.35rem;
+    padding-left: 0.15rem;
+    font-size: 0.9rem;
+    font-weight: 700;
+    line-height: 1.4;
+    color: #a34a44;
+}
+
+.intake-feedback[data-state="error"] {
+    color: #a34a44;
+}
+
+.intake-stage[data-state="error"] .intake-stage__frame {
+    border-color: rgba(200, 92, 82, 0.24);
+    box-shadow:
+        0 28px 60px rgba(2, 7, 12, 0.22),
+        inset 0 1px 0 rgba(255, 255, 255, 0.92),
+        0 0 0 1px rgba(200, 92, 82, 0.08);
+}
+
 textarea {
     width: 100%;
     min-height: 15rem;
@@ -483,6 +505,18 @@ textarea:focus {
         #ffffff;
     box-shadow:
         0 0 0 4px rgba(183, 138, 73, 0.12),
+        inset 0 1px 0 rgba(255, 255, 255, 0.84),
+        inset 0 -16px 28px rgba(17, 29, 45, 0.03);
+}
+
+.intake-stage[data-state="error"] textarea,
+textarea[aria-invalid="true"] {
+    border-color: rgba(200, 92, 82, 0.34);
+    background:
+        linear-gradient(180deg, rgba(255, 251, 250, 0.98), rgba(252, 240, 237, 0.94)),
+        #fffaf8;
+    box-shadow:
+        0 0 0 4px rgba(200, 92, 82, 0.08),
         inset 0 1px 0 rgba(255, 255, 255, 0.84),
         inset 0 -16px 28px rgba(17, 29, 45, 0.03);
 }
