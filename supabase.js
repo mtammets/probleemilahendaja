@@ -3,6 +3,7 @@ import { createClient } from "@supabase/supabase-js";
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL?.trim();
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY?.trim();
 const SESSION_STORAGE_KEY = "probleemilahendaja_session_id";
+let inMemorySessionId = null;
 
 export const isSupabaseConfigured = Boolean(supabaseUrl && supabaseAnonKey);
 
@@ -25,15 +26,25 @@ function normalizeRpcSingleResult(data) {
 }
 
 export function getOrCreateSessionId() {
-    const existingSessionId = window.localStorage.getItem(SESSION_STORAGE_KEY);
+    try {
+        const existingSessionId = window.localStorage.getItem(SESSION_STORAGE_KEY);
 
-    if (existingSessionId) {
-        return existingSessionId;
+        if (existingSessionId) {
+            inMemorySessionId = existingSessionId;
+            return existingSessionId;
+        }
+
+        const sessionId = crypto.randomUUID();
+        window.localStorage.setItem(SESSION_STORAGE_KEY, sessionId);
+        inMemorySessionId = sessionId;
+        return sessionId;
+    } catch (_error) {
+        if (!inMemorySessionId) {
+            inMemorySessionId = crypto.randomUUID();
+        }
+
+        return inMemorySessionId;
     }
-
-    const sessionId = crypto.randomUUID();
-    window.localStorage.setItem(SESSION_STORAGE_KEY, sessionId);
-    return sessionId;
 }
 
 export async function fetchSolvedReportsTotal() {

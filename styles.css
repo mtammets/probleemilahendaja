@@ -1277,12 +1277,28 @@ button:focus-visible {
     }
 
     .report__outcome-main {
-        min-height: 0;
+        min-height: auto;
+        gap: 0.55rem;
+        padding: 1.15rem 1.1rem 1.05rem;
     }
 
     .report__outcome-text {
         max-width: 100%;
-        font-size: clamp(1.8rem, 8vw, 2.7rem);
+        font-size: clamp(1.45rem, 7.2vw, 2.15rem);
+        line-height: 0.98;
+        letter-spacing: -0.05em;
+    }
+
+    .report__outcome-main::before {
+        width: 5.1rem;
+        height: 0.3rem;
+        inset: 0.85rem auto auto 0.95rem;
+    }
+
+    .report__outcome-main::after {
+        left: 1.1rem;
+        right: 1.1rem;
+        top: 1rem;
     }
 
     .report-note {

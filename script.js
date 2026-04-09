@@ -53,6 +53,7 @@ const COUNTER_EPOCH = Date.UTC(2026, 0, 1, 9, 0, 0);
 const MIN_SOLVE_DURATION = 3200;
 const LOADING_PROGRESS_CAP = 0.92;
 const REMOTE_METRICS_REFRESH_INTERVAL = 15000;
+const REPORT_REQUEST_TIMEOUT = 18000;
 const numberFormatter = new Intl.NumberFormat("et-EE");
 const sections = [container, loadingDiv, solutionDiv, reportDiv];
 
@@ -118,7 +119,7 @@ const REPORT_FIELD_LIMITS = {
     clarityMeta: 64,
     originalProblem: 140,
     analysis: 132,
-    resolution: 96,
+    resolution: 76,
     summary: 124
 };
 
@@ -393,12 +394,18 @@ function normalizeGeneratedReport(problemText, report) {
 }
 
 async function fetchGeneratedReport(problemText) {
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(function () {
+        controller.abort();
+    }, REPORT_REQUEST_TIMEOUT);
+
     try {
         const response = await fetch("/api/report", {
             method: "POST",
             headers: {
                 "Content-Type": "application/json"
             },
+            signal: controller.signal,
             body: JSON.stringify({
                 problemText
             })
@@ -423,6 +430,8 @@ async function fetchGeneratedReport(problemText) {
     } catch (error) {
         console.error("Failed to generate report via API.", error);
         return buildFallbackReport(problemText);
+    } finally {
+        window.clearTimeout(timeoutId);
     }
 }
 
@@ -512,6 +521,19 @@ function queueReportPersistence(report) {
             console.error("Failed to save report to Supabase.", error);
             return null;
         });
+}
+
+function queueReportPersistenceInBackground(report) {
+    try {
+        queueReportPersistence(report);
+    } catch (error) {
+        console.error("Failed to start report persistence.", error);
+        pendingReportSave = null;
+    }
+
+    void settleReportSaveAfterLoading().catch(function (error) {
+        console.error("Failed to settle report persistence.", error);
+    });
 }
 
 async function settleReportSaveAfterLoading() {
@@ -605,9 +627,8 @@ solveButton.addEventListener("click", async function () {
         stopLoadingProgress();
         setLoadingProgress(1);
         populateReport(report);
-        queueReportPersistence(report);
-        await settleReportSaveAfterLoading();
         showPanel(solutionDiv, "done");
+        queueReportPersistenceInBackground(report);
     } finally {
         isGeneratingReport = false;
     }

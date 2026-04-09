@@ -147,7 +147,7 @@ function normalizeReport(problemText, payload) {
         resolution: normalizeField(
             payload.resolution,
             "Praegune seis on rahulik ja lõpetatud ning varasem probleem ei määra enam tervikut.",
-            96
+            76
         ),
         summary: normalizeField(
             payload.summary,
@@ -199,7 +199,7 @@ app.post("/api/report", async function (request, response) {
                 "- typeValue peab olema lühike, selge ja mitte liiga tehniline",
                 "- statusMeta, typeMeta ja clarityMeta peavad olema lühikesed kõrvalread, mitte pikad selgitused",
                 "- clarityValue peab olema väga lühike, eelistatult 1 kuni 2 sõna",
-                "- resolution peab kirjeldama ainult praegust lõppseisu, olema kompaktne ja mahtuma ühe suure rõhulause mõõtu",
+                "- resolution peab kirjeldama ainult praegust lõppseisu, olema väga kompaktne ja umbes 6 kuni 10 sõna piires",
                 "- analysis peab ütlema ühes lühikeses lauses, mis täpselt sai lahendatud",
                 "- summary peab olema üks lühike lause, mis jätab mulje, et see teema enam ei ole päriselt probleem",
                 "- originalProblem peab olema kasutaja sisendi lühike või täpne eestikeelne kuju",
