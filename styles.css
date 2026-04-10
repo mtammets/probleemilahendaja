@@ -1,26 +1,34 @@
 :root {
-    --canvas: #efeae2;
-    --canvas-deep: #e1dbd0;
-    --surface: rgba(250, 247, 241, 0.9);
-    --surface-strong: #f8f4ed;
+    --canvas: #f1e8df;
+    --canvas-deep: #e5d4ca;
+    --surface: rgba(253, 247, 241, 0.92);
+    --surface-strong: #fbf4ec;
     --line: rgba(17, 29, 45, 0.1);
     --line-strong: rgba(17, 29, 45, 0.18);
     --ink: #111d2d;
     --ink-soft: #586577;
-    --accent: #ad8650;
-    --accent-soft: #d8c1a0;
-    --action: #1b2a3f;
-    --action-hover: #233751;
-    --success: #234e46;
+    --accent: #da7b5b;
+    --accent-soft: #f1c6b1;
+    --action: #17465d;
+    --action-hover: #1e5c78;
+    --success: #22695c;
     --shadow: 0 28px 70px rgba(16, 24, 40, 0.12);
     --radius: 30px;
     --navy-950: #07101a;
     --navy-900: #0d1826;
     --navy-850: #132133;
     --mist: rgba(228, 235, 243, 0.78);
-    --gold: #b78a49;
-    --gold-soft: #dcc39a;
+    --gold: #d59b3d;
+    --gold-soft: #efd0a0;
     --cream: #fcf8f1;
+    --coral: #dc7658;
+    --coral-soft: #f4c6b4;
+    --teal: #2b8ea0;
+    --teal-soft: #bfe8ea;
+    --mint: #73c0a7;
+    --mint-soft: #d7f0e6;
+    --violet: #6f6ecf;
+    --violet-soft: #d7d6ff;
 }
 
 *,
@@ -43,7 +51,7 @@ body {
     font-family: "Manrope", sans-serif;
     color: var(--ink);
     background:
-        linear-gradient(180deg, rgba(7, 16, 26, 0.5) 0%, rgba(7, 16, 26, 0.24) 26%, rgba(7, 16, 26, 0.8) 100%),
+        linear-gradient(180deg, rgba(7, 16, 26, 0.42) 0%, rgba(7, 16, 26, 0.18) 24%, rgba(7, 16, 26, 0.78) 100%),
         url("./assets/sunset-background.jpg") center center / cover no-repeat;
     overflow-x: hidden;
 }
@@ -58,16 +66,18 @@ body::after {
 
 body::before {
     background:
-        radial-gradient(circle at 14% 18%, rgba(97, 137, 182, 0.24), transparent 28%),
-        radial-gradient(circle at 86% 12%, rgba(214, 176, 112, 0.18), transparent 24%),
+        radial-gradient(circle at 12% 16%, rgba(220, 118, 88, 0.22), transparent 24%),
+        radial-gradient(circle at 82% 14%, rgba(68, 181, 202, 0.22), transparent 26%),
+        radial-gradient(circle at 78% 84%, rgba(132, 205, 170, 0.18), transparent 26%),
+        radial-gradient(circle at 22% 78%, rgba(213, 155, 61, 0.16), transparent 24%),
         radial-gradient(circle at 50% 118%, rgba(7, 16, 26, 0.72), transparent 44%);
 }
 
 body::after {
     background:
-        linear-gradient(180deg, rgba(7, 16, 26, 0.18) 0%, rgba(7, 16, 26, 0) 24%, rgba(7, 16, 26, 0.62) 100%),
-        radial-gradient(circle at 50% 0%, rgba(255, 255, 255, 0.08), transparent 38%);
-    opacity: 0.56;
+        linear-gradient(180deg, rgba(7, 16, 26, 0.16) 0%, rgba(7, 16, 26, 0) 24%, rgba(7, 16, 26, 0.58) 100%),
+        radial-gradient(circle at 50% 0%, rgba(255, 255, 255, 0.06), transparent 38%);
+    opacity: 0.6;
 }
 
 body[data-state="loading"] {
@@ -148,7 +158,7 @@ body[data-state="report"] {
 .panel__frame::before {
     inset: 0 0 auto 0;
     height: 6px;
-    background: linear-gradient(90deg, var(--action) 0 72%, var(--accent) 100%);
+    background: linear-gradient(90deg, var(--coral) 0%, var(--gold) 34%, var(--teal) 70%, var(--mint) 100%);
 }
 
 .panel__frame::after {
@@ -159,87 +169,140 @@ body[data-state="report"] {
 
 .container .panel__frame {
     display: grid;
-    gap: clamp(1.6rem, 2.9vw, 2.5rem);
-    padding: clamp(1.4rem, 3vw, 2.3rem);
+    gap: clamp(1.7rem, 3vw, 2.45rem);
+    padding: clamp(1.45rem, 3vw, 2.35rem);
+    isolation: isolate;
     background:
-        linear-gradient(145deg, rgba(10, 19, 31, 0.96), rgba(16, 29, 45, 0.93)),
-        rgba(9, 18, 30, 0.92);
-    border-color: rgba(183, 138, 73, 0.22);
+        radial-gradient(circle at 12% 16%, rgba(220, 118, 88, 0.14), transparent 24%),
+        radial-gradient(circle at 86% 14%, rgba(68, 181, 202, 0.14), transparent 26%),
+        radial-gradient(circle at 78% 80%, rgba(132, 205, 170, 0.1), transparent 24%),
+        linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0) 22%),
+        linear-gradient(145deg, #09121d 0%, #102231 46%, #17293f 78%, #21274a 100%);
+    border-color: rgba(216, 224, 234, 0.12);
     box-shadow:
-        0 46px 110px rgba(2, 7, 12, 0.52),
-        inset 0 1px 0 rgba(255, 255, 255, 0.05),
-        inset 0 -1px 0 rgba(255, 255, 255, 0.03);
+        0 48px 110px rgba(2, 7, 12, 0.52),
+        0 10px 22px rgba(2, 7, 12, 0.24),
+        inset 0 1px 0 rgba(255, 255, 255, 0.06),
+        inset 0 -1px 0 rgba(255, 255, 255, 0.04);
+}
+
+.container .panel__frame > * {
+    position: relative;
+    z-index: 1;
 }
 
 .container .panel__frame::before {
-    height: 4px;
-    background: linear-gradient(
-        90deg,
-        rgba(183, 138, 73, 0) 0%,
-        rgba(183, 138, 73, 0.68) 18%,
-        rgba(220, 196, 155, 0.96) 52%,
-        rgba(144, 178, 216, 0.52) 100%
-    );
+    z-index: 0;
+    inset: 0;
+    background:
+        linear-gradient(120deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0) 26%),
+        radial-gradient(circle at 18% 0%, rgba(220, 118, 88, 0.1), transparent 18%);
 }
 
 .container .panel__frame::after {
-    inset: 16px;
-    border-color: rgba(255, 255, 255, 0.06);
+    z-index: 0;
+    inset: 14px;
+    border-color: rgba(255, 255, 255, 0.08);
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.02), rgba(255, 255, 255, 0));
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
 }
 
 .intake-shell {
+    position: relative;
     display: grid;
-    gap: clamp(1.4rem, 2.5vw, 2rem);
+    gap: clamp(1.5rem, 2.7vw, 2rem);
+}
+
+.intake-shell::before {
+    display: none;
+}
+
+.intake-shell::after {
+    display: none;
+}
+
+.intake-shell > * {
+    position: relative;
+    z-index: 1;
 }
 
 .intake-hero {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(16.5rem, 18.5rem);
-    gap: 1.65rem;
-    align-items: start;
+    grid-template-columns: minmax(0, 1fr) minmax(17rem, 18.75rem);
+    gap: clamp(1.25rem, 2.6vw, 2rem);
+    align-items: end;
 }
 
 .brand-lockup {
+    position: relative;
     display: grid;
     justify-items: start;
-    gap: 0.32rem;
-    padding-top: 0.35rem;
+    align-content: end;
+    gap: 0.3rem;
+    min-height: clamp(7rem, 13vw, 8.8rem);
+    padding-top: 0.1rem;
+}
+
+.brand-lockup::before {
+    display: none;
+}
+
+.brand-lockup::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: auto;
+    bottom: -0.15rem;
+    width: min(100%, 28rem);
+    height: 1px;
+    background: linear-gradient(90deg, rgba(255, 255, 255, 0.28), rgba(255, 255, 255, 0));
+    pointer-events: none;
 }
 
 .brand-lockup__copy {
     display: grid;
-    gap: 0.34rem;
+    gap: 0.28rem;
     min-width: 0;
 }
 
 .counter-line {
     position: relative;
+    overflow: hidden;
     display: grid;
-    gap: 0.85rem;
-    align-self: stretch;
+    gap: 0.7rem;
+    align-self: end;
     align-content: start;
     justify-self: end;
     width: min(100%, 18.5rem);
-    margin-top: 0.35rem;
-    padding: 1.15rem 1.15rem 1.3rem;
+    margin-top: 0;
+    padding: 1.15rem 1.2rem 1.3rem;
     border-radius: 24px;
-    border: 1px solid rgba(183, 138, 73, 0.22);
+    border: 1px solid rgba(255, 255, 255, 0.14);
     background:
-        linear-gradient(180deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0.03)),
-        rgba(9, 18, 30, 0.42);
+        radial-gradient(circle at 82% 18%, rgba(128, 186, 226, 0.14), transparent 30%),
+        radial-gradient(circle at 14% 100%, rgba(220, 118, 88, 0.1), transparent 34%),
+        linear-gradient(180deg, rgba(255, 255, 255, 0.11), rgba(255, 255, 255, 0.03)),
+        rgba(6, 15, 24, 0.72);
     box-shadow:
-        inset 0 1px 0 rgba(255, 255, 255, 0.05),
-        0 18px 32px rgba(0, 0, 0, 0.16);
+        inset 0 1px 0 rgba(255, 255, 255, 0.1),
+        0 22px 46px rgba(0, 0, 0, 0.24),
+        0 0 0 1px rgba(255, 255, 255, 0.03);
+    backdrop-filter: blur(16px);
+    animation: none;
+}
+
+.counter-line::before {
+    display: none;
 }
 
 .counter-line::after {
     content: "";
     position: absolute;
-    left: 1.25rem;
-    right: 1.25rem;
-    bottom: 1.05rem;
+    left: 1.2rem;
+    right: 1.2rem;
+    bottom: 1rem;
     height: 1px;
-    background: linear-gradient(90deg, rgba(255, 255, 255, 0.18), rgba(255, 255, 255, 0));
+    background: linear-gradient(90deg, rgba(255, 255, 255, 0.24), rgba(255, 255, 255, 0));
     pointer-events: none;
 }
 
@@ -250,19 +313,22 @@ body[data-state="report"] {
     font-weight: 800;
     letter-spacing: 0.16em;
     text-transform: uppercase;
-    color: rgba(220, 196, 155, 0.82);
+    color: rgba(235, 240, 246, 0.84);
     line-height: 1.5;
 }
 
 .counter-line__value {
     font-family: "Plus Jakarta Sans", sans-serif;
-    font-size: clamp(2.7rem, 4.9vw, 3.9rem);
+    font-size: clamp(3rem, 5vw, 4rem);
     font-weight: 800;
     letter-spacing: -0.08em;
     line-height: 0.92;
-    color: var(--cream);
+    color: #fbfdff;
     font-variant-numeric: tabular-nums lining-nums;
     white-space: nowrap;
+    text-shadow:
+        0 1px 0 rgba(255, 255, 255, 0.14),
+        0 14px 28px rgba(0, 0, 0, 0.18);
 }
 
 .brand-wordmark {
@@ -341,14 +407,17 @@ body[data-state="report"] {
 
 .brand-wordmark--hero .brand-wordmark__name {
     font-family: "Plus Jakarta Sans", sans-serif;
-    font-size: clamp(1.9rem, 3.9vw, 2.85rem);
+    font-size: clamp(2.7rem, 5.1vw, 3.95rem);
     font-weight: 800;
-    line-height: 0.96;
-    letter-spacing: -0.065em;
+    line-height: 0.9;
+    letter-spacing: -0.074em;
     background: none;
-    -webkit-text-fill-color: var(--cream);
-    color: var(--cream);
-    text-shadow: 0 10px 24px rgba(0, 0, 0, 0.16);
+    -webkit-text-fill-color: #fbfdff;
+    color: #fbfdff;
+    text-shadow:
+        0 1px 0 rgba(255, 255, 255, 0.16),
+        0 14px 28px rgba(0, 0, 0, 0.18),
+        0 24px 44px rgba(0, 0, 0, 0.16);
 }
 
 .brand-wordmark--report .brand-wordmark__name {
@@ -372,18 +441,23 @@ h2 {
 
 .tagline {
     display: block;
-    margin: 0.1rem 0 0;
+    margin: 0.15rem 0 0;
     max-width: 28ch;
+    padding-left: 0;
     font-family: "Manrope", sans-serif;
-    font-size: 0.74rem;
+    font-size: 0.72rem;
     font-style: normal;
     font-weight: 800;
     line-height: 1.35;
-    letter-spacing: 0.14em;
+    letter-spacing: 0.15em;
     text-transform: uppercase;
-    color: rgba(220, 196, 155, 0.66);
+    color: rgba(232, 238, 245, 0.82);
     text-wrap: balance;
     text-shadow: none;
+}
+
+.tagline::before {
+    display: none;
 }
 
 @media (max-width: 980px) {
@@ -409,6 +483,7 @@ h2 {
 
 .intake-stage {
     position: relative;
+    padding-top: 0.1rem;
 }
 
 .intake-stage::before,
@@ -419,33 +494,54 @@ h2 {
 }
 
 .intake-stage::before {
-    inset: 8% 18% auto auto;
-    width: clamp(7rem, 16vw, 11rem);
-    aspect-ratio: 1;
-    border-radius: 50%;
-    background: radial-gradient(circle at center, rgba(183, 138, 73, 0.16), rgba(183, 138, 73, 0));
-    filter: blur(10px);
+    display: none;
 }
 
 .intake-stage::after {
-    inset: auto auto 10% 6%;
-    width: clamp(10rem, 20vw, 15rem);
-    height: 1px;
-    background: linear-gradient(90deg, rgba(220, 196, 155, 0.34), rgba(220, 196, 155, 0));
+    display: none;
 }
 
 .intake-stage__frame {
+    position: relative;
+    overflow: hidden;
     display: grid;
     gap: 1rem;
-    padding: clamp(1.1rem, 2.3vw, 1.5rem);
+    padding: clamp(1.2rem, 2.4vw, 1.55rem);
     border-radius: 30px;
-    border: 1px solid rgba(183, 138, 73, 0.18);
+    border: 1px solid rgba(17, 29, 45, 0.08);
     background:
-        linear-gradient(180deg, rgba(251, 248, 242, 0.99), rgba(239, 231, 219, 0.96)),
-        rgba(255, 255, 255, 0.96);
+        radial-gradient(circle at 100% 0%, rgba(191, 232, 234, 0.34), transparent 24%),
+        radial-gradient(circle at 0% 100%, rgba(244, 198, 180, 0.28), transparent 24%),
+        linear-gradient(180deg, rgba(255, 254, 251, 0.99), rgba(247, 241, 234, 0.98));
     box-shadow:
-        0 28px 60px rgba(2, 7, 12, 0.22),
+        0 28px 60px rgba(3, 9, 16, 0.24),
         inset 0 1px 0 rgba(255, 255, 255, 0.92);
+}
+
+.intake-stage__frame::before,
+.intake-stage__frame::after {
+    content: "";
+    position: absolute;
+    pointer-events: none;
+}
+
+.intake-stage__frame::before {
+    left: 1.2rem;
+    right: 1.2rem;
+    top: 0.95rem;
+    height: 0.24rem;
+    border-radius: 999px;
+    background: linear-gradient(90deg, rgba(220, 118, 88, 0.92), rgba(213, 155, 61, 0.88), rgba(68, 181, 202, 0.82), rgba(132, 205, 170, 0.74));
+    box-shadow: none;
+}
+
+.intake-stage__frame::after {
+    display: none;
+}
+
+.intake-stage__frame > * {
+    position: relative;
+    z-index: 1;
 }
 
 .intake-feedback {
@@ -472,21 +568,19 @@ h2 {
 
 textarea {
     width: 100%;
-    min-height: 15rem;
+    min-height: 15.5rem;
     resize: vertical;
     border: 1px solid rgba(17, 29, 45, 0.1);
     border-radius: 22px;
-    padding: 1.2rem 1.25rem;
-    background:
-        linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(247, 242, 234, 0.92)),
-        #fbf8f2;
+    padding: 1.25rem 1.3rem;
+    background: #ffffff;
     color: #162235;
     font: inherit;
     font-size: 1rem;
     line-height: 1.7;
     box-shadow:
-        inset 0 1px 0 rgba(255, 255, 255, 0.8),
-        inset 0 -18px 28px rgba(17, 29, 45, 0.03);
+        inset 0 1px 0 rgba(255, 255, 255, 0.84),
+        inset 0 -16px 28px rgba(17, 29, 45, 0.02);
     transition:
         border-color 0.2s ease,
         box-shadow 0.2s ease,
@@ -494,19 +588,17 @@ textarea {
 }
 
 textarea::placeholder {
-    color: #717d8d;
+    color: #707d8d;
 }
 
 textarea:focus {
     outline: none;
-    border-color: rgba(183, 138, 73, 0.36);
-    background:
-        linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(249, 244, 237, 0.96)),
-        #ffffff;
+    border-color: rgba(183, 138, 73, 0.3);
+    background: #ffffff;
     box-shadow:
-        0 0 0 4px rgba(183, 138, 73, 0.12),
-        inset 0 1px 0 rgba(255, 255, 255, 0.84),
-        inset 0 -16px 28px rgba(17, 29, 45, 0.03);
+        0 0 0 4px rgba(183, 138, 73, 0.1),
+        0 12px 28px rgba(17, 29, 45, 0.06),
+        inset 0 1px 0 rgba(255, 255, 255, 0.9);
 }
 
 .intake-stage[data-state="error"] textarea,
@@ -554,7 +646,7 @@ button::before {
     pointer-events: none;
 }
 
-button:not(.rating-panel__button):not(.button--secondary):not(.button--ghost):hover {
+button:not(.rating-panel__button):not(.button--secondary):not(.button--ghost):not(.science-feed__list-item):hover {
     transform: translateY(-2px);
     background: linear-gradient(135deg, #132033 0%, #20324b 64%, #355172 100%);
     box-shadow:
@@ -606,17 +698,46 @@ button:disabled {
     opacity: 0.78;
 }
 
+#solveButton {
+    min-height: 4rem;
+    border-radius: 18px;
+    color: #132030;
+    border-color: rgba(245, 213, 168, 0.52);
+    background: linear-gradient(135deg, #df7e60 0%, #e6ab55 42%, #f0d37a 100%);
+    box-shadow:
+        0 18px 36px rgba(209, 126, 74, 0.24),
+        inset 0 1px 0 rgba(255, 255, 255, 0.46);
+    text-shadow: none;
+}
+
+#solveButton::after {
+    display: none;
+}
+
+#solveButton:hover {
+    transform: translateY(-2px);
+    color: #101d2b;
+    background: linear-gradient(135deg, #e8896c 0%, #edb663 42%, #f3d986 100%);
+    box-shadow:
+        0 22px 42px rgba(209, 126, 74, 0.28),
+        inset 0 1px 0 rgba(255, 255, 255, 0.52);
+}
+
+#solveButton:active {
+    transform: translateY(0);
+}
+
 .newsletter__frame {
     display: grid;
     grid-template-columns: minmax(0, 1.08fr) minmax(20rem, 24rem);
     gap: clamp(1.25rem, 3vw, 2.2rem);
     align-items: stretch;
     background:
-        radial-gradient(circle at 8% 16%, rgba(124, 164, 212, 0.14), transparent 24%),
-        radial-gradient(circle at 88% 12%, rgba(220, 184, 117, 0.2), transparent 24%),
-        linear-gradient(92deg, rgba(7, 14, 24, 0.9) 0%, rgba(10, 18, 29, 0.82) 34%, rgba(10, 18, 29, 0.48) 62%, rgba(10, 18, 29, 0.74) 100%),
-        linear-gradient(135deg, rgba(11, 22, 35, 0.52), rgba(24, 38, 58, 0.26)),
-        url("./assets/sunset-background.jpg") center 58% / cover no-repeat;
+        linear-gradient(96deg, rgba(17, 24, 34, 0.72) 0%, rgba(18, 34, 44, 0.54) 31%, rgba(22, 61, 70, 0.16) 58%, rgba(245, 239, 228, 0.04) 100%),
+        radial-gradient(circle at 12% 18%, rgba(220, 118, 88, 0.18), transparent 24%),
+        radial-gradient(circle at 82% 12%, rgba(68, 181, 202, 0.18), transparent 26%),
+        linear-gradient(180deg, rgba(255, 250, 241, 0.08), rgba(13, 22, 33, 0.08)),
+        url("./assets/newsletter-photo-banner.jpg") center center / cover no-repeat;
     border-color: rgba(220, 184, 117, 0.28);
     box-shadow:
         0 44px 90px rgba(3, 8, 14, 0.44),
@@ -627,16 +748,295 @@ button:disabled {
     height: 4px;
     background: linear-gradient(
         90deg,
-        rgba(220, 184, 117, 0.18) 0%,
-        rgba(220, 184, 117, 0.92) 22%,
-        rgba(255, 232, 188, 0.98) 50%,
-        rgba(140, 184, 214, 0.8) 100%
+        rgba(220, 118, 88, 0.18) 0%,
+        rgba(220, 118, 88, 0.94) 18%,
+        rgba(213, 155, 61, 0.96) 42%,
+        rgba(68, 181, 202, 0.9) 72%,
+        rgba(132, 205, 170, 0.86) 100%
     );
 }
 
 .newsletter__frame::after {
     inset: 16px;
     border-color: rgba(255, 255, 255, 0.06);
+}
+
+.minefield-banner {
+    width: 100%;
+}
+
+.minefield-banner__frame {
+    display: grid;
+    grid-template-columns: minmax(17rem, 0.88fr) minmax(0, 1.42fr);
+    gap: 0.95rem;
+    min-height: clamp(18rem, 34vw, 22rem);
+    padding: 0.95rem;
+    color: #eef5ff;
+    text-decoration: none;
+    background:
+        linear-gradient(180deg, rgba(9, 15, 24, 0.985), rgba(5, 10, 18, 0.985)),
+        radial-gradient(circle at 78% 18%, rgba(115, 150, 194, 0.12), transparent 26%),
+        radial-gradient(circle at 16% 85%, rgba(69, 128, 103, 0.1), transparent 28%);
+    border-color: rgba(125, 147, 173, 0.22);
+    box-shadow:
+        0 34px 76px rgba(4, 10, 17, 0.36),
+        inset 0 1px 0 rgba(255, 255, 255, 0.06);
+    transition:
+        transform 180ms ease,
+        box-shadow 180ms ease,
+        border-color 180ms ease;
+}
+
+.minefield-banner__frame::before {
+    height: 2px;
+    background: linear-gradient(90deg, rgba(108, 138, 189, 0.2) 0%, rgba(139, 181, 216, 0.88) 54%, rgba(240, 225, 204, 0.64) 100%);
+}
+
+.minefield-banner__frame::after {
+    inset: 14px;
+    border-color: rgba(122, 145, 172, 0.16);
+}
+
+.minefield-banner__frame:hover {
+    transform: translateY(-3px);
+    border-color: rgba(144, 170, 201, 0.32);
+    box-shadow:
+        0 42px 90px rgba(4, 10, 17, 0.42),
+        inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.minefield-banner__info,
+.minefield-banner__visual,
+.minefield-banner__visual-frame {
+    position: relative;
+    z-index: 1;
+}
+
+.minefield-banner__info {
+    display: grid;
+    align-content: space-between;
+    gap: 1rem;
+    min-width: 0;
+    padding: 1.2rem 1.15rem 1rem;
+    border-radius: 24px;
+    background:
+        linear-gradient(180deg, rgba(13, 22, 34, 0.96), rgba(9, 16, 27, 0.98));
+    border: 1px solid rgba(124, 145, 171, 0.2);
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.04),
+        0 14px 34px rgba(3, 8, 14, 0.2);
+}
+
+.minefield-banner__eyebrow {
+    display: inline-flex;
+    width: fit-content;
+    max-width: 100%;
+    align-items: center;
+    font-family: "Rajdhani", sans-serif;
+    font-size: 0.82rem;
+    font-weight: 700;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: rgba(180, 196, 218, 0.72);
+}
+
+.minefield-banner__title {
+    margin: 0;
+    display: grid;
+    gap: 0;
+    font-family: "Rajdhani", sans-serif;
+    font-size: clamp(2.7rem, 4.7vw, 4.1rem);
+    font-weight: 700;
+    line-height: 0.84;
+    letter-spacing: -0.035em;
+    color: #edf4ff;
+    text-shadow: 0 12px 28px rgba(0, 0, 0, 0.24);
+}
+
+.minefield-banner__title span:last-child {
+    color: #f1e5d3;
+}
+
+.minefield-banner__lead {
+    margin: 0;
+    max-width: 28ch;
+    font-family: "Space Grotesk", sans-serif;
+    font-size: 1rem;
+    font-weight: 500;
+    line-height: 1.55;
+    color: rgba(212, 223, 239, 0.84);
+}
+
+.minefield-banner__actions {
+    display: grid;
+    gap: 0.72rem;
+    align-content: end;
+}
+
+.minefield-banner__action {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    min-height: 3rem;
+    padding: 0.85rem 1rem;
+    border-radius: 14px;
+    font-family: "Rajdhani", sans-serif;
+    font-size: 1rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+}
+
+.minefield-banner__action::after {
+    content: "→";
+    font-size: 1.15rem;
+    line-height: 1;
+}
+
+.minefield-banner__action--primary {
+    color: #effff3;
+    background: linear-gradient(180deg, rgba(56, 112, 73, 0.98), rgba(34, 72, 47, 0.98));
+    border: 1px solid rgba(132, 211, 154, 0.34);
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.08),
+        0 10px 20px rgba(6, 18, 10, 0.22);
+}
+
+.minefield-banner__action--secondary {
+    color: #e8f4ff;
+    background: linear-gradient(180deg, rgba(42, 83, 132, 0.98), rgba(24, 50, 84, 0.98));
+    border: 1px solid rgba(122, 173, 226, 0.28);
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.08),
+        0 10px 20px rgba(7, 15, 26, 0.22);
+}
+
+.minefield-banner__action--secondary::after {
+    content: "↗";
+}
+
+.minefield-banner__visual {
+    min-width: 0;
+    padding: 0.38rem;
+    border-radius: 24px;
+    background:
+        linear-gradient(180deg, rgba(10, 17, 27, 0.98), rgba(7, 13, 22, 0.98));
+    border: 1px solid rgba(124, 145, 171, 0.18);
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.04),
+        0 18px 34px rgba(3, 8, 14, 0.24);
+}
+
+.minefield-banner__visual-frame {
+    min-height: 100%;
+    border-radius: 20px;
+    overflow: hidden;
+    border: 1px solid rgba(124, 145, 171, 0.14);
+    background:
+        radial-gradient(circle at 50% 84%, rgba(220, 228, 238, 0.34), transparent 28%),
+        linear-gradient(180deg, rgba(7, 12, 20, 0.02), rgba(7, 12, 20, 0.2)),
+        url("./assets/Minefield.png") center center / cover no-repeat;
+}
+
+.minefield-banner__visual-frame::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background:
+        radial-gradient(circle at 52% 88%, rgba(248, 81, 73, 0.16), transparent 12%),
+        linear-gradient(180deg, rgba(4, 8, 14, 0.1) 0%, rgba(4, 8, 14, 0) 22%, rgba(4, 8, 14, 0.22) 100%);
+    pointer-events: none;
+}
+
+.minefield-banner__visual-frame::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    box-shadow:
+        inset 0 0 0 1px rgba(255, 255, 255, 0.03),
+        inset 0 -80px 120px rgba(4, 8, 14, 0.16);
+    pointer-events: none;
+}
+
+.lorien-banner {
+    width: 100%;
+}
+
+.lorien-banner__frame {
+    display: grid;
+    gap: 0.8rem;
+    padding: clamp(0.95rem, 2.2vw, 1.25rem);
+    color: inherit;
+    text-decoration: none;
+    background:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.97), rgba(248, 245, 240, 0.95));
+    border-color: rgba(44, 37, 29, 0.08);
+    box-shadow:
+        0 18px 54px rgba(24, 20, 16, 0.1),
+        inset 0 1px 0 rgba(255, 255, 255, 0.92);
+    transition:
+        transform 180ms ease,
+        box-shadow 180ms ease,
+        border-color 180ms ease;
+}
+
+.lorien-banner__frame::before {
+    height: 1px;
+    background: linear-gradient(90deg, rgba(46, 38, 30, 0) 0%, rgba(46, 38, 30, 0.12) 22%, rgba(46, 38, 30, 0.12) 78%, rgba(46, 38, 30, 0) 100%);
+}
+
+.lorien-banner__frame::after {
+    inset: 14px;
+    border-color: rgba(44, 37, 29, 0.06);
+}
+
+.lorien-banner__frame:hover {
+    transform: translateY(-2px);
+    border-color: rgba(44, 37, 29, 0.12);
+    box-shadow:
+        0 22px 58px rgba(24, 20, 16, 0.12),
+        inset 0 1px 0 rgba(255, 255, 255, 0.92);
+}
+
+.lorien-banner__masthead {
+    display: flex;
+    justify-content: center;
+    text-align: center;
+}
+
+.lorien-banner__brand {
+    font-family: "Cormorant Garamond", serif;
+    font-size: clamp(2rem, 4vw, 3rem);
+    font-weight: 700;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: #161310;
+}
+
+.lorien-banner__hero {
+    position: relative;
+    min-height: clamp(14.5rem, 27vw, 19rem);
+    border-radius: 26px;
+    overflow: hidden;
+    border: 1px solid rgba(71, 59, 49, 0.08);
+    box-shadow:
+        0 16px 40px rgba(32, 26, 20, 0.12),
+        inset 0 1px 0 rgba(255, 255, 255, 0.52);
+    background:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.16) 0%, rgba(255, 255, 255, 0.03) 20%, rgba(29, 22, 17, 0.04) 100%),
+        url("./assets/Lorien.png") center 44% / cover no-repeat;
+}
+
+.lorien-banner__hero::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.12) 0%, rgba(255, 255, 255, 0.03) 20%, rgba(255, 255, 255, 0) 44%),
+        radial-gradient(circle at 48% 14%, rgba(255, 255, 255, 0.2), transparent 24%),
+        linear-gradient(180deg, rgba(18, 14, 10, 0) 64%, rgba(18, 14, 10, 0.06) 100%);
+    pointer-events: none;
 }
 
 .newsletter__copy {
@@ -955,7 +1355,10 @@ button:disabled {
     gap: 1.1rem;
     padding-block: clamp(1.25rem, 3.4vw, 1.9rem);
     background:
-        linear-gradient(180deg, rgba(251, 248, 242, 0.96), rgba(243, 238, 228, 0.93)),
+        radial-gradient(circle at 0% 0%, rgba(244, 198, 180, 0.24), transparent 22%),
+        radial-gradient(circle at 100% 0%, rgba(191, 232, 234, 0.26), transparent 24%),
+        radial-gradient(circle at 100% 100%, rgba(215, 240, 230, 0.22), transparent 22%),
+        linear-gradient(180deg, rgba(252, 247, 241, 0.97), rgba(244, 237, 226, 0.94)),
         rgba(255, 255, 255, 0.86);
     border-color: rgba(17, 29, 45, 0.09);
     box-shadow:
@@ -964,7 +1367,7 @@ button:disabled {
 }
 
 .recent-feed__frame::before {
-    background: linear-gradient(90deg, rgba(27, 42, 63, 0.98) 0%, rgba(183, 138, 73, 0.84) 50%, rgba(126, 169, 151, 0.96) 100%);
+    background: linear-gradient(90deg, var(--coral) 0%, var(--gold) 34%, var(--teal) 68%, var(--mint) 100%);
 }
 
 .recent-feed__header {
@@ -1027,8 +1430,8 @@ button:disabled {
     border-radius: 24px;
     border: 1px solid rgba(17, 29, 45, 0.08);
     background:
-        radial-gradient(circle at 100% 0%, rgba(217, 199, 164, 0.28), transparent 28%),
-        radial-gradient(circle at 0% 100%, rgba(158, 194, 180, 0.16), transparent 30%),
+        radial-gradient(circle at 100% 0%, rgba(244, 198, 180, 0.24), transparent 28%),
+        radial-gradient(circle at 0% 100%, rgba(191, 232, 234, 0.18), transparent 30%),
         linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(244, 239, 231, 0.95)),
         rgba(255, 255, 255, 0.82);
     box-shadow:
@@ -1216,9 +1619,10 @@ button:disabled {
     display: grid;
     gap: 1.15rem;
     background:
-        radial-gradient(circle at 100% 0%, rgba(147, 170, 194, 0.16), transparent 28%),
-        radial-gradient(circle at 0% 100%, rgba(211, 178, 122, 0.14), transparent 24%),
-        linear-gradient(180deg, rgba(251, 248, 243, 0.99), rgba(242, 235, 224, 0.97)),
+        radial-gradient(circle at 100% 0%, rgba(191, 232, 234, 0.2), transparent 28%),
+        radial-gradient(circle at 0% 0%, rgba(244, 198, 180, 0.18), transparent 22%),
+        radial-gradient(circle at 0% 100%, rgba(240, 211, 122, 0.16), transparent 24%),
+        linear-gradient(180deg, rgba(252, 248, 243, 0.99), rgba(243, 235, 223, 0.97)),
         rgba(255, 255, 255, 0.96);
 }
 
@@ -1264,8 +1668,8 @@ button:disabled {
     border-radius: 28px;
     border: 1px solid rgba(17, 29, 45, 0.08);
     background:
-        radial-gradient(circle at 100% 0%, rgba(184, 141, 75, 0.14), transparent 28%),
-        radial-gradient(circle at 0% 100%, rgba(104, 145, 170, 0.16), transparent 28%),
+        radial-gradient(circle at 100% 0%, rgba(244, 198, 180, 0.18), transparent 28%),
+        radial-gradient(circle at 0% 100%, rgba(191, 232, 234, 0.18), transparent 28%),
         linear-gradient(180deg, rgba(255, 255, 255, 0.99), rgba(243, 237, 228, 0.96)),
         rgba(255, 255, 255, 0.9);
     box-shadow:
@@ -1286,7 +1690,7 @@ button:disabled {
     top: 1rem;
     height: 0.24rem;
     border-radius: 999px;
-    background: linear-gradient(90deg, rgba(28, 46, 66, 0.92), rgba(194, 151, 88, 0.84), rgba(111, 159, 168, 0.76));
+    background: linear-gradient(90deg, var(--coral) 0%, var(--gold) 34%, var(--teal) 70%, var(--mint) 100%);
 }
 
 .science-article::after {
@@ -1337,14 +1741,14 @@ button:disabled {
 }
 
 .science-article__eyebrow {
-    color: #214b5f;
-    background: linear-gradient(180deg, rgba(225, 242, 247, 0.98), rgba(208, 232, 238, 0.96));
+    color: #1e5766;
+    background: linear-gradient(180deg, rgba(225, 246, 248, 0.98), rgba(202, 235, 237, 0.96));
 }
 
 .science-article__theme,
 .science-feed__list-theme {
-    color: #6d4f1f;
-    background: linear-gradient(180deg, rgba(248, 237, 216, 0.98), rgba(239, 224, 193, 0.96));
+    color: #8d5630;
+    background: linear-gradient(180deg, rgba(251, 232, 224, 0.98), rgba(244, 206, 188, 0.96));
 }
 
 .science-article__reading-time {
@@ -1490,13 +1894,31 @@ button:disabled {
     cursor: pointer;
 }
 
-.science-feed__list-item:hover,
-.science-feed__list-item.is-selected {
+.science-feed__list-item:hover {
     transform: translateY(-2px);
-    border-color: rgba(194, 151, 88, 0.24);
+    border-color: rgba(43, 142, 160, 0.24);
+    background:
+        radial-gradient(circle at 100% 0%, rgba(191, 232, 234, 0.18), transparent 32%),
+        radial-gradient(circle at 0% 100%, rgba(244, 198, 180, 0.12), transparent 30%),
+        linear-gradient(180deg, rgba(255, 255, 255, 0.99), rgba(246, 241, 232, 0.97)),
+        rgba(255, 255, 255, 0.9);
     box-shadow:
         inset 0 1px 0 rgba(255, 255, 255, 0.9),
         0 22px 40px rgba(17, 29, 45, 0.08);
+}
+
+.science-feed__list-item.is-selected {
+    transform: translateY(-2px);
+    border-color: rgba(43, 142, 160, 0.28);
+    background:
+        radial-gradient(circle at 100% 0%, rgba(191, 232, 234, 0.18), transparent 34%),
+        radial-gradient(circle at 0% 100%, rgba(244, 198, 180, 0.14), transparent 28%),
+        linear-gradient(180deg, rgba(255, 255, 255, 0.99), rgba(247, 242, 234, 0.98)),
+        rgba(255, 255, 255, 0.92);
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.92),
+        0 22px 40px rgba(17, 29, 45, 0.08),
+        0 0 0 1px rgba(43, 142, 160, 0.08);
 }
 
 .science-feed__list-title {
@@ -1524,6 +1946,9 @@ button:disabled {
     gap: 1.15rem;
     padding-block: clamp(1.55rem, 4vw, 2.5rem);
     background:
+        radial-gradient(circle at 0% 0%, rgba(244, 198, 180, 0.2), transparent 20%),
+        radial-gradient(circle at 100% 0%, rgba(191, 232, 234, 0.22), transparent 24%),
+        radial-gradient(circle at 100% 100%, rgba(215, 240, 230, 0.2), transparent 20%),
         linear-gradient(180deg, rgba(255, 252, 247, 0.99), rgba(246, 241, 232, 0.98)),
         rgba(255, 255, 255, 0.96);
     border-color: rgba(17, 29, 45, 0.1);
@@ -1533,7 +1958,7 @@ button:disabled {
 }
 
 .report__frame::before {
-    background: linear-gradient(90deg, #9fc3b5 0%, #bdddcf 52%, #d8ece3 100%);
+    background: linear-gradient(90deg, var(--coral) 0%, var(--gold) 34%, var(--teal) 68%, var(--mint) 100%);
 }
 
 .report__hero,
@@ -2364,6 +2789,12 @@ button:disabled {
     .container .panel__frame {
         gap: 1.15rem;
         padding: 1.05rem;
+        background:
+            radial-gradient(circle at 12% 18%, rgba(220, 118, 88, 0.16), transparent 20%),
+            radial-gradient(circle at 84% 12%, rgba(68, 181, 202, 0.16), transparent 24%),
+            radial-gradient(circle at 78% 86%, rgba(132, 205, 170, 0.12), transparent 20%),
+            linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0) 18%),
+            linear-gradient(145deg, rgba(9, 18, 30, 0.98), rgba(15, 32, 47, 0.95), rgba(29, 38, 65, 0.94));
     }
 
     .container .panel__frame::after {
@@ -2376,16 +2807,17 @@ button:disabled {
 
     .intake-hero {
         grid-template-columns: 1fr;
-        gap: 0.9rem;
+        gap: 1rem;
         align-items: start;
     }
 
     .brand-lockup {
-        gap: 0.2rem;
+        min-height: auto;
+        gap: 0.3rem;
     }
 
     .brand-lockup__copy {
-        gap: 0.24rem;
+        gap: 0.32rem;
     }
 
     .brand-wordmark {
@@ -2394,7 +2826,7 @@ button:disabled {
     }
 
     .brand-wordmark--hero .brand-wordmark__name {
-        font-size: clamp(1.52rem, 7.7vw, 2.08rem);
+        font-size: clamp(2.2rem, 9vw, 2.9rem);
     }
 
     .brand-wordmark--report {
@@ -2417,7 +2849,8 @@ button:disabled {
 
     .tagline {
         max-width: 100%;
-        margin-top: 0.05rem;
+        margin-top: 0.1rem;
+        padding-left: 0;
         font-size: 0.64rem;
         line-height: 1.3;
         letter-spacing: 0.13em;
@@ -2426,7 +2859,7 @@ button:disabled {
     .counter-line {
         margin-top: 0;
         gap: 0.65rem;
-        padding: 1rem;
+        padding: 1.05rem;
     }
 
     .counter-line::after {
@@ -2444,22 +2877,23 @@ button:disabled {
     }
 
     .intake-stage__frame {
-        gap: 0.85rem;
-        padding: 1rem;
-        border-radius: 24px;
+        gap: 0.9rem;
+        padding: 1.05rem;
+        border-radius: 26px;
     }
 
-    .intake-stage::before {
-        width: 6.25rem;
+    .intake-stage__frame::before {
+        left: 1rem;
+        right: 1rem;
     }
 
-    .intake-stage::after {
-        width: 7.25rem;
+    #solveButton {
+        min-height: 3.85rem;
     }
 
     textarea {
-        min-height: 11.5rem;
-        padding: 1rem;
+        min-height: 12.5rem;
+        padding: 1.05rem;
     }
 
     .report__hero,
@@ -2467,6 +2901,7 @@ button:disabled {
     .report__story,
     .report__footer,
     .report__actions,
+    .minefield-banner__frame,
     .newsletter__frame,
     .recent-feed__header,
     .recent-feed__grid,
@@ -2531,6 +2966,49 @@ button:disabled {
     .newsletter__copy h2 {
         max-width: none;
         font-size: clamp(2.1rem, 9vw, 3rem);
+    }
+
+    .minefield-banner__frame {
+        min-height: auto;
+        gap: 0.85rem;
+        padding: 0.85rem;
+    }
+
+    .minefield-banner__info {
+        padding: 1rem;
+    }
+
+    .minefield-banner__lead {
+        max-width: none;
+        font-size: 0.98rem;
+    }
+
+    .minefield-banner__title {
+        font-size: clamp(2.1rem, 11vw, 3rem);
+    }
+
+    .minefield-banner__visual {
+        min-height: 14rem;
+    }
+
+    .minefield-banner__visual-frame {
+        min-height: 14rem;
+        background-position: center center;
+    }
+
+    .lorien-banner__frame {
+        gap: 0.7rem;
+        padding: 0.85rem;
+    }
+
+    .lorien-banner__brand {
+        font-size: clamp(1.45rem, 7.5vw, 2rem);
+        letter-spacing: 0.09em;
+    }
+
+    .lorien-banner__hero {
+        min-height: 12.75rem;
+        border-radius: 22px;
     }
 
     .newsletter__aside {
