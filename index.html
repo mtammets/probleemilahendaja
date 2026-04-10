@@ -8,7 +8,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link
-        href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,600;0,700;1,700&family=Manrope:wght@400;500;600;700;800&family=Plus+Jakarta+Sans:wght@600;700;800&family=Rajdhani:wght@500;600;700&family=Space+Grotesk:wght@500;700&display=swap"
+        href="https://fonts.googleapis.com/css2?family=Anton&family=Cormorant+Garamond:ital,wght@0,600;0,700;1,700&family=Manrope:wght@400;500;600;700;800&family=Plus+Jakarta+Sans:wght@600;700;800&family=Rajdhani:wght@500;600;700&family=Space+Grotesk:wght@500;700&display=swap"
         rel="stylesheet">
     <link rel="stylesheet" href="styles.css">
 </head>
@@ -253,6 +253,30 @@
                 <div id="recentProblemsList" class="recent-feed__grid" aria-live="polite"></div>
             </div>
         </section>
+        <section class="urgits-banner panel" aria-label="urgits.ee">
+            <a class="panel__frame urgits-banner__frame" href="https://urgits.ee" aria-label="Ava urgits.ee">
+                <div class="urgits-banner__content">
+                    <h2 class="urgits-banner__title">
+                        <span>ÄRA URGITSE</span>
+                        <span>SUVALISE KEPIGA</span>
+                    </h2>
+                    <span class="urgits-banner__cta">urgits.ee</span>
+                </div>
+            </a>
+        </section>
+        <section id="dailyArticles" class="science-feed panel" aria-labelledby="scienceFeedTitle">
+            <div class="panel__frame science-feed__frame">
+                <div class="science-feed__header">
+                    <h2 id="scienceFeedTitle">Veel lugeda</h2>
+                </div>
+                <div class="science-feed__layout">
+                    <article id="scienceArticleFeatured" class="science-article" aria-live="polite"></article>
+                    <div class="science-feed__rail">
+                        <div id="scienceArticleList" class="science-feed__list" role="listbox" aria-label="Artiklid"></div>
+                    </div>
+                </div>
+            </div>
+        </section>
         <section class="minefield-banner panel" aria-label="Minefield Drift">
             <a class="panel__frame minefield-banner__frame" href="https://minefield.games" aria-label="Ava Minefield Drift koduleht">
                 <div class="minefield-banner__info">
@@ -272,15 +296,15 @@
                 </div>
             </a>
         </section>
-        <section id="dailyArticles" class="science-feed panel" aria-labelledby="scienceFeedTitle">
-            <div class="panel__frame science-feed__frame">
-                <div class="science-feed__header">
-                    <h2 id="scienceFeedTitle">Veel lugeda</h2>
+        <section id="dailyHoroscope" class="horoscope-feed panel" aria-label="Päeva horoskoop">
+            <div class="panel__frame horoscope-feed__frame">
+                <div class="horoscope-feed__header">
+                    <h2>Päeva horoskoop</h2>
                 </div>
-                <div class="science-feed__layout">
-                    <article id="scienceArticleFeatured" class="science-article" aria-live="polite"></article>
-                    <div class="science-feed__rail">
-                        <div id="scienceArticleList" class="science-feed__list" role="listbox" aria-label="Artiklid"></div>
+                <div class="horoscope-feed__layout">
+                    <article id="horoscopeFeatured" class="horoscope-card" aria-live="polite"></article>
+                    <div class="horoscope-feed__rail">
+                        <div id="horoscopeSignGrid" class="horoscope-feed__signs" role="listbox" aria-label="Tähemärgid"></div>
                     </div>
                 </div>
             </div>

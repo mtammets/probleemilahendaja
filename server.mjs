@@ -13,16 +13,19 @@ const port = Number(process.env.PORT || 8787);
 const openAiModel = process.env.OPENAI_MODEL?.trim() || "gpt-5-mini";
 const publicFeedModel = process.env.OPENAI_PUBLIC_FEED_MODEL?.trim() || openAiModel;
 const articleModel = process.env.OPENAI_ARTICLE_MODEL?.trim() || openAiModel;
+const horoscopeModel = process.env.OPENAI_HOROSCOPE_MODEL?.trim() || openAiModel;
 const appTimeZone = process.env.APP_TIMEZONE?.trim() || "Europe/Tallinn";
 const openAiApiKey = process.env.OPENAI_API_KEY?.trim() || "";
 const client = openAiApiKey ? new OpenAI({ apiKey: openAiApiKey }) : null;
 const recentProblemReports = [];
 const dailyArticleCachePath = path.join(__dirname, ".cache", "daily-articles.json");
+const dailyHoroscopeCachePath = path.join(__dirname, ".cache", "daily-horoscope.json");
 const newsletterSignupsCachePath = path.join(__dirname, ".cache", "newsletter-signups.json");
 const RECENT_PROBLEMS_LIMIT = 6;
 const DAILY_ARTICLE_ARCHIVE_LIMIT = 10;
 const DAILY_ARTICLE_PUBLIC_LIMIT = 4;
 const DAILY_ARTICLE_STYLE_VERSION = 3;
+const DAILY_HOROSCOPE_STYLE_VERSION = 4;
 const NEWSLETTER_EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/i;
 const PUBLIC_FEED_TEXT_LIMIT = 180;
 const PUBLIC_FEED_FALLBACK_TEXT = "Üks terava sõnastusega probleem sai lahendatud.";
@@ -31,6 +34,9 @@ const DAILY_ARTICLE_SOFT_LANGUAGE_REGEX = /\b(?:teekond|hingetõmme|kergus|maagi
 let dailyArticles = [];
 let dailyArticlesLoaded = false;
 let dailyArticleGenerationPromise = null;
+let dailyHoroscope = null;
+let dailyHoroscopeLoaded = false;
+let dailyHoroscopeGenerationPromise = null;
 let newsletterSignups = [];
 let newsletterSignupsLoaded = false;
 let newsletterSignupsWritePromise = Promise.resolve();
@@ -67,6 +73,168 @@ const DAILY_ARTICLE_THEMES = [
         lenses: ["Harjumus", "Tegutsemine", "Eneseusk"]
     }
 ];
+
+const HOROSCOPE_SIGNS = [
+    {
+        id: "aries",
+        label: "Jäär",
+        prompt: "kiire hoog, otse minek, konfliktide lühike rada",
+        fallback: {
+            title: "Lõika müra",
+            lead: "Täna oled tavalisest kärsituma meelega ja just seepärast hakkab üks vana probleem eriti kiiresti närvidele käima.",
+            tension: "Pooleliolevad asjad võtavad jõudu rohkem kui uus tempo juurde annab.",
+            shift: "Sulge üks veninud probleem enne, kui avad järgmise vaidluse või ülesande.",
+            outcome: "Kui üks sõlm kaob, liiguvad ka ülejäänud otsused kiiremini."
+        }
+    },
+    {
+        id: "taurus",
+        label: "Sõnn",
+        prompt: "püsivus, mugavus, aeglane surve, praktiline korrastus",
+        fallback: {
+            title: "Pane paika",
+            lead: "Päev kisub sind täna lahendama just seda küsimust, mida oled mõnda aega mugavusest edasi lükanud.",
+            tension: "Ebamäärane kohustus närib tausta ka siis, kui väljast paistab kõik rahulik.",
+            shift: "Tee üks rahaline, kodune või tööline lahtine ots lõpuni ära.",
+            outcome: "Pärast seda jääb päevas rohkem rahu ja vähem taustapinget."
+        }
+    },
+    {
+        id: "gemini",
+        label: "Kaksikud",
+        prompt: "liigne infovoog, suhtlus, killustunud fookus, mitu niiti korraga",
+        fallback: {
+            title: "Vali üks joon",
+            lead: "Täna muutub korraga liiga palju huvitavaks, aga just üks pooleliolev teema tahab su tähelepanu kõige valjemalt.",
+            tension: "Liiga palju paralleelseid teemasid jätab mulje, et midagi ei liigu.",
+            shift: "Vii üks vestlus või otsus lõpuni enne, kui hakkad uut teemat kerima.",
+            outcome: "Kui üks liin sulgub, muutub ülejäänu kohe selgemaks."
+        }
+    },
+    {
+        id: "cancer",
+        label: "Vähk",
+        prompt: "kodune pinge, emotsionaalne taust, lähedased suhted, kaitsevajadus",
+        fallback: {
+            title: "Ütle välja",
+            lead: "Päeva jooksul võib ilmneda, et üks vaikides kantud pinge tahab lõpuks ausat nime ja rahulikku lahendust.",
+            tension: "Vaikne pinge kodu või läheduse ümber kogub rohkem koormust kui otsene jutt.",
+            shift: "Lahenda üks väike, aga tõrkuv suhteteema kohe, mitte peas edasi.",
+            outcome: "Kui õhku jääb vähem, on ka ülejäänud päev lihtsam kanda."
+        }
+    },
+    {
+        id: "leo",
+        label: "Lõvi",
+        prompt: "uhkus, nähtavus, juhtroll, tugev tahe",
+        fallback: {
+            title: "Tee selgeks",
+            lead: "Täna tahad sa, et asjad liiguksid kindla käega, aga enne tuleb ära lahendada üks segane vastutuskoht.",
+            tension: "Kui rollid on ähmased, kulub energiat rohkem tõestamisele kui lahendamisele.",
+            shift: "Võta üks juhtimist või kokkulepet puudutav probleem sirgelt lahti ja lõpeta see ära.",
+            outcome: "Pärast seda tuleb nähtavust juurde ilma liigse pingutuseta."
+        }
+    },
+    {
+        id: "virgo",
+        label: "Neitsi",
+        prompt: "detailid, süsteem, kord, vead ja parandused",
+        fallback: {
+            title: "Paranda juur",
+            lead: "Päev näitab sulle täna üsna täpselt, kustkohast üks tüütu segadus tegelikult alguse saab.",
+            tension: "Pisivigade jada sööb aega siis, kui algpõhjus jääb alles.",
+            shift: "Tee korda see koht, mis tekitab sama probleemi uuesti ja uuesti.",
+            outcome: "Kui allikas kaob, muutub kogu töövoog kergemaks."
+        }
+    },
+    {
+        id: "libra",
+        label: "Kaalud",
+        prompt: "tasakaal, suhted, otsustamatus, peen pinge",
+        fallback: {
+            title: "Lõpeta kõikumine",
+            lead: "Täna on kõige koormavam mitte probleem ise, vaid veniv kõikumine selle ümber.",
+            tension: "Veniv kaalumine hoiab väikese probleemi suuremana kui ta tegelikult on.",
+            shift: "Vali üks suund ja lahenda see küsimus lõpuni, isegi kui täiuslik tunnetus puudub.",
+            outcome: "Kui ebakindlus väheneb, saab päev uue rütmi."
+        }
+    },
+    {
+        id: "scorpio",
+        label: "Skorpion",
+        prompt: "sügav pinge, varjatud konflikt, kontroll, läbistus",
+        fallback: {
+            title: "Mine tuuma",
+            lead: "Päeva peale saab selgeks, et üks teema ei lahene enne, kui sa lähed selle päris põhjuse juurde välja.",
+            tension: "Peidetud motiiv või välja ütlemata konflikt teeb väikese teema raskeks.",
+            shift: "Vaata otse selle sisse, mis tegelikult pidurdab, ja nimeta see ära.",
+            outcome: "Kui põhjus on nähtav, kaob ka liigne surve."
+        }
+    },
+    {
+        id: "sagittarius",
+        label: "Ambur",
+        prompt: "liikumine, perspektiiv, vabadus, liiga suured hüpped",
+        fallback: {
+            title: "Hoia siht maas",
+            lead: "Täna kipub pilk minema kaugele ette, kuigi üks üsna maisem takistus tahab enne ära lahendada.",
+            tension: "Liiga kaugele vaatamine jätab lähedase segaduse endiselt jalgu.",
+            shift: "Lahenda üks praktiline takistus kohe, mitte pärast järgmist suurt sammu.",
+            outcome: "Kui rada ees on puhas, liigub ka suurem plaan kiiremini."
+        }
+    },
+    {
+        id: "capricorn",
+        label: "Kaljukits",
+        prompt: "vastutus, tulemus, struktuur, surve all tehtud otsused",
+        fallback: {
+            title: "Tõsta raskus ära",
+            lead: "Päeva raskem osa ei tule täna uuest tööst, vaid sellest, mida oled juba liiga kaua lihtsalt kandnud.",
+            tension: "Pidevalt kontrolli all hoitud probleem sööb rohkem jõudu kui ta välja näitab.",
+            shift: "Võta ette see kohustus, mis on liiga kaua ainult kandmise peal olnud.",
+            outcome: "Kui see saab lahendatud, jääb ruumi tugevamale fookusele."
+        }
+    },
+    {
+        id: "aquarius",
+        label: "Veevalaja",
+        prompt: "ebaharilik lahendus, distantseerumine, süsteemi muutmine, vaimne ruum",
+        fallback: {
+            title: "Murra muster",
+            lead: "Täna näed eriti hästi, milline probleem kordub mitte juhuslikult, vaid vigase mustri tõttu.",
+            tension: "Sama probleem kordub, kui selle taga olev süsteem jääb puutumata.",
+            shift: "Muuda üht harjumust, tööjärjekorda või kokkulepet, mis tekitab sama ummiku uuesti.",
+            outcome: "Kui skeem muutub, ei pea sama asja enam pidevalt lappima."
+        }
+    },
+    {
+        id: "pisces",
+        label: "Kalad",
+        prompt: "tundlikkus, hajumine, kujutlus, pehme surve ja vältimine",
+        fallback: {
+            title: "Too asi maale",
+            lead: "Täna mõjub sulle kõige rohkem see, kui üks seni hägusaks jäänud küsimus saab lõpuks kindla kuju.",
+            tension: "Ebamäärane tunne läheb suureks siis, kui sellele ei anta selget piiri.",
+            shift: "Pane üks hägusalt häirinud teema konkreetseks ülesandeks ja lahenda see lõpuni.",
+            outcome: "Kui asi saab kuju, väheneb ka sisemine müra."
+        }
+    }
+];
+
+const HOROSCOPE_INDICATOR_DEFAULTS = {
+    aries: { money: 3, relationships: 2, family: 3 },
+    taurus: { money: 4, relationships: 3, family: 4 },
+    gemini: { money: 3, relationships: 4, family: 2 },
+    cancer: { money: 2, relationships: 4, family: 5 },
+    leo: { money: 4, relationships: 3, family: 2 },
+    virgo: { money: 4, relationships: 3, family: 3 },
+    libra: { money: 3, relationships: 4, family: 3 },
+    scorpio: { money: 3, relationships: 2, family: 4 },
+    sagittarius: { money: 3, relationships: 3, family: 2 },
+    capricorn: { money: 5, relationships: 2, family: 3 },
+    aquarius: { money: 3, relationships: 3, family: 2 },
+    pisces: { money: 2, relationships: 4, family: 4 }
+};
 
 const REPORT_SYSTEM_PROMPT = [
     "Sa koostad eestikeelse meelelahutusliku probleemilahenduse raporti.",
@@ -159,6 +327,49 @@ const DAILY_ARTICLE_JSON_SCHEMA = {
     }
 };
 
+const DAILY_HOROSCOPE_JSON_SCHEMA = {
+    type: "object",
+    additionalProperties: false,
+    required: ["signs"],
+    properties: {
+        signs: {
+            type: "array",
+            minItems: HOROSCOPE_SIGNS.length,
+            maxItems: HOROSCOPE_SIGNS.length,
+            items: {
+                type: "object",
+                additionalProperties: false,
+                required: ["sign", "title", "paragraphs", "indicators"],
+                properties: {
+                    sign: {
+                        type: "string",
+                        enum: HOROSCOPE_SIGNS.map(function (sign) {
+                            return sign.id;
+                        })
+                    },
+                    title: { type: "string" },
+                    paragraphs: {
+                        type: "array",
+                        minItems: 3,
+                        maxItems: 3,
+                        items: { type: "string" }
+                    },
+                    indicators: {
+                        type: "object",
+                        additionalProperties: false,
+                        required: ["money", "relationships", "family"],
+                        properties: {
+                            money: { type: "integer", minimum: 1, maximum: 5 },
+                            relationships: { type: "integer", minimum: 1, maximum: 5 },
+                            family: { type: "integer", minimum: 1, maximum: 5 }
+                        }
+                    }
+                }
+            }
+        }
+    }
+};
+
 app.use(express.json({ limit: "1mb" }));
 
 function sanitizeProblemText(text) {
@@ -235,6 +446,38 @@ function normalizeTextList(values, fallbackValues, maxItems, maxLength) {
         })
         .filter(Boolean)
         .slice(0, maxItems);
+}
+
+function normalizeScaleValue(value, fallbackValue) {
+    const numericValue = Number(value);
+
+    if (!Number.isFinite(numericValue)) {
+        return fallbackValue;
+    }
+
+    return Math.max(1, Math.min(5, Math.round(numericValue)));
+}
+
+function toSentenceContinuation(text) {
+    const cleaned = normalizeField(text, "", 220).replace(/\.$/, "");
+
+    if (!cleaned) {
+        return "";
+    }
+
+    return cleaned.charAt(0).toLocaleLowerCase("et-EE") + cleaned.slice(1);
+}
+
+function buildFallbackHoroscopeParagraphs(fallbackSign) {
+    const secondLineTail = toSentenceContinuation(fallbackSign.shift);
+
+    return [
+        fallbackSign.lead,
+        secondLineTail
+            ? `${fallbackSign.tension} Päeva jooksul tasub ${secondLineTail}.`
+            : fallbackSign.tension,
+        fallbackSign.outcome
+    ];
 }
 
 function compactLabel(value, fallback, maxLength) {
@@ -650,6 +893,199 @@ async function getDailyArticleArchive() {
         .slice(0, DAILY_ARTICLE_PUBLIC_LIMIT);
 }
 
+function buildFallbackDailyHoroscope(dateKey) {
+    return {
+        dateKey,
+        styleVersion: DAILY_HOROSCOPE_STYLE_VERSION,
+        publishedAt: new Date().toISOString(),
+        signs: HOROSCOPE_SIGNS.map(function (signMeta) {
+            const fallbackIndicators = HOROSCOPE_INDICATOR_DEFAULTS[signMeta.id] || {
+                money: 3,
+                relationships: 3,
+                family: 3
+            };
+
+            return {
+                sign: signMeta.id,
+                label: signMeta.label,
+                title: signMeta.fallback.title,
+                paragraphs: buildFallbackHoroscopeParagraphs(signMeta.fallback),
+                indicators: fallbackIndicators
+            };
+        })
+    };
+}
+
+function normalizeDailyHoroscopeSignPayload(signMeta, payload) {
+    const fallbackSign = signMeta.fallback;
+    const fallbackIndicators = HOROSCOPE_INDICATOR_DEFAULTS[signMeta.id] || {
+        money: 3,
+        relationships: 3,
+        family: 3
+    };
+    const fallbackParagraphs = buildFallbackHoroscopeParagraphs(fallbackSign);
+
+    return {
+        sign: signMeta.id,
+        label: signMeta.label,
+        title: normalizeField(payload?.title, fallbackSign.title, 48),
+        paragraphs: normalizeTextList(payload?.paragraphs, fallbackParagraphs, 3, 220),
+        indicators: {
+            money: normalizeScaleValue(payload?.indicators?.money, fallbackIndicators.money),
+            relationships: normalizeScaleValue(payload?.indicators?.relationships, fallbackIndicators.relationships),
+            family: normalizeScaleValue(payload?.indicators?.family, fallbackIndicators.family)
+        }
+    };
+}
+
+function normalizeDailyHoroscopePayload(dateKey, payload, publishedAt = new Date().toISOString()) {
+    const payloadSigns = Array.isArray(payload?.signs) ? payload.signs : [];
+
+    return {
+        dateKey,
+        styleVersion: DAILY_HOROSCOPE_STYLE_VERSION,
+        publishedAt,
+        signs: HOROSCOPE_SIGNS.map(function (signMeta) {
+            const matchingPayload = payloadSigns.find(function (entry) {
+                return entry?.sign === signMeta.id;
+            });
+
+            return normalizeDailyHoroscopeSignPayload(signMeta, matchingPayload);
+        })
+    };
+}
+
+function normalizeStoredDailyHoroscope(record) {
+    if (!record || typeof record !== "object") {
+        return null;
+    }
+
+    if ((record.styleVersion ?? 0) !== DAILY_HOROSCOPE_STYLE_VERSION) {
+        return null;
+    }
+
+    const dateKey = normalizeField(record.dateKey || record.date_key, getLocalDateKey(), 20);
+    const publishedAt = new Date(parseTimestamp(record.publishedAt || record.published_at) || Date.now()).toISOString();
+
+    return normalizeDailyHoroscopePayload(dateKey, {
+        signs: record.signs
+    }, publishedAt);
+}
+
+async function loadDailyHoroscope() {
+    if (dailyHoroscopeLoaded) {
+        return dailyHoroscope;
+    }
+
+    try {
+        const raw = await readFile(dailyHoroscopeCachePath, "utf8");
+        const payload = JSON.parse(raw);
+        dailyHoroscope = normalizeStoredDailyHoroscope(payload);
+    } catch (error) {
+        if (error?.code !== "ENOENT") {
+            console.error("Failed to load daily horoscope.", error);
+        }
+
+        dailyHoroscope = null;
+    }
+
+    dailyHoroscopeLoaded = true;
+    return dailyHoroscope;
+}
+
+async function saveDailyHoroscope() {
+    await mkdir(path.dirname(dailyHoroscopeCachePath), { recursive: true });
+    await writeFile(
+        dailyHoroscopeCachePath,
+        JSON.stringify(dailyHoroscope, null, 2),
+        "utf8"
+    );
+}
+
+async function generateDailyHoroscope(dateKey) {
+    const fallbackHoroscope = buildFallbackDailyHoroscope(dateKey);
+
+    if (!client) {
+        return fallbackHoroscope;
+    }
+
+    try {
+        const aiResponse = await client.responses.create({
+            model: horoscopeModel,
+            max_output_tokens: 2000,
+            reasoning: {
+                effort: "low"
+            },
+            instructions: [
+                "Sa kirjutad eestikeelse päevase horoskoobi 12 tähemärgile.",
+                "Iga tähemärgi tekst peab olema seotud probleemide, hõõrdumise, otsuste, lahtiste otsade või nende lahendamisega.",
+                "Toon peab olema jutustav, voolav ja horoskoobile omane, aga samal ajal maitsekas ja usutav.",
+                "See peab lugedes mõjuma nagu päris horoskoobirubriik, mitte nagu juhend, checklist või lahenduste nimekiri.",
+                "Lauseehitus võib olla horoskoobile omane, näiteks 'täna oled...' või 'päeva peale võib selguda...'.",
+                "Ära alusta kõiki tähemärke sama mustriga ja väldi korduvat mehhaanilist rütmi.",
+                "Ära kasuta sõnu või ideid nagu universum, kosmiline energia, retrograad, vibratsioon, hinge teekond, tervenemine, manifestatsioon.",
+                "Ära maini AI-d, mudelit ega sisu loomise protsessi.",
+                "Iga märgi title peab olema lühike, kuni umbes 4 sõna.",
+                "paragraphs peab sisaldama täpselt 3 lühikest lõiku, mis loevad kokku ühe voolava horoskoobina.",
+                "Esimene lõik peab seadma päeva tooni ja näitama, kuidas lahtised teemad või probleemid sind täna mõjutavad.",
+                "Teine lõik peab kirjeldama, kus kohas pinge, hõõrdumine või mõni lahendamata küsimus end näitab.",
+                "Kolmas lõik peab andma elegantse horoskoobilaadse suuna selle kohta, mis juhtub siis, kui teema käsile võtad või õigel hetkel lõpetad.",
+                "Kirjuta konkreetselt, aga ära muutu käskivaks ega tehniliseks.",
+                "indicators peab andma kolm päeva näidikut skaalal 1 kuni 5: money, relationships, family.",
+                "Näidikud peavad sobima sama päeva tooniga, mitte olema juhuslikud.",
+                "Tagasta ainult puhas JSON."
+            ].join(" "),
+            input: [
+                `Kuupäev: ${dateKey}`,
+                "Tähemärgid ja toonid:",
+                HOROSCOPE_SIGNS.map(function (signMeta) {
+                    return `- ${signMeta.label} (${signMeta.id}): ${signMeta.prompt}`;
+                }).join("\n")
+            ].join("\n"),
+            text: {
+                verbosity: "low",
+                format: {
+                    type: "json_schema",
+                    name: "daily_horoscope",
+                    strict: true,
+                    schema: DAILY_HOROSCOPE_JSON_SCHEMA
+                }
+            }
+        });
+
+        const payload = extractJsonObject(aiResponse.output_text);
+        return normalizeDailyHoroscopePayload(dateKey, payload);
+    } catch (error) {
+        console.error("Failed to generate daily horoscope.", error);
+        return fallbackHoroscope;
+    }
+}
+
+async function ensureDailyHoroscopeForToday() {
+    const todayKey = getLocalDateKey();
+    await loadDailyHoroscope();
+
+    if (dailyHoroscope?.dateKey === todayKey) {
+        return dailyHoroscope;
+    }
+
+    if (!dailyHoroscopeGenerationPromise) {
+        dailyHoroscopeGenerationPromise = (async function () {
+            dailyHoroscope = await generateDailyHoroscope(todayKey);
+            await saveDailyHoroscope();
+            return dailyHoroscope;
+        }()).finally(function () {
+            dailyHoroscopeGenerationPromise = null;
+        });
+    }
+
+    return dailyHoroscopeGenerationPromise;
+}
+
+async function getDailyHoroscopeForToday() {
+    return ensureDailyHoroscopeForToday();
+}
+
 function buildModerationSummary(moderationResult) {
     if (!moderationResult || typeof moderationResult !== "object") {
         return "Moderation result unavailable.";
@@ -841,6 +1277,23 @@ app.get("/api/daily-articles", async function (_request, response) {
         console.error("Failed to prepare daily articles.", error);
         response.status(500).json({
             error: "Päeva artikli laadimine ebaõnnestus."
+        });
+    }
+});
+
+app.get("/api/daily-horoscope", async function (_request, response) {
+    try {
+        const horoscope = await getDailyHoroscopeForToday();
+
+        response.json({
+            date: horoscope?.dateKey || getLocalDateKey(),
+            publishedAt: horoscope?.publishedAt || new Date().toISOString(),
+            signs: Array.isArray(horoscope?.signs) ? horoscope.signs : []
+        });
+    } catch (error) {
+        console.error("Failed to prepare daily horoscope.", error);
+        response.status(500).json({
+            error: "Päeva horoskoobi laadimine ebaõnnestus."
         });
     }
 });

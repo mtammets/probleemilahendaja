@@ -646,7 +646,7 @@ button::before {
     pointer-events: none;
 }
 
-button:not(.rating-panel__button):not(.button--secondary):not(.button--ghost):not(.science-feed__list-item):hover {
+button:not(.rating-panel__button):not(.button--secondary):not(.button--ghost):not(.science-feed__list-item):not(.horoscope-sign):hover {
     transform: translateY(-2px);
     background: linear-gradient(135deg, #132033 0%, #20324b 64%, #355172 100%);
     box-shadow:
@@ -1037,6 +1037,102 @@ button:disabled {
         radial-gradient(circle at 48% 14%, rgba(255, 255, 255, 0.2), transparent 24%),
         linear-gradient(180deg, rgba(18, 14, 10, 0) 64%, rgba(18, 14, 10, 0.06) 100%);
     pointer-events: none;
+}
+
+.urgits-banner {
+    width: 100%;
+}
+
+.urgits-banner__frame {
+    position: relative;
+    display: block;
+    min-height: clamp(15.5rem, 25vw, 18.5rem);
+    padding: clamp(1.15rem, 2.5vw, 1.6rem);
+    color: #f8f1df;
+    text-decoration: none;
+    background:
+        linear-gradient(90deg, rgba(10, 7, 5, 0.72) 0%, rgba(10, 7, 5, 0.38) 28%, rgba(10, 7, 5, 0.12) 52%, rgba(10, 7, 5, 0.34) 100%),
+        radial-gradient(circle at 58% 78%, rgba(255, 145, 42, 0.46), transparent 15%),
+        radial-gradient(circle at 61% 80%, rgba(255, 216, 146, 0.18), transparent 19%),
+        linear-gradient(180deg, rgba(14, 9, 7, 0.06) 0%, rgba(14, 9, 7, 0.42) 100%),
+        url("./assets/Urgits-fire-v2.jpg") center 44% / cover no-repeat;
+    border-color: rgba(223, 122, 52, 0.22);
+    box-shadow:
+        0 30px 78px rgba(18, 12, 8, 0.32),
+        inset 0 1px 0 rgba(255, 255, 255, 0.04);
+    transition:
+        transform 180ms ease,
+        box-shadow 180ms ease,
+        border-color 180ms ease;
+}
+
+.urgits-banner__frame::before {
+    height: 5px;
+    background: linear-gradient(90deg, rgba(255, 168, 72, 0.96) 0%, rgba(233, 118, 58, 0.98) 52%, rgba(115, 47, 13, 0.98) 100%);
+}
+
+.urgits-banner__frame::after {
+    inset: 14px;
+    border-color: rgba(255, 231, 194, 0.05);
+}
+
+.urgits-banner__frame:hover {
+    transform: translateY(-3px);
+    border-color: rgba(233, 118, 58, 0.24);
+    box-shadow:
+        0 34px 82px rgba(18, 12, 8, 0.34),
+        inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+.urgits-banner__content {
+    position: relative;
+    min-width: 0;
+}
+
+.urgits-banner__content {
+    display: grid;
+    align-content: space-between;
+    gap: 1.15rem;
+    width: min(100%, 34rem);
+    min-height: 100%;
+    padding: clamp(1.35rem, 3vw, 1.9rem);
+}
+
+.urgits-banner__title {
+    margin: 0;
+    display: grid;
+    gap: 0.05em;
+    font-family: "Anton", sans-serif;
+    max-width: 11.8ch;
+    font-size: clamp(2.7rem, 4.9vw, 4.45rem);
+    font-weight: 400;
+    line-height: 0.86;
+    letter-spacing: 0.012em;
+    text-transform: uppercase;
+    color: #fff3dd;
+    text-shadow:
+        0 16px 28px rgba(0, 0, 0, 0.3),
+        0 2px 0 rgba(0, 0, 0, 0.12);
+}
+
+.urgits-banner__cta {
+    display: inline-flex;
+    width: fit-content;
+    align-items: center;
+    justify-content: center;
+    min-height: 3.05rem;
+    padding: 0.7rem 1.08rem;
+    border-radius: 999px;
+    background: linear-gradient(180deg, rgba(251, 167, 76, 0.96), rgba(224, 109, 44, 0.96));
+    box-shadow:
+        0 18px 34px rgba(92, 36, 8, 0.32),
+        inset 0 1px 0 rgba(255, 255, 255, 0.24);
+    font-family: "Space Grotesk", sans-serif;
+    font-size: 0.92rem;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: #23150b;
 }
 
 .newsletter__copy {
@@ -1935,6 +2031,321 @@ button:disabled {
     font-size: 0.95rem;
     line-height: 1.62;
     color: #607182;
+}
+
+.horoscope-feed__frame {
+    display: grid;
+    gap: 1.15rem;
+    background:
+        radial-gradient(circle at 14% 12%, rgba(121, 132, 255, 0.18), transparent 22%),
+        radial-gradient(circle at 100% 0%, rgba(102, 197, 209, 0.18), transparent 26%),
+        radial-gradient(circle at 82% 100%, rgba(246, 176, 106, 0.16), transparent 24%),
+        linear-gradient(180deg, rgba(10, 17, 30, 0.98), rgba(15, 24, 41, 0.97)),
+        rgba(11, 19, 33, 0.98);
+    border-color: rgba(143, 170, 220, 0.16);
+    box-shadow:
+        0 34px 76px rgba(4, 9, 17, 0.32),
+        inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+.horoscope-feed__frame::before {
+    background: linear-gradient(90deg, rgba(255, 143, 115, 0.88) 0%, rgba(160, 149, 255, 0.9) 46%, rgba(99, 199, 214, 0.92) 100%);
+}
+
+.horoscope-feed__header {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 1rem;
+    align-items: end;
+    padding-bottom: 0.25rem;
+    border-bottom: 1px solid rgba(220, 232, 255, 0.08);
+}
+
+.horoscope-feed__header h2 {
+    margin: 0;
+    font-size: clamp(1.55rem, 3vw, 2.15rem);
+    line-height: 1;
+    letter-spacing: -0.04em;
+    color: #f3f7ff;
+    text-wrap: balance;
+}
+
+.horoscope-feed__layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1.28fr) minmax(19rem, 0.92fr);
+    gap: 1rem;
+    align-items: start;
+}
+
+.horoscope-card {
+    --horoscope-accent: #8aa9ff;
+    --horoscope-glow: rgba(138, 169, 255, 0.22);
+    position: relative;
+    overflow: hidden;
+    display: grid;
+    gap: 1rem;
+    min-width: 0;
+    min-height: 22rem;
+    padding: clamp(1.2rem, 3vw, 1.5rem);
+    border-radius: 30px;
+    border: 1px solid rgba(214, 227, 255, 0.1);
+    background:
+        radial-gradient(circle at 100% 0%, var(--horoscope-glow), transparent 30%),
+        radial-gradient(circle at 0% 100%, rgba(255, 255, 255, 0.04), transparent 32%),
+        linear-gradient(180deg, rgba(16, 27, 45, 0.96), rgba(12, 20, 35, 0.98)),
+        rgba(11, 18, 31, 0.98);
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.06),
+        0 24px 52px rgba(2, 7, 14, 0.28);
+}
+
+.horoscope-card::before,
+.horoscope-card::after {
+    content: "";
+    position: absolute;
+    pointer-events: none;
+}
+
+.horoscope-card::before {
+    inset: 1.05rem auto auto 1.1rem;
+    width: 7rem;
+    height: 0.24rem;
+    border-radius: 999px;
+    background: linear-gradient(90deg, color-mix(in srgb, var(--horoscope-accent) 90%, white), rgba(255, 255, 255, 0.08));
+}
+
+.horoscope-card::after {
+    right: -1.2rem;
+    top: 1.8rem;
+    width: 9rem;
+    height: 9rem;
+    border-radius: 50%;
+    background: radial-gradient(circle, var(--horoscope-glow), rgba(255, 255, 255, 0));
+    filter: blur(8px);
+}
+
+.horoscope-card--empty {
+    align-content: center;
+}
+
+.horoscope-card__top {
+    display: flex;
+    align-items: center;
+    gap: 0.9rem;
+    padding-top: 0.35rem;
+    min-width: 0;
+}
+
+.horoscope-card__emblem {
+    display: grid;
+    place-items: center;
+    width: 4.2rem;
+    aspect-ratio: 1;
+    border-radius: 50%;
+    font-size: 2rem;
+    line-height: 1;
+    color: #f5f7ff;
+    background:
+        radial-gradient(circle at 30% 28%, rgba(255, 255, 255, 0.28), rgba(255, 255, 255, 0) 38%),
+        linear-gradient(180deg, color-mix(in srgb, var(--horoscope-accent) 64%, white), color-mix(in srgb, var(--horoscope-accent) 48%, #0d1728));
+    box-shadow:
+        0 18px 38px color-mix(in srgb, var(--horoscope-glow) 86%, transparent),
+        inset 0 1px 0 rgba(255, 255, 255, 0.3);
+}
+
+.horoscope-card__meta {
+    display: grid;
+    gap: 0.35rem;
+    min-width: 0;
+}
+
+.horoscope-card__sign {
+    font-size: 0.88rem;
+    font-weight: 800;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: color-mix(in srgb, var(--horoscope-accent) 72%, white);
+}
+
+.horoscope-card__date {
+    font-size: 0.85rem;
+    font-weight: 700;
+    color: rgba(219, 229, 246, 0.72);
+}
+
+.horoscope-card__title {
+    margin: 0;
+    font-family: "Cormorant Garamond", serif;
+    font-size: clamp(2.15rem, 4.3vw, 3.3rem);
+    line-height: 0.96;
+    letter-spacing: -0.04em;
+    color: #f7f9ff;
+    text-wrap: balance;
+}
+
+.horoscope-card__lead {
+    margin: 0;
+    max-width: 56ch;
+    font-size: 1.08rem;
+    line-height: 1.78;
+    color: rgba(238, 243, 252, 0.88);
+}
+
+.horoscope-card__body {
+    display: grid;
+    gap: 0.95rem;
+    max-width: 58ch;
+}
+
+.horoscope-card__paragraph {
+    margin: 0;
+    font-size: 1rem;
+    line-height: 1.78;
+    color: rgba(223, 231, 245, 0.8);
+}
+
+.horoscope-card__indicators {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.85rem;
+    margin-top: 0.2rem;
+}
+
+.horoscope-indicator {
+    display: grid;
+    gap: 0.55rem;
+    min-width: 0;
+    padding: 0.9rem 0.95rem;
+    border-radius: 20px;
+    border: 1px solid rgba(214, 227, 255, 0.08);
+    background:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.03)),
+        rgba(255, 255, 255, 0.02);
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.08),
+        0 14px 30px rgba(3, 8, 14, 0.16);
+}
+
+.horoscope-indicator__label {
+    font-size: 0.76rem;
+    font-weight: 800;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: color-mix(in srgb, var(--horoscope-accent) 72%, white);
+}
+
+.horoscope-indicator__meter {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 0.26rem;
+}
+
+.horoscope-indicator__segment {
+    height: 0.52rem;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.1);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+.horoscope-indicator__segment.is-active {
+    background: linear-gradient(90deg, color-mix(in srgb, var(--horoscope-accent) 92%, white), color-mix(in srgb, var(--horoscope-accent) 68%, #0d1728));
+    box-shadow:
+        0 0 18px color-mix(in srgb, var(--horoscope-glow) 64%, transparent),
+        inset 0 1px 0 rgba(255, 255, 255, 0.28);
+}
+
+.horoscope-feed__rail {
+    display: grid;
+    gap: 0.9rem;
+    align-content: start;
+    min-width: 0;
+}
+
+.horoscope-feed__signs {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.8rem;
+}
+
+.horoscope-sign {
+    --sign-accent: #8aa9ff;
+    --sign-glow: rgba(138, 169, 255, 0.22);
+    position: relative;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    gap: 0.8rem;
+    width: 100%;
+    min-width: 0;
+    min-height: 4.6rem;
+    padding: 0.88rem 0.9rem;
+    border-radius: 22px;
+    border: 1px solid rgba(214, 227, 255, 0.08);
+    text-align: left;
+    background:
+        radial-gradient(circle at 100% 0%, var(--sign-glow), transparent 36%),
+        linear-gradient(180deg, rgba(17, 27, 45, 0.96), rgba(11, 18, 31, 0.98)),
+        rgba(11, 18, 31, 0.98);
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.05),
+        0 16px 30px rgba(2, 7, 14, 0.18);
+    transition:
+        transform 180ms ease,
+        border-color 180ms ease,
+        box-shadow 180ms ease,
+        background 180ms ease;
+    cursor: pointer;
+}
+
+.horoscope-sign:hover,
+.horoscope-sign.is-selected {
+    transform: translateY(-2px);
+    border-color: color-mix(in srgb, var(--sign-accent) 42%, white);
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.08),
+        0 22px 40px rgba(2, 7, 14, 0.24);
+}
+
+.horoscope-sign.is-selected {
+    background:
+        radial-gradient(circle at 100% 0%, color-mix(in srgb, var(--sign-glow) 126%, transparent), transparent 36%),
+        linear-gradient(180deg, rgba(20, 33, 54, 0.98), rgba(13, 23, 40, 1)),
+        rgba(11, 18, 31, 0.98);
+}
+
+.horoscope-sign__glyph {
+    display: grid;
+    place-items: center;
+    width: 3rem;
+    aspect-ratio: 1;
+    border-radius: 50%;
+    font-size: 1.45rem;
+    line-height: 1;
+    color: #f6f8ff;
+    background:
+        radial-gradient(circle at 30% 28%, rgba(255, 255, 255, 0.24), rgba(255, 255, 255, 0) 36%),
+        linear-gradient(180deg, color-mix(in srgb, var(--sign-accent) 58%, white), color-mix(in srgb, var(--sign-accent) 48%, #0d1728));
+    box-shadow:
+        0 14px 28px color-mix(in srgb, var(--sign-glow) 86%, transparent),
+        inset 0 1px 0 rgba(255, 255, 255, 0.28);
+    flex: none;
+}
+
+.horoscope-sign__name {
+    min-width: 0;
+    font-size: 0.92rem;
+    font-weight: 800;
+    letter-spacing: 0.02em;
+    color: #f3f7ff;
+    text-align: left;
+}
+
+.horoscope-sign--empty {
+    grid-column: 1 / -1;
+    justify-content: center;
+    min-height: 4.5rem;
+    color: rgba(219, 229, 246, 0.74);
+    cursor: default;
 }
 
 .report {
@@ -2902,11 +3313,14 @@ button:disabled {
     .report__footer,
     .report__actions,
     .minefield-banner__frame,
+    .urgits-banner__frame,
     .newsletter__frame,
     .recent-feed__header,
     .recent-feed__grid,
     .science-feed__header,
-    .science-feed__layout {
+    .science-feed__layout,
+    .horoscope-feed__header,
+    .horoscope-feed__layout {
         grid-template-columns: 1fr;
     }
 
@@ -3011,6 +3425,28 @@ button:disabled {
         border-radius: 22px;
     }
 
+    .urgits-banner__frame {
+        min-height: 13.4rem;
+        padding: 0.9rem;
+    }
+
+    .urgits-banner__content {
+        gap: 0.8rem;
+        width: min(100%, 18rem);
+        padding: 0.95rem 0.9rem;
+    }
+
+    .urgits-banner__title {
+        max-width: 10.5ch;
+        font-size: clamp(2.15rem, 9vw, 3rem);
+    }
+
+    .urgits-banner__cta {
+        min-height: 2.6rem;
+        padding: 0.58rem 0.92rem;
+        font-size: 0.76rem;
+    }
+
     .newsletter__aside {
         padding-left: 0;
     }
@@ -3046,6 +3482,39 @@ button:disabled {
 
     .science-feed__list-title {
         font-size: 1.55rem;
+    }
+
+    .horoscope-card {
+        min-height: auto;
+    }
+
+    .horoscope-card__title {
+        font-size: clamp(1.95rem, 9vw, 2.6rem);
+    }
+
+    .horoscope-card__lead,
+    .horoscope-card__paragraph {
+        font-size: 0.96rem;
+        line-height: 1.7;
+    }
+
+    .horoscope-feed__signs {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    .horoscope-sign {
+        padding: 0.82rem 0.72rem;
+        justify-content: center;
+        text-align: center;
+    }
+
+    .horoscope-sign__name {
+        font-size: 0.84rem;
+        text-align: center;
+    }
+
+    .horoscope-card__indicators {
+        grid-template-columns: 1fr;
     }
 
     .rating-panel__scale {

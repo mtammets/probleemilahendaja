@@ -31,6 +31,8 @@ const newsletterFeedback = document.getElementById("newsletterFeedback");
 const recentProblemsList = document.getElementById("recentProblemsList");
 const scienceArticleFeatured = document.getElementById("scienceArticleFeatured");
 const scienceArticleList = document.getElementById("scienceArticleList");
+const horoscopeFeatured = document.getElementById("horoscopeFeatured");
+const horoscopeSignGrid = document.getElementById("horoscopeSignGrid");
 const reportTitle = document.getElementById("reportTitle");
 const reportLead = document.getElementById("reportLead");
 const reportStatusValue = document.getElementById("reportStatusValue");
@@ -61,6 +63,10 @@ let recentProblemsSyncTimer;
 let dailyArticles = [];
 let dailyArticlesSyncTimer;
 let selectedDailyArticleId = "";
+let dailyHoroscopeSigns = [];
+let dailyHoroscopeSyncTimer;
+let selectedHoroscopeSignId = "";
+let dailyHoroscopePublishedAt = "";
 let isSubmittingNewsletter = false;
 let selectedRating = 0;
 let remoteSolvedCount = null;
@@ -76,6 +82,7 @@ const RECENT_PROBLEM_EQUIVALENT_WINDOW_MS = 15000;
 const RECENT_PROBLEMS_REFRESH_INTERVAL = 10000;
 const DAILY_ARTICLES_LIMIT = 4;
 const DAILY_ARTICLES_REFRESH_INTERVAL = 60 * 60 * 1000;
+const DAILY_HOROSCOPE_REFRESH_INTERVAL = 60 * 60 * 1000;
 const NEWSLETTER_EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/i;
 const PUBLIC_FEED_PROFANITY_REGEX = /\b(?:pers(?:e|se|es|et|ed|ega|ele|el|esse|est|i)?|t(?:ü|y)r(?:a|ad|aga|ale|al|ast|i)?|munn(?:i|e|id|idega|ile|il|ist)?|vitt(?:u|i|e|ud|idega|ile|is|a)?|niku(?:da|n|d|b|s|tud|ga|le)?|pask(?:a|e|i|aks|aga|ale|as|ast|u)?|sit(?:t|a|ad|ane|ase|aks|aga|ale|as|ast)?|hui(?:a|i|d|ga|le|s)?|fuck(?:ing|ed|er|s)?|shit(?:ty|ted|ting|s)?)\b/giu;
 const numberFormatter = new Intl.NumberFormat("et-EE");
@@ -87,6 +94,21 @@ const articleDateFormatter = new Intl.DateTimeFormat("et-EE", {
     month: "long",
     year: "numeric"
 });
+
+const HOROSCOPE_SIGNS = [
+    { id: "aries", label: "Jäär", symbol: "\u2648", accent: "#ff8c73", accentSoft: "rgba(255, 140, 115, 0.22)" },
+    { id: "taurus", label: "Sõnn", symbol: "\u2649", accent: "#d0ab65", accentSoft: "rgba(208, 171, 101, 0.22)" },
+    { id: "gemini", label: "Kaksikud", symbol: "\u264A", accent: "#7ab1ff", accentSoft: "rgba(122, 177, 255, 0.22)" },
+    { id: "cancer", label: "Vähk", symbol: "\u264B", accent: "#8fd0cb", accentSoft: "rgba(143, 208, 203, 0.24)" },
+    { id: "leo", label: "Lõvi", symbol: "\u264C", accent: "#f19a4e", accentSoft: "rgba(241, 154, 78, 0.24)" },
+    { id: "virgo", label: "Neitsi", symbol: "\u264D", accent: "#8ec7a5", accentSoft: "rgba(142, 199, 165, 0.24)" },
+    { id: "libra", label: "Kaalud", symbol: "\u264E", accent: "#f0bf88", accentSoft: "rgba(240, 191, 136, 0.24)" },
+    { id: "scorpio", label: "Skorpion", symbol: "\u264F", accent: "#8378ff", accentSoft: "rgba(131, 120, 255, 0.22)" },
+    { id: "sagittarius", label: "Ambur", symbol: "\u2650", accent: "#4ec9d5", accentSoft: "rgba(78, 201, 213, 0.22)" },
+    { id: "capricorn", label: "Kaljukits", symbol: "\u2651", accent: "#b8c0d1", accentSoft: "rgba(184, 192, 209, 0.22)" },
+    { id: "aquarius", label: "Veevalaja", symbol: "\u2652", accent: "#72b5ff", accentSoft: "rgba(114, 181, 255, 0.22)" },
+    { id: "pisces", label: "Kalad", symbol: "\u2653", accent: "#b898ff", accentSoft: "rgba(184, 152, 255, 0.22)" }
+];
 const sections = [container, loadingDiv, solutionDiv, reportDiv];
 
 const CATEGORY_RULES = [
@@ -591,6 +613,235 @@ function normalizeDailyArticle(record, index) {
         readingTime: truncate(sanitizeProblemText(record.readingTime || record.reading_time || "3 min lugemine"), 24),
         publishedAt
     };
+}
+
+function getHoroscopeMeta(signId) {
+    return HOROSCOPE_SIGNS.find(function (sign) {
+        return sign.id === signId;
+    }) || HOROSCOPE_SIGNS[0];
+}
+
+function normalizeHoroscopeEntry(record, publishedAt) {
+    if (!record || typeof record !== "object") {
+        return null;
+    }
+
+    const signId = sanitizeProblemText(record.sign || "").toLocaleLowerCase("en-US");
+    const signMeta = getHoroscopeMeta(signId);
+    const title = truncate(sanitizeProblemText(record.title || ""), 48);
+    const paragraphs = normalizeTextArray(
+        record.paragraphs,
+        [
+            "Täna jäävad lahtised teemad veidi kiiremini külge kui tavaliselt.",
+            "Päeva sisse jääb üks probleem, mis tahab rohkem tähelepanu kui esmapilgul paistab.",
+            "Kui selle õigel hetkel ära lõpetad, liigub ülejäänud päev palju puhtamalt edasi."
+        ],
+        3,
+        220
+    );
+
+    if (!signId || signMeta.id !== signId || !title || paragraphs.length === 0) {
+        return null;
+    }
+
+    const rawIndicators = record.indicators && typeof record.indicators === "object" ? record.indicators : {};
+    const indicators = {
+        money: Math.max(1, Math.min(5, Math.round(Number(rawIndicators.money) || 3))),
+        relationships: Math.max(1, Math.min(5, Math.round(Number(rawIndicators.relationships) || 3))),
+        family: Math.max(1, Math.min(5, Math.round(Number(rawIndicators.family) || 3)))
+    };
+
+    return {
+        id: signMeta.id,
+        label: signMeta.label,
+        symbol: signMeta.symbol,
+        accent: signMeta.accent,
+        accentSoft: signMeta.accentSoft,
+        title,
+        paragraphs,
+        indicators,
+        publishedAt
+    };
+}
+
+function getSelectedHoroscopeSign() {
+    if (dailyHoroscopeSigns.length === 0) {
+        return null;
+    }
+
+    return dailyHoroscopeSigns.find(function (sign) {
+        return sign.id === selectedHoroscopeSignId;
+    }) || dailyHoroscopeSigns[0];
+}
+
+function createHoroscopePlaceholder() {
+    const fragment = document.createDocumentFragment();
+    const title = document.createElement("h3");
+
+    title.className = "horoscope-card__title";
+    title.textContent = "Laadimine";
+    fragment.append(title);
+
+    return fragment;
+}
+
+function renderFeaturedHoroscope(sign) {
+    if (!horoscopeFeatured) {
+        return;
+    }
+
+    if (!sign) {
+        horoscopeFeatured.classList.add("horoscope-card--empty");
+        horoscopeFeatured.replaceChildren(createHoroscopePlaceholder());
+        return;
+    }
+
+    horoscopeFeatured.classList.remove("horoscope-card--empty");
+    horoscopeFeatured.style.setProperty("--horoscope-accent", sign.accent);
+    horoscopeFeatured.style.setProperty("--horoscope-glow", sign.accentSoft);
+
+    const fragment = document.createDocumentFragment();
+    const top = document.createElement("div");
+    const emblem = document.createElement("div");
+    const meta = document.createElement("div");
+    const signLabel = document.createElement("span");
+    const date = document.createElement("span");
+    const title = document.createElement("h3");
+    const body = document.createElement("div");
+    const indicators = document.createElement("div");
+
+    top.className = "horoscope-card__top";
+    emblem.className = "horoscope-card__emblem";
+    meta.className = "horoscope-card__meta";
+    signLabel.className = "horoscope-card__sign";
+    date.className = "horoscope-card__date";
+    title.className = "horoscope-card__title";
+    body.className = "horoscope-card__body";
+    indicators.className = "horoscope-card__indicators";
+
+    emblem.textContent = sign.symbol;
+    signLabel.textContent = sign.label;
+    date.textContent = articleDateFormatter.format(new Date(sign.publishedAt || dailyHoroscopePublishedAt || Date.now()));
+    title.textContent = sign.title;
+
+    meta.append(signLabel, date);
+    top.append(emblem, meta);
+    fragment.append(top, title);
+
+    sign.paragraphs.forEach(function (paragraphText, index) {
+        const paragraph = document.createElement("p");
+
+        paragraph.className = index === 0 ? "horoscope-card__lead" : "horoscope-card__paragraph";
+        paragraph.textContent = paragraphText;
+        body.append(paragraph);
+    });
+
+    [
+        { key: "money", label: "Raha" },
+        { key: "relationships", label: "Suhted" },
+        { key: "family", label: "Perekond" }
+    ].forEach(function (item) {
+        const block = document.createElement("div");
+        const label = document.createElement("span");
+        const meter = document.createElement("span");
+        const value = sign.indicators?.[item.key] ?? 3;
+
+        block.className = "horoscope-indicator";
+        label.className = "horoscope-indicator__label";
+        meter.className = "horoscope-indicator__meter";
+
+        label.textContent = item.label;
+
+        for (let index = 0; index < 5; index += 1) {
+            const segment = document.createElement("span");
+            segment.className = "horoscope-indicator__segment";
+            segment.classList.toggle("is-active", index < value);
+            meter.append(segment);
+        }
+
+        block.append(label, meter);
+        indicators.append(block);
+    });
+
+    fragment.append(body, indicators);
+    horoscopeFeatured.replaceChildren(fragment);
+}
+
+function createHoroscopeSignButton(sign) {
+    const button = document.createElement("button");
+    const glyph = document.createElement("span");
+    const name = document.createElement("strong");
+    const isSelected = sign.id === getSelectedHoroscopeSign()?.id;
+
+    button.type = "button";
+    button.className = "horoscope-sign";
+    button.setAttribute("role", "option");
+    button.setAttribute("aria-selected", String(isSelected));
+    button.classList.toggle("is-selected", isSelected);
+    button.style.setProperty("--sign-accent", sign.accent);
+    button.style.setProperty("--sign-glow", sign.accentSoft);
+
+    glyph.className = "horoscope-sign__glyph";
+    name.className = "horoscope-sign__name";
+
+    glyph.textContent = sign.symbol;
+    name.textContent = sign.label;
+    button.append(glyph, name);
+
+    button.addEventListener("click", function () {
+        selectedHoroscopeSignId = sign.id;
+        renderDailyHoroscope();
+    });
+
+    return button;
+}
+
+function renderDailyHoroscope() {
+    if (!horoscopeFeatured || !horoscopeSignGrid) {
+        return;
+    }
+
+    const selectedSign = getSelectedHoroscopeSign();
+    const fragment = document.createDocumentFragment();
+
+    renderFeaturedHoroscope(selectedSign);
+
+    if (dailyHoroscopeSigns.length === 0) {
+        const emptyItem = document.createElement("div");
+        emptyItem.className = "horoscope-sign horoscope-sign--empty";
+        emptyItem.textContent = "Laadimine";
+        horoscopeSignGrid.replaceChildren(emptyItem);
+        return;
+    }
+
+    dailyHoroscopeSigns.forEach(function (sign) {
+        fragment.append(createHoroscopeSignButton(sign));
+    });
+
+    horoscopeSignGrid.replaceChildren(fragment);
+}
+
+function setDailyHoroscope(payload) {
+    const publishedAt = new Date(parseDateToTimestamp(payload?.publishedAt || payload?.published_at)).toISOString();
+
+    dailyHoroscopePublishedAt = publishedAt;
+    dailyHoroscopeSigns = HOROSCOPE_SIGNS.map(function (meta) {
+        const entry = Array.isArray(payload?.signs)
+            ? payload.signs.find(function (item) {
+                return item?.sign === meta.id;
+            })
+            : null;
+
+        return normalizeHoroscopeEntry(entry, publishedAt);
+    }).filter(Boolean);
+
+    if (!dailyHoroscopeSigns.some(function (sign) {
+        return sign.id === selectedHoroscopeSignId;
+    })) {
+        selectedHoroscopeSignId = dailyHoroscopeSigns[0]?.id || "";
+    }
+
+    renderDailyHoroscope();
 }
 
 function normalizeRecentProblem(record) {
@@ -1222,6 +1473,25 @@ async function fetchDailyArticlesFromServer() {
     }
 }
 
+async function fetchDailyHoroscopeFromServer() {
+    try {
+        const response = await fetch("/api/daily-horoscope", {
+            headers: {
+                "Accept": "application/json"
+            }
+        });
+
+        if (!response.ok) {
+            throw new Error("Daily horoscope request failed.");
+        }
+
+        return await response.json();
+    } catch (error) {
+        console.error("Failed to fetch daily horoscope from local server.", error);
+        return null;
+    }
+}
+
 async function submitNewsletterSignup(email) {
     const response = await fetch("/api/newsletter-signups", {
         method: "POST",
@@ -1264,6 +1534,16 @@ async function refreshDailyArticles() {
         setDailyArticles(articles);
     } else if (dailyArticles.length === 0) {
         renderDailyArticles();
+    }
+}
+
+async function refreshDailyHoroscope() {
+    const payload = await fetchDailyHoroscopeFromServer();
+
+    if (payload?.signs?.length > 0) {
+        setDailyHoroscope(payload);
+    } else if (dailyHoroscopeSigns.length === 0) {
+        renderDailyHoroscope();
     }
 }
 
@@ -1333,6 +1613,19 @@ function initializeDailyArticles() {
     dailyArticlesSyncTimer = window.setInterval(function () {
         void refreshDailyArticles();
     }, DAILY_ARTICLES_REFRESH_INTERVAL);
+}
+
+function initializeDailyHoroscope() {
+    renderDailyHoroscope();
+
+    if (dailyHoroscopeSyncTimer) {
+        window.clearInterval(dailyHoroscopeSyncTimer);
+    }
+
+    void refreshDailyHoroscope();
+    dailyHoroscopeSyncTimer = window.setInterval(function () {
+        void refreshDailyHoroscope();
+    }, DAILY_HOROSCOPE_REFRESH_INTERVAL);
 }
 
 function initializeNewsletterForm() {
@@ -1456,5 +1749,6 @@ setLoadingProgress(0);
 resetRating();
 initializeRecentProblems();
 initializeDailyArticles();
+initializeDailyHoroscope();
 initializeNewsletterForm();
 startSolvedCountSync();
