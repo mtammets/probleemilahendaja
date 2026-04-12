@@ -67,9 +67,143 @@ create table if not exists public.report_ratings (
     unique (report_id, session_id)
 );
 
+create or replace function public.set_updated_at()
+returns trigger
+language plpgsql
+as $$
+begin
+    new.updated_at = timezone('utc', now());
+    return new;
+end;
+$$;
+
+create table if not exists public.editorial_items (
+    id uuid primary key default gen_random_uuid(),
+    slug text not null unique,
+    content_type text not null check (
+        content_type in ('daily_article', 'daily_persona', 'daily_horoscope', 'daily_weather')
+    ),
+    date_key date not null,
+    location_key text,
+    generation_signature text,
+    status text not null default 'published' check (
+        status in ('draft', 'review', 'scheduled', 'published', 'archived')
+    ),
+    title text,
+    summary text,
+    payload jsonb not null default '{}'::jsonb,
+    cover_media_path text,
+    cover_media_url text,
+    source_model text,
+    prompt_version text,
+    style_version integer not null default 1,
+    published_at timestamptz not null default timezone('utc', now()),
+    created_at timestamptz not null default timezone('utc', now()),
+    updated_at timestamptz not null default timezone('utc', now())
+);
+
+create index if not exists editorial_items_content_type_date_idx
+on public.editorial_items (content_type, date_key desc, published_at desc);
+
+create index if not exists editorial_items_status_idx
+on public.editorial_items (status, content_type, published_at desc);
+
+create table if not exists public.media_assets (
+    id uuid primary key default gen_random_uuid(),
+    editorial_item_id uuid references public.editorial_items(id) on delete cascade,
+    storage_bucket text not null,
+    storage_path text not null unique,
+    public_url text not null,
+    mime_type text not null,
+    alt_text text,
+    origin text not null default 'openai' check (
+        origin in ('openai', 'upload', 'fallback')
+    ),
+    metadata jsonb not null default '{}'::jsonb,
+    created_at timestamptz not null default timezone('utc', now()),
+    updated_at timestamptz not null default timezone('utc', now())
+);
+
+create table if not exists public.ai_generation_runs (
+    id uuid primary key default gen_random_uuid(),
+    content_type text not null,
+    item_slug text,
+    status text not null check (
+        status in ('started', 'completed', 'failed')
+    ),
+    model text,
+    prompt_version text,
+    input_payload jsonb not null default '{}'::jsonb,
+    output_payload jsonb not null default '{}'::jsonb,
+    error_message text,
+    created_at timestamptz not null default timezone('utc', now()),
+    finished_at timestamptz
+);
+
+create index if not exists ai_generation_runs_content_type_created_idx
+on public.ai_generation_runs (content_type, created_at desc);
+
+create table if not exists public.newsletter_signups (
+    id uuid primary key default gen_random_uuid(),
+    email text not null,
+    email_normalized text not null unique,
+    source text not null default 'homepage-form',
+    created_at timestamptz not null default timezone('utc', now()),
+    updated_at timestamptz not null default timezone('utc', now())
+);
+
+drop trigger if exists set_reports_updated_at on public.report_ratings;
+create trigger set_reports_updated_at
+before update on public.report_ratings
+for each row
+execute function public.set_updated_at();
+
+drop trigger if exists set_editorial_items_updated_at on public.editorial_items;
+create trigger set_editorial_items_updated_at
+before update on public.editorial_items
+for each row
+execute function public.set_updated_at();
+
+drop trigger if exists set_media_assets_updated_at on public.media_assets;
+create trigger set_media_assets_updated_at
+before update on public.media_assets
+for each row
+execute function public.set_updated_at();
+
+drop trigger if exists set_newsletter_signups_updated_at on public.newsletter_signups;
+create trigger set_newsletter_signups_updated_at
+before update on public.newsletter_signups
+for each row
+execute function public.set_updated_at();
+
 alter table public.app_metrics enable row level security;
 alter table public.reports enable row level security;
 alter table public.report_ratings enable row level security;
+alter table public.editorial_items enable row level security;
+alter table public.media_assets enable row level security;
+alter table public.ai_generation_runs enable row level security;
+alter table public.newsletter_signups enable row level security;
+
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values (
+    'editorial-media',
+    'editorial-media',
+    true,
+    10485760,
+    array['image/jpeg', 'image/png', 'image/webp', 'image/avif']
+)
+on conflict (id) do update
+set
+    public = excluded.public,
+    file_size_limit = excluded.file_size_limit,
+    allowed_mime_types = excluded.allowed_mime_types;
+
+drop policy if exists "Public can read editorial media" on storage.objects;
+create policy "Public can read editorial media"
+on storage.objects
+for select
+to public
+using (bucket_id = 'editorial-media');
 
 do $$
 begin

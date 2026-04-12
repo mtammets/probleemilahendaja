@@ -1,5 +1,6 @@
 import "dotenv/config";
 import express from "express";
+import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 import OpenAI from "openai";
 import { access, mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -18,18 +19,33 @@ const horoscopeModel = process.env.OPENAI_HOROSCOPE_MODEL?.trim() || openAiModel
 const weatherModel = process.env.OPENAI_WEATHER_MODEL?.trim() || openAiModel;
 const imageModel = process.env.OPENAI_IMAGE_MODEL?.trim() || "gpt-image-1";
 const appTimeZone = process.env.APP_TIMEZONE?.trim() || "Europe/Tallinn";
+const supabaseUrl = process.env.SUPABASE_URL?.trim() || process.env.VITE_SUPABASE_URL?.trim() || "";
+const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim() || "";
+const editorialBucketName = process.env.SUPABASE_EDITORIAL_BUCKET?.trim() || "editorial-media";
 const openAiApiKey = process.env.OPENAI_API_KEY?.trim() || "";
 const client = openAiApiKey ? new OpenAI({ apiKey: openAiApiKey }) : null;
+const supabaseAdmin = supabaseUrl && supabaseServiceRoleKey
+    ? createSupabaseClient(supabaseUrl, supabaseServiceRoleKey, {
+        auth: {
+            persistSession: false,
+            autoRefreshToken: false
+        }
+    })
+    : null;
 const recentProblemReports = [];
+const dailyCoverStoryCachePath = path.join(__dirname, ".cache", "daily-cover-stories.json");
 const dailyArticleCachePath = path.join(__dirname, ".cache", "daily-articles.json");
 const dailyPersonaCachePath = path.join(__dirname, ".cache", "daily-personas.json");
 const dailyHoroscopeCachePath = path.join(__dirname, ".cache", "daily-horoscope.json");
 const dailyWeatherCachePath = path.join(__dirname, ".cache", "daily-weather.json");
 const newsletterSignupsCachePath = path.join(__dirname, ".cache", "newsletter-signups.json");
+const generatedCoverStoryDir = path.join(__dirname, ".cache", "cover-stories");
 const generatedWeatherSceneDir = path.join(__dirname, ".cache", "weather-scenes");
 const RECENT_PROBLEMS_LIMIT = 6;
+const DAILY_COVER_STORY_ARCHIVE_LIMIT = 10;
 const DAILY_ARTICLE_ARCHIVE_LIMIT = 10;
 const DAILY_ARTICLE_PUBLIC_LIMIT = 8;
+const DAILY_COVER_STORY_STYLE_VERSION = 1;
 const DAILY_ARTICLE_STYLE_VERSION = 6;
 const DAILY_PERSONA_ARCHIVE_LIMIT = 10;
 const DAILY_PERSONA_PUBLIC_LIMIT = 8;
@@ -37,6 +53,7 @@ const DAILY_PERSONA_STYLE_VERSION = 8;
 const DAILY_HOROSCOPE_STYLE_VERSION = 4;
 const DAILY_WEATHER_STYLE_VERSION = 2;
 const DAILY_WEATHER_CACHE_LIMIT = 24;
+const EDITORIAL_WARMUP_INTERVAL_MS = 30 * 60 * 1000;
 const WEATHER_FORECAST_DAYS = 5;
 const WEATHER_TIMELINE_HOUR_TARGETS = [6, 9, 12, 15, 18, 21];
 const WEATHER_API_BASE_URL = "https://api.open-meteo.com/v1/forecast";
@@ -58,6 +75,20 @@ const PUBLIC_FEED_TEXT_LIMIT = 180;
 const PUBLIC_FEED_FALLBACK_TEXT = "Üks terava sõnastusega probleem sai lahendatud.";
 const PUBLIC_FEED_PROFANITY_REGEX = /\b(?:pers(?:e|se|es|et|ed|ega|ele|el|esse|est|i)?|t(?:ü|y)r(?:a|ad|aga|ale|al|ast|i)?|munn(?:i|e|id|idega|ile|il|ist)?|vitt(?:u|i|e|ud|idega|ile|is|a)?|niku(?:da|n|d|b|s|tud|ga|le)?|pask(?:a|e|i|aks|aga|ale|as|ast|u)?|sit(?:t|a|ad|ane|ase|aks|aga|ale|as|ast)?|hui(?:a|i|d|ga|le|s)?|fuck(?:ing|ed|er|s)?|shit(?:ty|ted|ting|s)?)\b/giu;
 const DAILY_ARTICLE_SOFT_LANGUAGE_REGEX = /\b(?:teekond|hingetõmme|maagia|inspireer|sisemine|süda|hing|transform|muudab kõik|unelmate|täiuslik)\b/iu;
+const EDITORIAL_STATUS_PUBLISHED = "published";
+const EDITORIAL_PROMPT_VERSIONS = {
+    daily_cover_story: "daily-cover-story-v1",
+    daily_cover_story_image: "daily-cover-story-image-v1",
+    daily_article: "daily-article-v1",
+    daily_persona: "daily-persona-v1",
+    daily_horoscope: "daily-horoscope-v1",
+    daily_weather: "daily-weather-v1",
+    daily_persona_image: "daily-persona-image-v1",
+    daily_weather_image: "daily-weather-image-v1"
+};
+let dailyCoverStories = [];
+let dailyCoverStoriesLoaded = false;
+let dailyCoverStoryGenerationPromises = new Map();
 let dailyArticles = [];
 let dailyArticlesLoaded = false;
 let dailyArticleGenerationPromise = null;
@@ -76,6 +107,8 @@ let newsletterSignupsWritePromise = Promise.resolve();
 const dailyWeatherGenerationPromises = new Map();
 const weatherSceneGenerationPromises = new Map();
 const weatherLocationLabelCache = new Map();
+let editorialWarmupPromise = null;
+let lastEditorialWarmupDateKey = "";
 
 const DAILY_ARTICLE_THEMES = [
     {
@@ -190,6 +223,69 @@ const DAILY_ARTICLE_THEMES = [
             bannerNote: "Kui probleem on, et kodu ei jäta saabudes mingit tunnet, siis üks tugev teos võib selle muuta kohe esimesel pilgul.",
             takeaways: ["Mulje muutub selgeks", "Ruum saab tooni", "Kodu tundub läbimõeldud"],
             readingTime: "4 min lugemine"
+        }
+    }
+];
+
+const DAILY_COVER_STORY_THEMES = [
+    {
+        label: "Pärast remonti",
+        prompt: "kaanelugu inimesest, kelle kodu jäi pärast remonti korralik, aga siiski iseloomuta, kuni üks visuaalne otsus pani ruumi tööle",
+        fallback: {
+            subjectName: "Helena Saar",
+            title: "Ta ei vajanud uut lampi",
+            summary: "Pärast pikka remonti selgus, et ruum ei vajanud enam uut eset, vaid üht otsust, mis annaks kõigele näo.",
+            photoBrief: "Create a premium horizontal editorial cover portrait of a believable Estonian woman in her late thirties inside a refined contemporary apartment. Keep the upper left area visually calm for masthead placement, place the subject on the right half, and let the mood feel warm, assured and modern."
+        }
+    },
+    {
+        label: "Ajutine kodu",
+        prompt: "kaanelugu inimesest, kes muutis ajutise üürikodu ühe selge teosega vähem juhuslikuks ja rohkem enda omaks",
+        fallback: {
+            subjectName: "Liis Pärn",
+            title: "Ajutine kodu jäi lõpuks meelde",
+            summary: "Kui kõik oluline oli juba olemas, muutis ühe seina otsus ruumi lõpuks kohaks, kuhu oli päriselt hea tagasi tulla.",
+            photoBrief: "Create a premium horizontal editorial cover portrait of a believable Estonian woman in her early forties in a tasteful rental apartment with subtle lived-in detail. Leave generous quiet space in the upper left for a magazine masthead and keep the subject confidently on the right half."
+        }
+    },
+    {
+        label: "Kingitus ilma piinata",
+        prompt: "kaanelugu inimesest, kes leidis lõpuks kingituse, mis ei mõjunud järjekordse viisakusostuna, vaid jäi ruumi päriselt elama",
+        fallback: {
+            subjectName: "Maarja Teder",
+            title: "Hea kingitus ei täitnud sahtlit",
+            summary: "Kui tavapärane kinkimine hakkas väsitama, osutus tugevaks vastuseks ese, mis jäi nähtavale ja meenutas end iga päev.",
+            photoBrief: "Create a premium horizontal editorial cover portrait of a believable Estonian woman in her thirties in a calm stylish apartment interior, as if photographed for a design and lifestyle magazine. Keep the left upper quadrant quiet and elegant, with the subject on the right half."
+        }
+    },
+    {
+        label: "Töönurga fookus",
+        prompt: "kaanelugu inimesest, kelle töönurk oli funktsionaalne, aga hajus, kuni üks visuaalne keskpunkt pani ruumi toetama keskendumist",
+        fallback: {
+            subjectName: "Karl Sild",
+            title: "Taust ei seganud enam tööd",
+            summary: "Mõnikord ei vaja töönurk rohkem organiseerimist, vaid üht selget raskuskeset, mis rahustab kogu ülejäänud ruumi.",
+            photoBrief: "Create a premium horizontal editorial cover portrait of a believable Estonian man in his late thirties in a refined work corner inside a real home. Keep the top left quadrant calm for magazine typography and place the subject on the right with generous framing."
+        }
+    },
+    {
+        label: "Esimene mulje",
+        prompt: "kaanelugu inimesest, kelle kodu ei jätnud varem saabudes mingit tunnet, kuni üks tugev teos pani esimese mulje tööle",
+        fallback: {
+            subjectName: "Kristel Vaher",
+            title: "Sisse astudes oli lõpuks tunne",
+            summary: "Kõik vajalik oli olemas, aga alles üks täpne visuaalne otsus muutis saabumise juhuslikust läbimõelduks.",
+            photoBrief: "Create a premium horizontal editorial cover portrait of a believable Estonian woman in her forties near the entrance or living area of a contemporary apartment. The image should feel like a major magazine cover, with clean space in the upper left and the subject framed on the right."
+        }
+    },
+    {
+        label: "Tühi sein",
+        prompt: "kaanelugu inimesest, kelle kodus kadus poolik tunne siis, kui tühi sein sai lõpuks põhjuse olemas olla",
+        fallback: {
+            subjectName: "Rasmus Oja",
+            title: "Poolik tunne kadus seinaga koos",
+            summary: "Kui pilgul polnud varem põhjust peatuda, andis üks tugev teos tervele ruumile korraga rohkem selgust ja raskust.",
+            photoBrief: "Create a premium horizontal editorial cover portrait of a believable Estonian man in his thirties inside a tasteful apartment with wall art presence and warm daylight. Reserve the upper left for masthead space and keep the subject on the right half, fully inside frame."
         }
     }
 ];
@@ -686,6 +782,18 @@ const PUBLIC_FEED_JSON_SCHEMA = {
     }
 };
 
+const DAILY_COVER_STORY_JSON_SCHEMA = {
+    type: "object",
+    additionalProperties: false,
+    required: ["subjectName", "title", "summary", "photoBrief"],
+    properties: {
+        subjectName: { type: "string" },
+        title: { type: "string" },
+        summary: { type: "string" },
+        photoBrief: { type: "string" }
+    }
+};
+
 const DAILY_ARTICLE_JSON_SCHEMA = {
     type: "object",
     additionalProperties: false,
@@ -1103,6 +1211,11 @@ function getThemeForDate(dateKey) {
     return DAILY_ARTICLE_THEMES[numericKey % DAILY_ARTICLE_THEMES.length];
 }
 
+function getCoverStoryThemeForDate(dateKey) {
+    const numericKey = Number(String(dateKey).replaceAll("-", "")) || 0;
+    return DAILY_COVER_STORY_THEMES[numericKey % DAILY_COVER_STORY_THEMES.length];
+}
+
 function getPersonaThemeForDate(dateKey) {
     const numericKey = Number(String(dateKey).replaceAll("-", "")) || 0;
     return DAILY_PERSONA_THEMES[numericKey % DAILY_PERSONA_THEMES.length];
@@ -1481,8 +1594,506 @@ function hashText(value) {
     return hash.toString(36);
 }
 
+function isSupabaseAdminConfigured() {
+    return Boolean(supabaseAdmin);
+}
+
+function sanitizeSlugSegment(value) {
+    return String(value || "")
+        .toLocaleLowerCase("en-US")
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-+|-+$/g, "");
+}
+
+function buildEditorialSlug() {
+    return Array.from(arguments)
+        .flat()
+        .map(sanitizeSlugSegment)
+        .filter(Boolean)
+        .join("-");
+}
+
+function buildDailyArticleSlug(dateKey) {
+    return buildEditorialSlug("daily-article", dateKey);
+}
+
+function buildDailyCoverStorySlug(dateKey) {
+    return buildEditorialSlug("daily-cover-story", dateKey);
+}
+
+function buildDailyPersonaSlug(dateKey) {
+    return buildEditorialSlug("daily-persona", dateKey);
+}
+
+function buildDailyHoroscopeSlug(dateKey) {
+    return buildEditorialSlug("daily-horoscope", dateKey);
+}
+
+function buildDailyWeatherSlug(dateKey, locationKey, signature) {
+    return buildEditorialSlug("daily-weather", dateKey, locationKey, hashText(signature));
+}
+
+function sanitizeStoragePathSegment(value) {
+    return String(value || "")
+        .replace(/[^a-z0-9._-]+/giu, "-")
+        .replace(/-+/g, "-")
+        .replace(/^-+|-+$/g, "")
+        .toLocaleLowerCase("en-US");
+}
+
+function buildEditorialImageStoragePath(contentType, dateKey, itemSlug, extension = "jpg") {
+    const safeExtension = sanitizeStoragePathSegment(extension || "jpg") || "jpg";
+
+    return [
+        sanitizeStoragePathSegment(contentType) || "editorial",
+        sanitizeStoragePathSegment(dateKey) || getLocalDateKey(),
+        `${sanitizeStoragePathSegment(itemSlug) || hashText(itemSlug)}.${safeExtension}`
+    ].join("/");
+}
+
+function getEditorialStoragePublicUrl(storagePath) {
+    if (!supabaseAdmin || !storagePath) {
+        return "";
+    }
+
+    const { data } = supabaseAdmin.storage.from(editorialBucketName).getPublicUrl(storagePath);
+    return data?.publicUrl || "";
+}
+
+function getEditorialDateKey(row) {
+    return normalizeField(row?.date_key || row?.dateKey, getLocalDateKey(), 20);
+}
+
+function getEditorialPublishedAt(row) {
+    return new Date(parseTimestamp(row?.published_at || row?.publishedAt) || Date.now()).toISOString();
+}
+
+function getEditorialPayload(row) {
+    return row?.payload && typeof row.payload === "object" ? row.payload : {};
+}
+
+function buildArticleRecordFromEditorialRow(row) {
+    const payload = getEditorialPayload(row);
+
+    return {
+        id: normalizeField(payload.id || row.slug, getEditorialDateKey(row), 96),
+        dateKey: getEditorialDateKey(row),
+        styleVersion: Number(row?.style_version) || DAILY_ARTICLE_STYLE_VERSION,
+        theme: payload.theme,
+        title: row.title || payload.title,
+        lead: row.summary || payload.lead,
+        highlight: payload.highlight,
+        bannerNote: payload.bannerNote,
+        paragraphs: payload.paragraphs,
+        takeaways: payload.takeaways,
+        lenses: payload.lenses,
+        readingTime: payload.readingTime,
+        imageUrl: row.cover_media_url || payload.imageUrl || "",
+        imageAlt: payload.imageAlt || "",
+        imageObjectPosition: payload.imageObjectPosition || "",
+        publishedAt: getEditorialPublishedAt(row)
+    };
+}
+
+function buildCoverStoryRecordFromEditorialRow(row) {
+    const payload = getEditorialPayload(row);
+
+    return {
+        id: normalizeField(payload.id || row.slug, getEditorialDateKey(row), 96),
+        dateKey: getEditorialDateKey(row),
+        styleVersion: Number(payload.styleVersion || row?.style_version) || DAILY_COVER_STORY_STYLE_VERSION,
+        subjectName: normalizeField(payload.subjectName, "Helena Saar", 64),
+        title: normalizeField(row.title || payload.title, "Päevane kaanelugu", 96),
+        summary: normalizeField(row.summary || payload.summary, "", 220),
+        photoBrief: normalizeField(payload.photoBrief, "", 420),
+        imageUrl: row.cover_media_url || payload.imageUrl || "",
+        imageAlt: payload.imageAlt || "",
+        publishedAt: getEditorialPublishedAt(row)
+    };
+}
+
+function buildPersonaRecordFromEditorialRow(row) {
+    const payload = getEditorialPayload(row);
+
+    return {
+        id: normalizeField(payload.id || row.slug, getEditorialDateKey(row), 96),
+        dateKey: getEditorialDateKey(row),
+        styleVersion: Number(row?.style_version) || DAILY_PERSONA_STYLE_VERSION,
+        theme: payload.theme,
+        characterName: payload.characterName,
+        characterMeta: payload.characterMeta,
+        title: row.title || payload.title,
+        lead: row.summary || payload.lead,
+        highlight: payload.highlight,
+        resultNote: payload.resultNote,
+        photoBrief: payload.photoBrief,
+        paragraphs: payload.paragraphs,
+        takeaways: payload.takeaways,
+        readingTime: payload.readingTime,
+        imageUrl: row.cover_media_url || payload.imageUrl || "",
+        imageAlt: payload.imageAlt || "",
+        imageObjectPosition: payload.imageObjectPosition || "",
+        publishedAt: getEditorialPublishedAt(row)
+    };
+}
+
+function buildHoroscopeRecordFromEditorialRow(row) {
+    const payload = getEditorialPayload(row);
+
+    return {
+        dateKey: getEditorialDateKey(row),
+        styleVersion: Number(row?.style_version) || DAILY_HOROSCOPE_STYLE_VERSION,
+        publishedAt: getEditorialPublishedAt(row),
+        signs: Array.isArray(payload.signs) ? payload.signs : []
+    };
+}
+
+function buildWeatherRecordFromEditorialRow(row) {
+    const payload = getEditorialPayload(row);
+
+    return normalizeStoredDailyWeatherEntry({
+        id: row.slug,
+        locationKey: row.location_key,
+        signature: row.generation_signature,
+        dateKey: getEditorialDateKey(row),
+        styleVersion: row.style_version,
+        publishedAt: getEditorialPublishedAt(row),
+        summaryLine: payload.summaryLine,
+        todayTitle: payload.todayTitle,
+        todaySummary: payload.todaySummary,
+        todayDetails: payload.todayDetails,
+        tomorrowTitle: payload.tomorrowTitle,
+        tomorrowSummary: payload.tomorrowSummary,
+        tomorrowDetails: payload.tomorrowDetails,
+        planningTips: payload.planningTips,
+        dayNotes: payload.dayNotes,
+        scenePrompt: payload.scenePrompt,
+        sceneKey: payload.sceneKey,
+        coverMediaUrl: row.cover_media_url || payload.coverMediaUrl || ""
+    });
+}
+
+function editorialRowNeedsCoverMedia(row) {
+    return !normalizeField(row?.cover_media_url, "", 500);
+}
+
+async function fetchPublishedEditorialRows(contentType, limit, options = {}) {
+    if (!supabaseAdmin) {
+        return [];
+    }
+
+    let query = supabaseAdmin
+        .from("editorial_items")
+        .select(`
+            id,
+            slug,
+            content_type,
+            date_key,
+            location_key,
+            generation_signature,
+            style_version,
+            title,
+            summary,
+            payload,
+            cover_media_url,
+            published_at
+        `)
+        .eq("content_type", contentType)
+        .eq("status", EDITORIAL_STATUS_PUBLISHED);
+
+    if (options.slugPrefix) {
+        query = query.like("slug", `${options.slugPrefix}%`);
+    }
+
+    const { data, error } = await query
+        .order("date_key", { ascending: false })
+        .order("published_at", { ascending: false })
+        .limit(limit);
+
+    if (error) {
+        throw error;
+    }
+
+    return Array.isArray(data) ? data : [];
+}
+
+async function fetchPublishedEditorialRowBySlug(slug) {
+    if (!supabaseAdmin || !slug) {
+        return null;
+    }
+
+    const { data, error } = await supabaseAdmin
+        .from("editorial_items")
+        .select(`
+            id,
+            slug,
+            content_type,
+            date_key,
+            location_key,
+            generation_signature,
+            style_version,
+            title,
+            summary,
+            payload,
+            cover_media_url,
+            published_at
+        `)
+        .eq("slug", slug)
+        .eq("status", EDITORIAL_STATUS_PUBLISHED)
+        .maybeSingle();
+
+    if (error) {
+        throw error;
+    }
+
+    return data || null;
+}
+
+function omitUndefinedProperties(record) {
+    return Object.fromEntries(Object.entries(record || {}).filter(function ([, value]) {
+        return value !== undefined;
+    }));
+}
+
+async function upsertEditorialItemRecord(record) {
+    if (!supabaseAdmin) {
+        return null;
+    }
+
+    const { data, error } = await supabaseAdmin
+        .from("editorial_items")
+        .upsert(omitUndefinedProperties(record), { onConflict: "slug" })
+        .select(`
+            id,
+            slug,
+            content_type,
+            date_key,
+            location_key,
+            generation_signature,
+            style_version,
+            title,
+            summary,
+            payload,
+            cover_media_path,
+            cover_media_url,
+            published_at
+        `)
+        .single();
+
+    if (error) {
+        throw error;
+    }
+
+    return data;
+}
+
+async function updateEditorialItemMediaFields(slug, media) {
+    if (!supabaseAdmin || !slug || !media?.publicUrl) {
+        return null;
+    }
+
+    const { data, error } = await supabaseAdmin
+        .from("editorial_items")
+        .update({
+            cover_media_path: media.storagePath,
+            cover_media_url: media.publicUrl
+        })
+        .eq("slug", slug)
+        .select(`
+            id,
+            slug,
+            content_type,
+            date_key,
+            location_key,
+            generation_signature,
+            style_version,
+            title,
+            summary,
+            payload,
+            cover_media_path,
+            cover_media_url,
+            published_at
+        `)
+        .single();
+
+    if (error) {
+        throw error;
+    }
+
+    return data;
+}
+
+async function uploadEditorialImageAsset(input) {
+    if (!supabaseAdmin || !input?.imageBuffer || !input?.itemSlug) {
+        return null;
+    }
+
+    const storagePath = buildEditorialImageStoragePath(
+        input.contentType,
+        input.dateKey,
+        input.fileBaseName || input.itemSlug,
+        input.extension || "jpg"
+    );
+
+    const uploadResult = await supabaseAdmin.storage.from(editorialBucketName).upload(storagePath, input.imageBuffer, {
+        upsert: true,
+        contentType: input.mimeType || "image/jpeg",
+        cacheControl: "31536000"
+    });
+
+    if (uploadResult.error) {
+        throw uploadResult.error;
+    }
+
+    const publicUrl = getEditorialStoragePublicUrl(storagePath);
+    const { error } = await supabaseAdmin
+        .from("media_assets")
+        .upsert({
+            editorial_item_id: input.itemId || null,
+            storage_bucket: editorialBucketName,
+            storage_path: storagePath,
+            public_url: publicUrl,
+            mime_type: input.mimeType || "image/jpeg",
+            alt_text: normalizeField(input.altText, "", 180),
+            origin: "openai",
+            metadata: input.metadata && typeof input.metadata === "object" ? input.metadata : {}
+        }, { onConflict: "storage_path" });
+
+    if (error) {
+        throw error;
+    }
+
+    return {
+        storagePath,
+        publicUrl
+    };
+}
+
+async function insertAiGenerationRun(run) {
+    if (!supabaseAdmin) {
+        return null;
+    }
+
+    const { data, error } = await supabaseAdmin
+        .from("ai_generation_runs")
+        .insert({
+            content_type: run.contentType,
+            item_slug: run.itemSlug || null,
+            status: "started",
+            model: run.model || null,
+            prompt_version: run.promptVersion || null,
+            input_payload: run.inputPayload && typeof run.inputPayload === "object" ? run.inputPayload : {},
+            output_payload: {},
+            error_message: null
+        })
+        .select("id")
+        .single();
+
+    if (error) {
+        throw error;
+    }
+
+    return data?.id || null;
+}
+
+async function finalizeAiGenerationRun(runId, result) {
+    if (!supabaseAdmin || !runId) {
+        return;
+    }
+
+    const { error } = await supabaseAdmin
+        .from("ai_generation_runs")
+        .update({
+            status: result.status,
+            output_payload: result.outputPayload && typeof result.outputPayload === "object" ? result.outputPayload : {},
+            error_message: result.errorMessage || null,
+            finished_at: new Date().toISOString()
+        })
+        .eq("id", runId);
+
+    if (error) {
+        throw error;
+    }
+}
+
+function sanitizeAiGenerationOutputPayload(value) {
+    if (!value || typeof value !== "object") {
+        return {};
+    }
+
+    if (Array.isArray(value?.data)) {
+        return {
+            data: value.data.map(function (entry) {
+                return {
+                    revised_prompt: normalizeField(entry?.revised_prompt, "", 500),
+                    url: normalizeField(entry?.url, "", 500),
+                    hasImage: Boolean(entry?.b64_json)
+                };
+            })
+        };
+    }
+
+    if (typeof value.output_text === "string" || typeof value.status === "string") {
+        return {
+            status: normalizeField(value.status, "", 32),
+            output_text: normalizeField(value.output_text, "", 4000)
+        };
+    }
+
+    return value;
+}
+
+async function runWithAiGenerationLog(config, callback) {
+    if (!supabaseAdmin) {
+        return callback();
+    }
+
+    let runId = null;
+
+    try {
+        runId = await insertAiGenerationRun(config);
+    } catch (error) {
+        console.error("Failed to start AI generation run log.", error);
+    }
+
+    try {
+        const result = await callback();
+
+        if (runId) {
+            try {
+                await finalizeAiGenerationRun(runId, {
+                    status: "completed",
+                    outputPayload: sanitizeAiGenerationOutputPayload(result)
+                });
+            } catch (finalizeError) {
+                console.error("Failed to finalize successful AI generation run log.", finalizeError);
+            }
+        }
+
+        return result;
+    } catch (error) {
+        if (runId) {
+            try {
+                await finalizeAiGenerationRun(runId, {
+                    status: "failed",
+                    outputPayload: {},
+                    errorMessage: normalizeField(error?.message, "Unknown error", 500)
+                });
+            } catch (finalizeError) {
+                console.error("Failed to finalize AI generation run log.", finalizeError);
+            }
+        }
+
+        throw error;
+    }
+}
+
 function buildWeatherSceneKey(dateKey, scenePrompt) {
     return `${dateKey}-${hashText(scenePrompt)}`;
+}
+
+function getCoverStoryImageFilePath(slug) {
+    return path.join(generatedCoverStoryDir, `${sanitizeStoragePathSegment(slug) || hashText(slug)}.jpg`);
 }
 
 function getWeatherSceneFilePath(sceneKey) {
@@ -1973,7 +2584,8 @@ function normalizeDailyWeatherPayload(snapshot, payload, locationKey, signature,
         planningTips: normalizeTextList(payload?.planningTips, fallbackNarrative.planningTips, 3, 88),
         dayNotes: normalizeWeatherDayNotes(payload?.dayNotes, fallbackNarrative.dayNotes),
         scenePrompt,
-        sceneKey
+        sceneKey,
+        coverMediaUrl: normalizeField(payload?.coverMediaUrl, "", 500)
     };
 }
 
@@ -2026,7 +2638,8 @@ function normalizeStoredDailyWeatherEntry(record) {
         ], 3, 88),
         dayNotes,
         scenePrompt,
-        sceneKey: normalizeField(record.sceneKey, buildWeatherSceneKey(dateKey, scenePrompt), 120)
+        sceneKey: normalizeField(record.sceneKey, buildWeatherSceneKey(dateKey, scenePrompt), 120),
+        coverMediaUrl: normalizeField(record.coverMediaUrl || record.cover_media_url, "", 500)
     };
 }
 
@@ -2035,19 +2648,31 @@ async function loadDailyWeatherEntries() {
         return dailyWeatherEntries;
     }
 
-    try {
-        const raw = await readFile(dailyWeatherCachePath, "utf8");
-        const payload = JSON.parse(raw);
-
-        dailyWeatherEntries = Array.isArray(payload?.entries)
-            ? payload.entries.map(normalizeStoredDailyWeatherEntry).filter(Boolean)
-            : [];
-    } catch (error) {
-        if (error?.code !== "ENOENT") {
-            console.error("Failed to load daily weather entries.", error);
+    if (isSupabaseAdminConfigured()) {
+        try {
+            const rows = await fetchPublishedEditorialRows("daily_weather", DAILY_WEATHER_CACHE_LIMIT);
+            dailyWeatherEntries = rows.map(buildWeatherRecordFromEditorialRow).filter(Boolean);
+        } catch (error) {
+            console.error("Failed to load daily weather entries from Supabase.", error);
+            dailyWeatherEntries = [];
         }
+    }
 
-        dailyWeatherEntries = [];
+    if (dailyWeatherEntries.length === 0) {
+        try {
+            const raw = await readFile(dailyWeatherCachePath, "utf8");
+            const payload = JSON.parse(raw);
+
+            dailyWeatherEntries = Array.isArray(payload?.entries)
+                ? payload.entries.map(normalizeStoredDailyWeatherEntry).filter(Boolean)
+                : [];
+        } catch (error) {
+            if (error?.code !== "ENOENT") {
+                console.error("Failed to load daily weather entries.", error);
+            }
+
+            dailyWeatherEntries = [];
+        }
     }
 
     dailyWeatherEntries = dailyWeatherEntries
@@ -2068,6 +2693,114 @@ async function saveDailyWeatherEntries() {
         JSON.stringify({ entries: dailyWeatherEntries.slice(0, DAILY_WEATHER_CACHE_LIMIT) }, null, 2),
         "utf8"
     );
+}
+
+function buildDailyWeatherImageAltText(snapshot) {
+    const label = normalizeField(snapshot?.location?.label, WEATHER_DEFAULT_LOCATION.label, 48);
+    return `Ilmavaate taustpilt asukohas ${label}`;
+}
+
+async function generateDailyWeatherSceneForItem(snapshot, entry, itemRow) {
+    if (!client || !supabaseAdmin || !itemRow?.slug || itemRow.cover_media_url) {
+        return itemRow;
+    }
+
+    const imageResponse = await runWithAiGenerationLog({
+        contentType: "daily_weather",
+        itemSlug: itemRow.slug,
+        model: imageModel,
+        promptVersion: EDITORIAL_PROMPT_VERSIONS.daily_weather_image,
+        inputPayload: {
+            dateKey: entry.dateKey,
+            locationKey: entry.locationKey,
+            scenePrompt: entry.scenePrompt
+        }
+    }, async function () {
+        return await client.images.generate({
+            model: imageModel,
+            prompt: entry.scenePrompt,
+            size: "1536x1024",
+            quality: "high",
+            output_format: "jpeg",
+            output_compression: 82
+        });
+    });
+
+    const imageData = imageResponse?.data?.[0]?.b64_json;
+
+    if (!imageData) {
+        throw new Error("Weather scene image response did not contain image data.");
+    }
+
+    const media = await uploadEditorialImageAsset({
+        itemId: itemRow.id,
+        itemSlug: itemRow.slug,
+        contentType: "daily_weather",
+        dateKey: entry.dateKey,
+        fileBaseName: itemRow.slug,
+        imageBuffer: Buffer.from(imageData, "base64"),
+        mimeType: "image/jpeg",
+        extension: "jpg",
+        altText: buildDailyWeatherImageAltText(snapshot),
+        metadata: {
+            promptVersion: EDITORIAL_PROMPT_VERSIONS.daily_weather_image,
+            locationKey: entry.locationKey,
+            signature: entry.signature
+        }
+    });
+
+    return await updateEditorialItemMediaFields(itemRow.slug, media);
+}
+
+async function persistDailyWeatherEntry(snapshot, entry) {
+    const normalizedEntry = normalizeDailyWeatherPayload(
+        snapshot,
+        entry,
+        entry.locationKey || getWeatherLocationKey(snapshot.location.latitude, snapshot.location.longitude),
+        entry.signature || buildWeatherSignature(snapshot),
+        entry.publishedAt
+    );
+
+    if (!isSupabaseAdminConfigured()) {
+        return normalizedEntry;
+    }
+
+    let row = await upsertEditorialItemRecord({
+        slug: buildDailyWeatherSlug(normalizedEntry.dateKey, normalizedEntry.locationKey, normalizedEntry.signature),
+        content_type: "daily_weather",
+        date_key: normalizedEntry.dateKey,
+        location_key: normalizedEntry.locationKey,
+        generation_signature: normalizedEntry.signature,
+        status: EDITORIAL_STATUS_PUBLISHED,
+        title: `Ilm ${normalizeField(snapshot.location.label, WEATHER_DEFAULT_LOCATION.label, 48)}`,
+        summary: normalizedEntry.summaryLine,
+        payload: {
+            summaryLine: normalizedEntry.summaryLine,
+            todayTitle: normalizedEntry.todayTitle,
+            todaySummary: normalizedEntry.todaySummary,
+            todayDetails: normalizedEntry.todayDetails,
+            tomorrowTitle: normalizedEntry.tomorrowTitle,
+            tomorrowSummary: normalizedEntry.tomorrowSummary,
+            tomorrowDetails: normalizedEntry.tomorrowDetails,
+            planningTips: normalizedEntry.planningTips,
+            dayNotes: normalizedEntry.dayNotes,
+            scenePrompt: normalizedEntry.scenePrompt,
+            sceneKey: normalizedEntry.sceneKey,
+            locationLabel: normalizeField(snapshot.location.label, WEATHER_DEFAULT_LOCATION.label, 48)
+        },
+        source_model: client ? weatherModel : "fallback",
+        prompt_version: EDITORIAL_PROMPT_VERSIONS.daily_weather,
+        style_version: DAILY_WEATHER_STYLE_VERSION,
+        published_at: normalizedEntry.publishedAt
+    });
+
+    try {
+        row = await generateDailyWeatherSceneForItem(snapshot, normalizedEntry, row);
+    } catch (error) {
+        console.error("Failed to generate daily weather scene image.", error);
+    }
+
+    return buildWeatherRecordFromEditorialRow(row) || normalizedEntry;
 }
 
 async function requestDailyWeatherFromModel(model, snapshot, locationKey, signature) {
@@ -2179,7 +2912,19 @@ async function generateDailyWeatherEntry(snapshot, locationKey, signature) {
 
     for (const model of candidateModels) {
         try {
-            return await requestDailyWeatherFromModel(model, snapshot, locationKey, signature);
+            return await runWithAiGenerationLog({
+                contentType: "daily_weather",
+                itemSlug: buildDailyWeatherSlug(snapshot.dateKey, locationKey, signature),
+                model,
+                promptVersion: EDITORIAL_PROMPT_VERSIONS.daily_weather,
+                inputPayload: {
+                    dateKey: snapshot.dateKey,
+                    locationKey,
+                    signature
+                }
+            }, async function () {
+                return await requestDailyWeatherFromModel(model, snapshot, locationKey, signature);
+            });
         } catch (error) {
             lastError = error;
             console.error(`Failed to generate daily weather copy with model ${model}.`, error);
@@ -2195,6 +2940,37 @@ async function ensureDailyWeatherEntry(snapshot) {
 
     const locationKey = getWeatherLocationKey(snapshot.location.latitude, snapshot.location.longitude);
     const signature = buildWeatherSignature(snapshot);
+    const slug = buildDailyWeatherSlug(snapshot.dateKey, locationKey, signature);
+
+    if (isSupabaseAdminConfigured()) {
+        try {
+            const row = await fetchPublishedEditorialRowBySlug(slug);
+
+            if (row) {
+                const entry = buildWeatherRecordFromEditorialRow(row);
+
+                if (entry) {
+                    if (editorialRowNeedsCoverMedia(row)) {
+                        const persistedEntry = await persistDailyWeatherEntry(snapshot, entry);
+
+                        dailyWeatherEntries = [
+                            persistedEntry,
+                            ...dailyWeatherEntries.filter(function (existing) {
+                                return !(existing.locationKey === locationKey && existing.signature === signature && existing.dateKey === snapshot.dateKey);
+                            })
+                        ].slice(0, DAILY_WEATHER_CACHE_LIMIT);
+
+                        return persistedEntry;
+                    }
+
+                    return entry;
+                }
+            }
+        } catch (error) {
+            console.error("Failed to load current weather entry from Supabase.", error);
+        }
+    }
+
     const existingEntry = dailyWeatherEntries.find(function (entry) {
         return entry.locationKey === locationKey && entry.signature === signature && entry.dateKey === snapshot.dateKey;
     });
@@ -2207,7 +2983,10 @@ async function ensureDailyWeatherEntry(snapshot) {
 
     if (!dailyWeatherGenerationPromises.has(generationKey)) {
         dailyWeatherGenerationPromises.set(generationKey, (async function () {
-            const entry = await generateDailyWeatherEntry(snapshot, locationKey, signature);
+            const entry = await persistDailyWeatherEntry(
+                snapshot,
+                await generateDailyWeatherEntry(snapshot, locationKey, signature)
+            );
 
             dailyWeatherEntries = [
                 entry,
@@ -2216,8 +2995,11 @@ async function ensureDailyWeatherEntry(snapshot) {
                 })
             ].slice(0, DAILY_WEATHER_CACHE_LIMIT);
 
-            dailyWeatherWritePromise = dailyWeatherWritePromise.then(saveDailyWeatherEntries);
-            await dailyWeatherWritePromise;
+            if (!isSupabaseAdminConfigured()) {
+                dailyWeatherWritePromise = dailyWeatherWritePromise.then(saveDailyWeatherEntries);
+                await dailyWeatherWritePromise;
+            }
+
             return entry;
         }()).finally(function () {
             dailyWeatherGenerationPromises.delete(generationKey);
@@ -2227,7 +3009,16 @@ async function ensureDailyWeatherEntry(snapshot) {
     return dailyWeatherGenerationPromises.get(generationKey);
 }
 
+async function prepareDefaultDailyWeatherForToday() {
+    const forecastSnapshot = await fetchWeatherForecastSnapshot(WEATHER_DEFAULT_LOCATION);
+    return await ensureDailyWeatherEntry(forecastSnapshot);
+}
+
 async function ensureWeatherSceneForEntry(entry) {
+    if (entry?.coverMediaUrl) {
+        return null;
+    }
+
     if (!entry?.sceneKey || !entry?.scenePrompt) {
         return null;
     }
@@ -2308,7 +3099,7 @@ function buildWeatherResponsePayload(snapshot, entry) {
         forecast: forecastDays,
         timelines: snapshot.timelines,
         planningTips: Array.isArray(entry?.planningTips) ? entry.planningTips : buildWeatherFallbackPlanningTips(snapshot),
-        backgroundImageUrl: entry?.sceneKey ? `/api/weather-scene/${entry.sceneKey}.jpg` : "",
+        backgroundImageUrl: entry?.coverMediaUrl || (entry?.sceneKey ? `/api/weather-scene/${entry.sceneKey}.jpg` : ""),
         publishedAt: entry?.publishedAt || new Date().toISOString(),
         attribution: {
             forecast: "Open-Meteo",
@@ -2423,6 +3214,482 @@ function buildFallbackDailyArticle(dateKey) {
     };
 }
 
+function buildFallbackDailyCoverStory(dateKey) {
+    const theme = getCoverStoryThemeForDate(dateKey);
+    const fallbackStory = theme.fallback;
+
+    return {
+        id: dateKey,
+        dateKey,
+        styleVersion: DAILY_COVER_STORY_STYLE_VERSION,
+        publishedAt: new Date().toISOString(),
+        subjectName: fallbackStory.subjectName,
+        title: fallbackStory.title,
+        summary: fallbackStory.summary,
+        photoBrief: fallbackStory.photoBrief,
+        imageUrl: "",
+        imageAlt: `${fallbackStory.subjectName} päevase kaaneloo portree`
+    };
+}
+
+function normalizeDailyCoverStoryPayload(dateKey, payload, publishedAt = new Date().toISOString()) {
+    const fallbackStory = buildFallbackDailyCoverStory(dateKey);
+
+    return {
+        id: dateKey,
+        dateKey,
+        styleVersion: DAILY_COVER_STORY_STYLE_VERSION,
+        publishedAt,
+        subjectName: normalizeField(payload.subjectName, fallbackStory.subjectName, 64),
+        title: normalizeField(payload.title, fallbackStory.title, 96),
+        summary: normalizeField(payload.summary, fallbackStory.summary, 220),
+        photoBrief: normalizeField(payload.photoBrief, fallbackStory.photoBrief, 420),
+        imageUrl: normalizeField(payload.imageUrl || payload.image_url, fallbackStory.imageUrl, 500),
+        imageAlt: normalizeField(payload.imageAlt || payload.image_alt, fallbackStory.imageAlt, 180)
+    };
+}
+
+function normalizeStoredDailyCoverStory(record) {
+    if (!record || typeof record !== "object") {
+        return null;
+    }
+
+    if ((record.styleVersion ?? 0) !== DAILY_COVER_STORY_STYLE_VERSION) {
+        return null;
+    }
+
+    const publishedAt = new Date(parseTimestamp(record.publishedAt || record.published_at) || Date.now()).toISOString();
+
+    return normalizeDailyCoverStoryPayload(normalizeField(record.dateKey || record.date_key || record.id, getLocalDateKey(), 20), {
+        subjectName: record.subjectName || record.subject_name,
+        title: record.title,
+        summary: record.summary,
+        photoBrief: record.photoBrief || record.photo_brief,
+        imageUrl: record.imageUrl || record.image_url,
+        imageAlt: record.imageAlt || record.image_alt
+    }, publishedAt);
+}
+
+async function loadDailyCoverStories() {
+    if (dailyCoverStoriesLoaded) {
+        return dailyCoverStories;
+    }
+
+    if (isSupabaseAdminConfigured()) {
+        try {
+            const rows = await fetchPublishedEditorialRows("daily_article", DAILY_COVER_STORY_ARCHIVE_LIMIT, {
+                slugPrefix: "daily-cover-story-"
+            });
+            dailyCoverStories = rows.map(buildCoverStoryRecordFromEditorialRow).map(normalizeStoredDailyCoverStory).filter(Boolean);
+        } catch (error) {
+            console.error("Failed to load daily cover stories from Supabase.", error);
+            dailyCoverStories = [];
+        }
+    }
+
+    if (dailyCoverStories.length === 0) {
+        try {
+            const raw = await readFile(dailyCoverStoryCachePath, "utf8");
+            const payload = JSON.parse(raw);
+
+            dailyCoverStories = Array.isArray(payload?.stories)
+                ? payload.stories.map(normalizeStoredDailyCoverStory).filter(Boolean)
+                : [];
+        } catch (error) {
+            if (error?.code !== "ENOENT") {
+                console.error("Failed to load daily cover story archive.", error);
+            }
+
+            dailyCoverStories = [];
+        }
+    }
+
+    dailyCoverStories = dailyCoverStories
+        .slice()
+        .sort(function (firstStory, secondStory) {
+            return getArchiveSortTimestamp(secondStory) - getArchiveSortTimestamp(firstStory);
+        })
+        .slice(0, DAILY_COVER_STORY_ARCHIVE_LIMIT);
+    dailyCoverStoriesLoaded = true;
+
+    return dailyCoverStories;
+}
+
+async function saveDailyCoverStories() {
+    await mkdir(path.dirname(dailyCoverStoryCachePath), { recursive: true });
+    await writeFile(
+        dailyCoverStoryCachePath,
+        JSON.stringify({ stories: dailyCoverStories.slice(0, DAILY_COVER_STORY_ARCHIVE_LIMIT) }, null, 2),
+        "utf8"
+    );
+}
+
+function buildDailyCoverStoryImageAltText(story) {
+    return `${normalizeField(story?.subjectName, "Päevase kaaneloo peategelane", 64)} päevase kaaneloo portree`;
+}
+
+function buildDailyCoverStoryImagePrompt(story) {
+    const photoBrief = normalizeField(story?.photoBrief, buildFallbackDailyCoverStory(story?.dateKey || getLocalDateKey()).photoBrief, 420);
+
+    return [
+        "Use case: photorealistic-natural",
+        "Asset type: homepage masthead background for a premium Estonian digital magazine cover story",
+        `Primary request: ${photoBrief}`,
+        `Subject and story context: ${normalizeField(story?.subjectName, "Believable Estonian cover subject", 64)}. ${normalizeField(story?.summary, "", 220)}`,
+        "Composition/framing: wide horizontal composition. The upper left quadrant must stay visually calm and mostly empty for the magazine masthead and slogan. Place the person on the right half of the image with generous margin and keep the head fully inside frame.",
+        "Style/medium: top-tier editorial magazine photography, premium and believable, contemporary Estonian lifestyle-magazine cover energy, not stock-photo.",
+        "Lighting/mood: calm, resolved, elegant, warm daylight or soft practical interior light.",
+        "Constraints: no text, no logos, no watermark, no couple, no background people, no face cut off by frame, no artificial HDR, no obvious AI artifacts."
+    ].join("\n");
+}
+
+async function generateDailyCoverStoryImageForStory(story, itemRow = null) {
+    const slug = buildDailyCoverStorySlug(story.dateKey);
+
+    if (itemRow?.cover_media_url) {
+        return normalizeStoredDailyCoverStory({
+            ...story,
+            imageUrl: itemRow.cover_media_url,
+            imageAlt: buildDailyCoverStoryImageAltText(story)
+        });
+    }
+
+    const localFilePath = getCoverStoryImageFilePath(slug);
+
+    if (!itemRow && (await doesFileExist(localFilePath))) {
+        return normalizeStoredDailyCoverStory({
+            ...story,
+            imageUrl: `/api/cover-story-image/${slug}.jpg`,
+            imageAlt: buildDailyCoverStoryImageAltText(story)
+        });
+    }
+
+    if (!client) {
+        return story;
+    }
+
+    const imageResponse = await runWithAiGenerationLog({
+        contentType: "daily_cover_story",
+        itemSlug: slug,
+        model: imageModel,
+        promptVersion: EDITORIAL_PROMPT_VERSIONS.daily_cover_story_image,
+        inputPayload: {
+            dateKey: story.dateKey,
+            subjectName: story.subjectName,
+            title: story.title
+        }
+    }, async function () {
+        return await client.images.generate({
+            model: imageModel,
+            prompt: buildDailyCoverStoryImagePrompt(story),
+            size: "1536x1024",
+            quality: "high",
+            output_format: "jpeg",
+            output_compression: 84
+        });
+    });
+
+    const imageData = imageResponse?.data?.[0]?.b64_json;
+
+    if (!imageData) {
+        throw new Error("Daily cover story image response did not contain image data.");
+    }
+
+    if (itemRow && isSupabaseAdminConfigured()) {
+        const media = await uploadEditorialImageAsset({
+            itemId: itemRow.id,
+            itemSlug: itemRow.slug,
+            contentType: "daily_cover_story",
+            dateKey: story.dateKey,
+            fileBaseName: itemRow.slug,
+            imageBuffer: Buffer.from(imageData, "base64"),
+            mimeType: "image/jpeg",
+            extension: "jpg",
+            altText: buildDailyCoverStoryImageAltText(story),
+            metadata: {
+                promptVersion: EDITORIAL_PROMPT_VERSIONS.daily_cover_story_image,
+                subjectName: story.subjectName,
+                title: story.title
+            }
+        });
+
+        const updatedRow = await updateEditorialItemMediaFields(itemRow.slug, media);
+
+        return normalizeStoredDailyCoverStory(buildCoverStoryRecordFromEditorialRow(updatedRow));
+    }
+
+    await mkdir(generatedCoverStoryDir, { recursive: true });
+    await writeFile(localFilePath, Buffer.from(imageData, "base64"));
+
+    return normalizeStoredDailyCoverStory({
+        ...story,
+        imageUrl: `/api/cover-story-image/${slug}.jpg`,
+        imageAlt: buildDailyCoverStoryImageAltText(story)
+    });
+}
+
+async function persistDailyCoverStory(story) {
+    const normalizedStory = normalizeDailyCoverStoryPayload(story.dateKey, story, story.publishedAt);
+
+    if (!isSupabaseAdminConfigured()) {
+        return await generateDailyCoverStoryImageForStory(normalizedStory, null);
+    }
+
+    const row = await upsertEditorialItemRecord({
+        slug: buildDailyCoverStorySlug(normalizedStory.dateKey),
+        content_type: "daily_article",
+        date_key: normalizedStory.dateKey,
+        location_key: null,
+        generation_signature: null,
+        status: EDITORIAL_STATUS_PUBLISHED,
+        title: normalizedStory.title,
+        summary: normalizedStory.summary,
+        payload: {
+            id: normalizedStory.id,
+            variant: "cover_story",
+            styleVersion: DAILY_COVER_STORY_STYLE_VERSION,
+            subjectName: normalizedStory.subjectName,
+            photoBrief: normalizedStory.photoBrief,
+            imageAlt: buildDailyCoverStoryImageAltText(normalizedStory)
+        },
+        source_model: client ? openAiModel : "fallback",
+        prompt_version: EDITORIAL_PROMPT_VERSIONS.daily_cover_story,
+        style_version: DAILY_COVER_STORY_STYLE_VERSION,
+        published_at: normalizedStory.publishedAt
+    });
+
+    return await generateDailyCoverStoryImageForStory(normalizedStory, row);
+}
+
+async function requestDailyCoverStoryFromModel(model, dateKey, theme) {
+    const aiResponse = await client.responses.create({
+        model,
+        max_output_tokens: 1000,
+        instructions: [
+            "Sa kirjutad eestikeelse päevase digiajakirja kaaneloo coverline'i ja lühikese sissejuhatuse.",
+            "Tulemus peab mõjuma nagu maitsekas Eesti elustiili- või sisustusajakirja kaanelugu, mitte reklaam ega pressiteade.",
+            "subjectName peab olema usutav Eesti ees- ja perekonnanimi.",
+            "title peab olema lühike, lööv ja ajakirjalik, kuni umbes 8 sõna.",
+            "summary peab olema üks lühike coverline või sissejuhatus, kuni umbes 26 sõna.",
+            "photoBrief peab olema ingliskeelne 2 kuni 4 lausega editorial cover photography brief.",
+            "photoBrief peab kirjeldama üht inimest, päris keskkonda, meeleolu ja kompositsiooni nii, et vasak ülemine ala jääks rahulikuks mastheadi jaoks.",
+            "Hoia toon kindel, intelligentne ja inimlik. Ära maini AI-d, prompti ega töövoogu.",
+            "Tagasta ainult puhas JSON."
+        ].join(" "),
+        input: [
+            `Kuupäev: ${dateKey}`,
+            `Tänane kaaneloo nurk: ${theme.prompt}`,
+            `Tänane teema silt: ${theme.label}`
+        ].join("\n"),
+        text: {
+            verbosity: "low",
+            format: {
+                type: "json_schema",
+                name: "daily_cover_story",
+                strict: true,
+                schema: DAILY_COVER_STORY_JSON_SCHEMA
+            }
+        }
+    });
+
+    if (aiResponse.status && aiResponse.status !== "completed") {
+        const reason = aiResponse.incomplete_details?.reason || aiResponse.status;
+        throw new Error(`Daily cover story response incomplete: ${reason}`);
+    }
+
+    return normalizeDailyCoverStoryPayload(dateKey, extractJsonObject(aiResponse.output_text));
+}
+
+async function generateDailyCoverStory(dateKey) {
+    const fallbackStory = buildFallbackDailyCoverStory(dateKey);
+    const theme = getCoverStoryThemeForDate(dateKey);
+
+    if (!client) {
+        return fallbackStory;
+    }
+
+    const candidateModels = [...new Set([openAiModel, "gpt-4.1"])];
+    let lastError = null;
+
+    for (const model of candidateModels) {
+        try {
+            return await runWithAiGenerationLog({
+                contentType: "daily_cover_story",
+                itemSlug: buildDailyCoverStorySlug(dateKey),
+                model,
+                promptVersion: EDITORIAL_PROMPT_VERSIONS.daily_cover_story,
+                inputPayload: {
+                    dateKey,
+                    theme: theme.label,
+                    prompt: theme.prompt
+                }
+            }, async function () {
+                return await requestDailyCoverStoryFromModel(model, dateKey, theme);
+            });
+        } catch (error) {
+            lastError = error;
+            console.error(`Failed to generate daily cover story with model ${model}.`, error);
+        }
+    }
+
+    console.error("Failed to generate daily cover story.", lastError);
+    return fallbackStory;
+}
+
+async function ensureDailyCoverStoryForDate(dateKey) {
+    await loadDailyCoverStories();
+
+    const existingStory = dailyCoverStories.find(function (story) {
+        return story.dateKey === dateKey || story.id === dateKey;
+    });
+
+    if (existingStory) {
+        if (isSupabaseAdminConfigured()) {
+            try {
+                const remoteRow = await fetchPublishedEditorialRowBySlug(buildDailyCoverStorySlug(dateKey));
+
+                if (!remoteRow) {
+                    const persistedStory = await persistDailyCoverStory(existingStory);
+
+                    dailyCoverStories = [
+                        persistedStory,
+                        ...dailyCoverStories.filter(function (story) {
+                            return story.id !== persistedStory.id && story.dateKey !== persistedStory.dateKey;
+                        })
+                    ].slice(0, DAILY_COVER_STORY_ARCHIVE_LIMIT);
+
+                    return persistedStory;
+                }
+
+                if (editorialRowNeedsCoverMedia(remoteRow)) {
+                    const storyToPersist = (remoteRow
+                        ? normalizeStoredDailyCoverStory(buildCoverStoryRecordFromEditorialRow(remoteRow))
+                        : null) || existingStory;
+                    const persistedStory = await persistDailyCoverStory(storyToPersist);
+
+                    dailyCoverStories = [
+                        persistedStory,
+                        ...dailyCoverStories.filter(function (story) {
+                            return story.id !== persistedStory.id && story.dateKey !== persistedStory.dateKey;
+                        })
+                    ].slice(0, DAILY_COVER_STORY_ARCHIVE_LIMIT);
+
+                    return persistedStory;
+                }
+            } catch (error) {
+                console.error("Failed to sync cached daily cover story to Supabase.", error);
+            }
+        }
+
+        return existingStory;
+    }
+
+    if (!dailyCoverStoryGenerationPromises.has(dateKey)) {
+        dailyCoverStoryGenerationPromises.set(dateKey, (async function () {
+            const story = await persistDailyCoverStory(await generateDailyCoverStory(dateKey));
+
+            dailyCoverStories = [
+                story,
+                ...dailyCoverStories.filter(function (existing) {
+                    return existing.id !== story.id && existing.dateKey !== story.dateKey;
+                })
+            ].slice(0, DAILY_COVER_STORY_ARCHIVE_LIMIT);
+
+            if (!isSupabaseAdminConfigured()) {
+                await saveDailyCoverStories();
+            }
+
+            return story;
+        }()).finally(function () {
+            dailyCoverStoryGenerationPromises.delete(dateKey);
+        }));
+    }
+
+    return dailyCoverStoryGenerationPromises.get(dateKey);
+}
+
+async function getDailyCoverStoryForToday() {
+    return ensureDailyCoverStoryForDate(getLocalDateKey());
+}
+
+async function backfillDailyCoverStories(count = DAILY_COVER_STORY_ARCHIVE_LIMIT) {
+    await loadDailyCoverStories();
+    const remoteCoverDateKeys = new Set();
+
+    if (isSupabaseAdminConfigured()) {
+        try {
+            const remoteRows = await fetchPublishedEditorialRows("daily_article", DAILY_COVER_STORY_ARCHIVE_LIMIT, {
+                slugPrefix: "daily-cover-story-"
+            });
+
+            remoteRows.forEach(function (row) {
+                remoteCoverDateKeys.add(getEditorialDateKey(row));
+            });
+        } catch (error) {
+            console.error("Failed to inspect remote daily cover story archive.", error);
+        }
+    }
+
+    const targetDateKeys = getRecentDateKeys(Math.max(1, Math.min(DAILY_COVER_STORY_ARCHIVE_LIMIT, Number(count) || 1)));
+
+    for (const dateKey of targetDateKeys) {
+        const existingStory = dailyCoverStories.find(function (story) {
+            return story.dateKey === dateKey || story.id === dateKey;
+        });
+
+        let remoteRow = null;
+
+        if (isSupabaseAdminConfigured()) {
+            try {
+                remoteRow = await fetchPublishedEditorialRowBySlug(buildDailyCoverStorySlug(dateKey));
+            } catch (error) {
+                console.error("Failed to load remote daily cover story.", error);
+            }
+        }
+
+        if (existingStory && isSupabaseAdminConfigured() && (!remoteCoverDateKeys.has(dateKey) || editorialRowNeedsCoverMedia(remoteRow))) {
+            const storyToPersist = (remoteRow
+                ? normalizeStoredDailyCoverStory(buildCoverStoryRecordFromEditorialRow(remoteRow))
+                : null) || existingStory;
+            const persistedStory = await persistDailyCoverStory(storyToPersist);
+
+            dailyCoverStories = [
+                persistedStory,
+                ...dailyCoverStories.filter(function (story) {
+                    return story.id !== persistedStory.id && story.dateKey !== persistedStory.dateKey;
+                })
+            ];
+            remoteCoverDateKeys.add(dateKey);
+        } else if (!existingStory) {
+            const story = await persistDailyCoverStory(await generateDailyCoverStory(dateKey));
+
+            dailyCoverStories = [
+                story,
+                ...dailyCoverStories.filter(function (existing) {
+                    return existing.id !== story.id && existing.dateKey !== story.dateKey;
+                })
+            ];
+
+            if (isSupabaseAdminConfigured()) {
+                remoteCoverDateKeys.add(dateKey);
+            }
+        }
+    }
+
+    dailyCoverStories = dailyCoverStories
+        .slice()
+        .sort(function (firstStory, secondStory) {
+            return getArchiveSortTimestamp(secondStory) - getArchiveSortTimestamp(firstStory);
+        })
+        .slice(0, DAILY_COVER_STORY_ARCHIVE_LIMIT);
+
+    if (!isSupabaseAdminConfigured()) {
+        await saveDailyCoverStories();
+    }
+
+    return dailyCoverStories;
+}
+
 function isDailyArticleTooSoft(article) {
     const compactText = [article.title, article.lead, article.highlight, article.bannerNote].join(" ");
     const fullText = [compactText, ...article.paragraphs].join(" ");
@@ -2473,13 +3740,19 @@ function normalizeDailyArticlePayload(dateKey, payload, publishedAt = new Date()
         lenses: normalizeTextList(payload.lenses, fallbackLenses, 3, 28).map(function (value, index) {
             return compactLabel(sanitizeLorienBrandText(value), sanitizeLorienBrandText(fallbackLenses[index]), 18);
         }),
-        readingTime: normalizeReadingTime(payload.readingTime, fallbackArticle.readingTime)
+        readingTime: normalizeReadingTime(payload.readingTime, fallbackArticle.readingTime),
+        imageUrl: normalizeField(payload.imageUrl || payload.image_url, "", 500),
+        imageAlt: normalizeField(payload.imageAlt || payload.image_alt, "", 180),
+        imageObjectPosition: normalizeField(payload.imageObjectPosition || payload.image_object_position, "", 32)
     };
 
     if (isDailyArticleTooSoft(normalizedArticle)) {
         return {
             ...fallbackArticle,
-            publishedAt
+            publishedAt,
+            imageUrl: normalizedArticle.imageUrl,
+            imageAlt: normalizedArticle.imageAlt,
+            imageObjectPosition: normalizedArticle.imageObjectPosition
         };
     }
 
@@ -2506,7 +3779,10 @@ function normalizeStoredDailyArticle(record) {
             paragraphs: record.paragraphs,
             takeaways: record.takeaways,
             lenses: record.lenses,
-            readingTime: record.readingTime
+            readingTime: record.readingTime,
+            imageUrl: record.imageUrl || record.image_url,
+            imageAlt: record.imageAlt || record.image_alt,
+            imageObjectPosition: record.imageObjectPosition || record.image_object_position
         }, publishedAt);
 }
 
@@ -2515,19 +3791,33 @@ async function loadDailyArticles() {
         return dailyArticles;
     }
 
-    try {
-        const raw = await readFile(dailyArticleCachePath, "utf8");
-        const payload = JSON.parse(raw);
-
-        dailyArticles = Array.isArray(payload?.articles)
-            ? payload.articles.map(normalizeStoredDailyArticle).filter(Boolean)
-            : [];
-    } catch (error) {
-        if (error?.code !== "ENOENT") {
-            console.error("Failed to load daily article archive.", error);
+    if (isSupabaseAdminConfigured()) {
+        try {
+            const rows = await fetchPublishedEditorialRows("daily_article", DAILY_ARTICLE_ARCHIVE_LIMIT, {
+                slugPrefix: "daily-article-"
+            });
+            dailyArticles = rows.map(buildArticleRecordFromEditorialRow).map(normalizeStoredDailyArticle).filter(Boolean);
+        } catch (error) {
+            console.error("Failed to load daily article archive from Supabase.", error);
+            dailyArticles = [];
         }
+    }
 
-        dailyArticles = [];
+    if (dailyArticles.length === 0) {
+        try {
+            const raw = await readFile(dailyArticleCachePath, "utf8");
+            const payload = JSON.parse(raw);
+
+            dailyArticles = Array.isArray(payload?.articles)
+                ? payload.articles.map(normalizeStoredDailyArticle).filter(Boolean)
+                : [];
+        } catch (error) {
+            if (error?.code !== "ENOENT") {
+                console.error("Failed to load daily article archive.", error);
+            }
+
+            dailyArticles = [];
+        }
     }
 
     dailyArticles.sort(function (firstArticle, secondArticle) {
@@ -2537,6 +3827,43 @@ async function loadDailyArticles() {
     dailyArticlesLoaded = true;
 
     return dailyArticles;
+}
+
+async function persistDailyArticle(article) {
+    const slug = buildDailyArticleSlug(article.dateKey);
+    const normalizedArticle = normalizeDailyArticlePayload(article.dateKey, article, article.publishedAt);
+
+    if (!isSupabaseAdminConfigured()) {
+        return normalizedArticle;
+    }
+
+    await upsertEditorialItemRecord({
+        slug,
+        content_type: "daily_article",
+        date_key: normalizedArticle.dateKey,
+        location_key: null,
+        generation_signature: null,
+        status: EDITORIAL_STATUS_PUBLISHED,
+        title: normalizedArticle.title,
+        summary: normalizedArticle.lead,
+        payload: {
+            id: normalizedArticle.id,
+            theme: normalizedArticle.theme,
+            highlight: normalizedArticle.highlight,
+            bannerNote: normalizedArticle.bannerNote,
+            paragraphs: normalizedArticle.paragraphs,
+            takeaways: normalizedArticle.takeaways,
+            lenses: normalizedArticle.lenses,
+            readingTime: normalizedArticle.readingTime
+        },
+        cover_media_url: normalizeField(normalizedArticle.imageUrl, "", 500) || undefined,
+        source_model: client ? articleModel : "fallback",
+        prompt_version: EDITORIAL_PROMPT_VERSIONS.daily_article,
+        style_version: DAILY_ARTICLE_STYLE_VERSION,
+        published_at: normalizedArticle.publishedAt
+    });
+
+    return normalizedArticle;
 }
 
 async function saveDailyArticles() {
@@ -2570,19 +3897,47 @@ async function loadNewsletterSignups() {
         return newsletterSignups;
     }
 
-    try {
-        const raw = await readFile(newsletterSignupsCachePath, "utf8");
-        const payload = JSON.parse(raw);
+    if (isSupabaseAdminConfigured()) {
+        try {
+            const { data, error } = await supabaseAdmin
+                .from("newsletter_signups")
+                .select("email, created_at")
+                .order("created_at", { ascending: false })
+                .limit(500);
 
-        newsletterSignups = Array.isArray(payload?.signups)
-            ? payload.signups.map(normalizeStoredNewsletterSignup).filter(Boolean)
-            : [];
-    } catch (error) {
-        if (error?.code !== "ENOENT") {
-            console.error("Failed to load newsletter signups.", error);
+            if (error) {
+                throw error;
+            }
+
+            newsletterSignups = Array.isArray(data)
+                ? data.map(function (row) {
+                    return normalizeStoredNewsletterSignup({
+                        email: row.email,
+                        createdAt: row.created_at
+                    });
+                }).filter(Boolean)
+                : [];
+        } catch (error) {
+            console.error("Failed to load newsletter signups from Supabase.", error);
+            newsletterSignups = [];
         }
+    }
 
-        newsletterSignups = [];
+    if (newsletterSignups.length === 0) {
+        try {
+            const raw = await readFile(newsletterSignupsCachePath, "utf8");
+            const payload = JSON.parse(raw);
+
+            newsletterSignups = Array.isArray(payload?.signups)
+                ? payload.signups.map(normalizeStoredNewsletterSignup).filter(Boolean)
+                : [];
+        } catch (error) {
+            if (error?.code !== "ENOENT") {
+                console.error("Failed to load newsletter signups.", error);
+            }
+
+            newsletterSignups = [];
+        }
     }
 
     newsletterSignupsLoaded = true;
@@ -2599,8 +3954,6 @@ async function saveNewsletterSignups() {
 }
 
 async function addNewsletterSignup(email) {
-    await loadNewsletterSignups();
-
     const normalizedEmail = normalizeEmailAddress(email);
 
     if (!isValidNewsletterEmail(normalizedEmail)) {
@@ -2608,6 +3961,52 @@ async function addNewsletterSignup(email) {
             status: "invalid"
         };
     }
+
+    if (isSupabaseAdminConfigured()) {
+        const { data: existingSignup, error: existingSignupError } = await supabaseAdmin
+            .from("newsletter_signups")
+            .select("email, created_at")
+            .eq("email_normalized", normalizedEmail)
+            .maybeSingle();
+
+        if (existingSignupError) {
+            throw existingSignupError;
+        }
+
+        if (existingSignup) {
+            return {
+                status: "existing",
+                signup: normalizeStoredNewsletterSignup({
+                    email: existingSignup.email,
+                    createdAt: existingSignup.created_at
+                })
+            };
+        }
+
+        const { data: insertedSignup, error: insertError } = await supabaseAdmin
+            .from("newsletter_signups")
+            .insert({
+                email: normalizedEmail,
+                email_normalized: normalizedEmail,
+                source: "homepage-form"
+            })
+            .select("email, created_at")
+            .single();
+
+        if (insertError) {
+            throw insertError;
+        }
+
+        return {
+            status: "created",
+            signup: normalizeStoredNewsletterSignup({
+                email: insertedSignup.email,
+                createdAt: insertedSignup.created_at
+            })
+        };
+    }
+
+    await loadNewsletterSignups();
 
     const existingSignup = newsletterSignups.find(function (signup) {
         return signup.email === normalizedEmail;
@@ -2708,7 +4107,19 @@ async function generateDailyArticle(dateKey) {
 
     for (const model of candidateModels) {
         try {
-            return await requestDailyArticleFromModel(model, dateKey, theme);
+            return await runWithAiGenerationLog({
+                contentType: "daily_article",
+                itemSlug: buildDailyArticleSlug(dateKey),
+                model,
+                promptVersion: EDITORIAL_PROMPT_VERSIONS.daily_article,
+                inputPayload: {
+                    dateKey,
+                    theme: theme.label,
+                    prompt: theme.prompt
+                }
+            }, async function () {
+                return await requestDailyArticleFromModel(model, dateKey, theme);
+            });
         } catch (error) {
             lastError = error;
             console.error(`Failed to generate daily article with model ${model}.`, error);
@@ -2728,12 +4139,33 @@ async function ensureDailyArticleForToday() {
     });
 
     if (existingArticle) {
+        if (isSupabaseAdminConfigured()) {
+            try {
+                const remoteRow = await fetchPublishedEditorialRowBySlug(buildDailyArticleSlug(todayKey));
+
+                if (!remoteRow) {
+                    const persistedArticle = await persistDailyArticle(existingArticle);
+
+                    dailyArticles = [
+                        persistedArticle,
+                        ...dailyArticles.filter(function (article) {
+                            return article.id !== persistedArticle.id && article.dateKey !== persistedArticle.dateKey;
+                        })
+                    ].slice(0, DAILY_ARTICLE_ARCHIVE_LIMIT);
+
+                    return persistedArticle;
+                }
+            } catch (error) {
+                console.error("Failed to sync cached daily article to Supabase.", error);
+            }
+        }
+
         return existingArticle;
     }
 
     if (!dailyArticleGenerationPromise) {
         dailyArticleGenerationPromise = (async function () {
-            const article = await generateDailyArticle(todayKey);
+            const article = await persistDailyArticle(await generateDailyArticle(todayKey));
 
             dailyArticles = [
                 article,
@@ -2742,7 +4174,10 @@ async function ensureDailyArticleForToday() {
                 })
             ].slice(0, DAILY_ARTICLE_ARCHIVE_LIMIT);
 
-            await saveDailyArticles();
+            if (!isSupabaseAdminConfigured()) {
+                await saveDailyArticles();
+            }
+
             return article;
         }()).finally(function () {
             dailyArticleGenerationPromise = null;
@@ -2765,6 +4200,21 @@ async function getDailyArticleArchive() {
 
 async function backfillDailyArticles(count = DAILY_ARTICLE_PUBLIC_LIMIT) {
     await loadDailyArticles();
+    const remoteArticleDateKeys = new Set();
+
+    if (isSupabaseAdminConfigured()) {
+        try {
+            const remoteRows = await fetchPublishedEditorialRows("daily_article", DAILY_ARTICLE_ARCHIVE_LIMIT, {
+                slugPrefix: "daily-article-"
+            });
+
+            remoteRows.forEach(function (row) {
+                remoteArticleDateKeys.add(getEditorialDateKey(row));
+            });
+        } catch (error) {
+            console.error("Failed to inspect remote daily article archive.", error);
+        }
+    }
 
     const targetDateKeys = getRecentDateKeys(count);
 
@@ -2773,14 +4223,28 @@ async function backfillDailyArticles(count = DAILY_ARTICLE_PUBLIC_LIMIT) {
             return article.dateKey === dateKey || article.id === dateKey;
         });
 
-        if (!existingArticle) {
-            const article = await generateDailyArticle(dateKey);
+        if (existingArticle && isSupabaseAdminConfigured() && !remoteArticleDateKeys.has(dateKey)) {
+            const persistedArticle = await persistDailyArticle(existingArticle);
+
+            dailyArticles = [
+                persistedArticle,
+                ...dailyArticles.filter(function (article) {
+                    return article.id !== persistedArticle.id && article.dateKey !== persistedArticle.dateKey;
+                })
+            ];
+            remoteArticleDateKeys.add(dateKey);
+        } else if (!existingArticle) {
+            const article = await persistDailyArticle(await generateDailyArticle(dateKey));
             dailyArticles = [
                 article,
                 ...dailyArticles.filter(function (existing) {
                     return existing.id !== article.id && existing.dateKey !== article.dateKey;
                 })
             ];
+
+            if (isSupabaseAdminConfigured()) {
+                remoteArticleDateKeys.add(dateKey);
+            }
         }
     }
 
@@ -2791,7 +4255,10 @@ async function backfillDailyArticles(count = DAILY_ARTICLE_PUBLIC_LIMIT) {
         })
         .slice(0, DAILY_ARTICLE_ARCHIVE_LIMIT);
 
-    await saveDailyArticles();
+    if (!isSupabaseAdminConfigured()) {
+        await saveDailyArticles();
+    }
+
     return dailyArticles.slice(0, Math.max(1, Number(count) || DAILY_ARTICLE_PUBLIC_LIMIT));
 }
 
@@ -2872,13 +4339,19 @@ function normalizeDailyPersonaPayload(dateKey, payload, publishedAt = new Date()
         takeaways: normalizeTextList(payload.takeaways, fallbackTakeaways, 3, 54).map(function (value, index) {
             return compactLabel(sanitizeAdministrativeLanguage(value), sanitizeAdministrativeLanguage(fallbackTakeaways[index]), 34);
         }),
-        readingTime: normalizeReadingTime(payload.readingTime, fallbackStory.readingTime)
+        readingTime: normalizeReadingTime(payload.readingTime, fallbackStory.readingTime),
+        imageUrl: normalizeField(payload.imageUrl || payload.image_url, "", 500),
+        imageAlt: normalizeField(payload.imageAlt || payload.image_alt, "", 180),
+        imageObjectPosition: normalizeField(payload.imageObjectPosition || payload.image_object_position, "", 32)
     };
 
     if (isDailyPersonaTooSoft(normalizedStory)) {
         return {
             ...fallbackStory,
-            publishedAt
+            publishedAt,
+            imageUrl: normalizedStory.imageUrl,
+            imageAlt: normalizedStory.imageAlt,
+            imageObjectPosition: normalizedStory.imageObjectPosition
         };
     }
 
@@ -2907,8 +4380,138 @@ function normalizeStoredDailyPersona(record) {
         photoBrief: record.photoBrief || record.photo_brief,
         paragraphs: record.paragraphs,
         takeaways: record.takeaways,
-        readingTime: record.readingTime
+        readingTime: record.readingTime,
+        imageUrl: record.imageUrl || record.image_url,
+        imageAlt: record.imageAlt || record.image_alt,
+        imageObjectPosition: record.imageObjectPosition || record.image_object_position
     }, publishedAt);
+}
+
+function buildDailyPersonaImageAltText(story) {
+    const name = normalizeField(story?.characterName, "Persooniloo peategelane", 48);
+    const theme = normalizeField(story?.theme, "persoonilugu", 42);
+    return `${name} persooniloo portree teemal "${theme}"`;
+}
+
+function buildDailyPersonaImagePrompt(story) {
+    const photoBrief = normalizeField(
+        story?.photoBrief,
+        "World-class Nordic editorial portrait of a believable Estonian interview subject in a real environment, warm and natural, not posed, not stock-like.",
+        400
+    );
+
+    return [
+        "Use case: photorealistic-natural",
+        "Asset type: editorial magazine feature image",
+        `Primary request: ${photoBrief}`,
+        `Story context: Estonian human-interest magazine story about ${sanitizeProblemText([story?.theme, story?.lead, story?.characterMeta].filter(Boolean).join(", "))}.`,
+        "Style direction: premium editorial photography, candid environmental portrait, modern Nordic magazine quality, believable, elegant, warm, not corporate, not stock-photo.",
+        "Composition: single strong hero image, natural setting, rich lived-in detail, visually memorable but realistic, enough negative space for responsive crops.",
+        "Lighting: natural daylight or soft practical light, truthful skin texture, real clothing texture, tasteful contrast.",
+        "Constraints: no text, no logos, no watermark, no user interface, no collage, no cover lines, no obvious AI artifacts, no plastic skin, no exaggerated props."
+    ].join("\n");
+}
+
+async function generateDailyPersonaImageForItem(story, itemRow) {
+    if (!client || !supabaseAdmin || !itemRow?.slug) {
+        return itemRow;
+    }
+
+    if (itemRow.cover_media_url) {
+        return itemRow;
+    }
+
+    const prompt = buildDailyPersonaImagePrompt(story);
+    const imageResponse = await runWithAiGenerationLog({
+        contentType: "daily_persona",
+        itemSlug: itemRow.slug,
+        model: imageModel,
+        promptVersion: EDITORIAL_PROMPT_VERSIONS.daily_persona_image,
+        inputPayload: {
+            dateKey: story.dateKey,
+            title: story.title,
+            theme: story.theme,
+            photoBrief: story.photoBrief
+        }
+    }, async function () {
+        return await client.images.generate({
+            model: imageModel,
+            prompt,
+            size: "1536x1024",
+            quality: "high",
+            output_format: "jpeg",
+            output_compression: 84
+        });
+    });
+
+    const imageData = imageResponse?.data?.[0]?.b64_json;
+
+    if (!imageData) {
+        throw new Error("Daily persona image response did not contain image data.");
+    }
+
+    const media = await uploadEditorialImageAsset({
+        itemId: itemRow.id,
+        itemSlug: itemRow.slug,
+        contentType: "daily_persona",
+        dateKey: story.dateKey,
+        fileBaseName: itemRow.slug,
+        imageBuffer: Buffer.from(imageData, "base64"),
+        mimeType: "image/jpeg",
+        extension: "jpg",
+        altText: buildDailyPersonaImageAltText(story),
+        metadata: {
+            promptVersion: EDITORIAL_PROMPT_VERSIONS.daily_persona_image,
+            title: story.title,
+            theme: story.theme
+        }
+    });
+
+    return await updateEditorialItemMediaFields(itemRow.slug, media);
+}
+
+async function persistDailyPersona(story) {
+    const normalizedStory = normalizeDailyPersonaPayload(story.dateKey, story, story.publishedAt);
+
+    if (!isSupabaseAdminConfigured()) {
+        return normalizedStory;
+    }
+
+    let row = await upsertEditorialItemRecord({
+        slug: buildDailyPersonaSlug(normalizedStory.dateKey),
+        content_type: "daily_persona",
+        date_key: normalizedStory.dateKey,
+        location_key: null,
+        generation_signature: null,
+        status: EDITORIAL_STATUS_PUBLISHED,
+        title: normalizedStory.title,
+        summary: normalizedStory.lead,
+        payload: {
+            id: normalizedStory.id,
+            theme: normalizedStory.theme,
+            characterName: normalizedStory.characterName,
+            characterMeta: normalizedStory.characterMeta,
+            highlight: normalizedStory.highlight,
+            resultNote: normalizedStory.resultNote,
+            photoBrief: normalizedStory.photoBrief,
+            paragraphs: normalizedStory.paragraphs,
+            takeaways: normalizedStory.takeaways,
+            readingTime: normalizedStory.readingTime,
+            imageAlt: buildDailyPersonaImageAltText(normalizedStory)
+        },
+        source_model: client ? personaModel : "fallback",
+        prompt_version: EDITORIAL_PROMPT_VERSIONS.daily_persona,
+        style_version: DAILY_PERSONA_STYLE_VERSION,
+        published_at: normalizedStory.publishedAt
+    });
+
+    try {
+        row = await generateDailyPersonaImageForItem(normalizedStory, row);
+    } catch (error) {
+        console.error("Failed to generate daily persona image.", error);
+    }
+
+    return normalizeStoredDailyPersona(buildPersonaRecordFromEditorialRow(row));
 }
 
 async function loadDailyPersonas() {
@@ -2916,19 +4519,31 @@ async function loadDailyPersonas() {
         return dailyPersonas;
     }
 
-    try {
-        const raw = await readFile(dailyPersonaCachePath, "utf8");
-        const payload = JSON.parse(raw);
-
-        dailyPersonas = Array.isArray(payload?.stories)
-            ? payload.stories.map(normalizeStoredDailyPersona).filter(Boolean)
-            : [];
-    } catch (error) {
-        if (error?.code !== "ENOENT") {
-            console.error("Failed to load daily persona archive.", error);
+    if (isSupabaseAdminConfigured()) {
+        try {
+            const rows = await fetchPublishedEditorialRows("daily_persona", DAILY_PERSONA_ARCHIVE_LIMIT);
+            dailyPersonas = rows.map(buildPersonaRecordFromEditorialRow).map(normalizeStoredDailyPersona).filter(Boolean);
+        } catch (error) {
+            console.error("Failed to load daily persona archive from Supabase.", error);
+            dailyPersonas = [];
         }
+    }
 
-        dailyPersonas = [];
+    if (dailyPersonas.length === 0) {
+        try {
+            const raw = await readFile(dailyPersonaCachePath, "utf8");
+            const payload = JSON.parse(raw);
+
+            dailyPersonas = Array.isArray(payload?.stories)
+                ? payload.stories.map(normalizeStoredDailyPersona).filter(Boolean)
+                : [];
+        } catch (error) {
+            if (error?.code !== "ENOENT") {
+                console.error("Failed to load daily persona archive.", error);
+            }
+
+            dailyPersonas = [];
+        }
     }
 
     dailyPersonas.sort(function (firstStory, secondStory) {
@@ -3039,7 +4654,19 @@ async function generateDailyPersona(dateKey) {
 
     for (const model of candidateModels) {
         try {
-            return await requestDailyPersonaFromModel(model, dateKey, theme, dailyPersonas);
+            return await runWithAiGenerationLog({
+                contentType: "daily_persona",
+                itemSlug: buildDailyPersonaSlug(dateKey),
+                model,
+                promptVersion: EDITORIAL_PROMPT_VERSIONS.daily_persona,
+                inputPayload: {
+                    dateKey,
+                    theme: theme.label,
+                    prompt: theme.prompt
+                }
+            }, async function () {
+                return await requestDailyPersonaFromModel(model, dateKey, theme, dailyPersonas);
+            });
         } catch (error) {
             lastError = error;
             console.error(`Failed to generate daily persona with model ${model}.`, error);
@@ -3059,12 +4686,49 @@ async function ensureDailyPersonaForToday() {
     });
 
     if (existingStory) {
+        if (isSupabaseAdminConfigured()) {
+            try {
+                const remoteRow = await fetchPublishedEditorialRowBySlug(buildDailyPersonaSlug(todayKey));
+
+                if (!remoteRow) {
+                    const persistedStory = await persistDailyPersona(existingStory);
+
+                    dailyPersonas = [
+                        persistedStory,
+                        ...dailyPersonas.filter(function (story) {
+                            return story.id !== persistedStory.id && story.dateKey !== persistedStory.dateKey;
+                        })
+                    ].slice(0, DAILY_PERSONA_ARCHIVE_LIMIT);
+
+                    return persistedStory;
+                }
+
+                if (editorialRowNeedsCoverMedia(remoteRow)) {
+                    const storyToPersist = (remoteRow
+                        ? normalizeStoredDailyPersona(buildPersonaRecordFromEditorialRow(remoteRow))
+                        : null) || existingStory;
+                    const persistedStory = await persistDailyPersona(storyToPersist);
+
+                    dailyPersonas = [
+                        persistedStory,
+                        ...dailyPersonas.filter(function (story) {
+                            return story.id !== persistedStory.id && story.dateKey !== persistedStory.dateKey;
+                        })
+                    ].slice(0, DAILY_PERSONA_ARCHIVE_LIMIT);
+
+                    return persistedStory;
+                }
+            } catch (error) {
+                console.error("Failed to sync cached daily persona story to Supabase.", error);
+            }
+        }
+
         return existingStory;
     }
 
     if (!dailyPersonaGenerationPromise) {
         dailyPersonaGenerationPromise = (async function () {
-            const story = await generateDailyPersona(todayKey);
+            const story = await persistDailyPersona(await generateDailyPersona(todayKey));
 
             dailyPersonas = [
                 story,
@@ -3073,7 +4737,10 @@ async function ensureDailyPersonaForToday() {
                 })
             ].slice(0, DAILY_PERSONA_ARCHIVE_LIMIT);
 
-            await saveDailyPersonas();
+            if (!isSupabaseAdminConfigured()) {
+                await saveDailyPersonas();
+            }
+
             return story;
         }()).finally(function () {
             dailyPersonaGenerationPromise = null;
@@ -3096,6 +4763,19 @@ async function getDailyPersonaArchive() {
 
 async function backfillDailyPersonas(count = DAILY_PERSONA_PUBLIC_LIMIT) {
     await loadDailyPersonas();
+    const remotePersonaDateKeys = new Set();
+
+    if (isSupabaseAdminConfigured()) {
+        try {
+            const remoteRows = await fetchPublishedEditorialRows("daily_persona", DAILY_PERSONA_ARCHIVE_LIMIT);
+
+            remoteRows.forEach(function (row) {
+                remotePersonaDateKeys.add(getEditorialDateKey(row));
+            });
+        } catch (error) {
+            console.error("Failed to inspect remote daily persona archive.", error);
+        }
+    }
 
     const targetDateKeys = getRecentDateKeys(count);
 
@@ -3104,14 +4784,41 @@ async function backfillDailyPersonas(count = DAILY_PERSONA_PUBLIC_LIMIT) {
             return story.dateKey === dateKey || story.id === dateKey;
         });
 
-        if (!existingStory) {
-            const story = await generateDailyPersona(dateKey);
+        let remoteRow = null;
+
+        if (isSupabaseAdminConfigured()) {
+            try {
+                remoteRow = await fetchPublishedEditorialRowBySlug(buildDailyPersonaSlug(dateKey));
+            } catch (error) {
+                console.error("Failed to load remote daily persona story.", error);
+            }
+        }
+
+        if (existingStory && isSupabaseAdminConfigured() && (!remotePersonaDateKeys.has(dateKey) || editorialRowNeedsCoverMedia(remoteRow))) {
+            const storyToPersist = (remoteRow
+                ? normalizeStoredDailyPersona(buildPersonaRecordFromEditorialRow(remoteRow))
+                : null) || existingStory;
+            const persistedStory = await persistDailyPersona(storyToPersist);
+
+            dailyPersonas = [
+                persistedStory,
+                ...dailyPersonas.filter(function (story) {
+                    return story.id !== persistedStory.id && story.dateKey !== persistedStory.dateKey;
+                })
+            ];
+            remotePersonaDateKeys.add(dateKey);
+        } else if (!existingStory) {
+            const story = await persistDailyPersona(await generateDailyPersona(dateKey));
             dailyPersonas = [
                 story,
                 ...dailyPersonas.filter(function (existing) {
                     return existing.id !== story.id && existing.dateKey !== story.dateKey;
                 })
             ];
+
+            if (isSupabaseAdminConfigured()) {
+                remotePersonaDateKeys.add(dateKey);
+            }
         }
     }
 
@@ -3122,7 +4829,10 @@ async function backfillDailyPersonas(count = DAILY_PERSONA_PUBLIC_LIMIT) {
         })
         .slice(0, DAILY_PERSONA_ARCHIVE_LIMIT);
 
-    await saveDailyPersonas();
+    if (!isSupabaseAdminConfigured()) {
+        await saveDailyPersonas();
+    }
+
     return dailyPersonas.slice(0, Math.max(1, Number(count) || DAILY_PERSONA_PUBLIC_LIMIT));
 }
 
@@ -3210,20 +4920,68 @@ async function loadDailyHoroscope() {
         return dailyHoroscope;
     }
 
-    try {
-        const raw = await readFile(dailyHoroscopeCachePath, "utf8");
-        const payload = JSON.parse(raw);
-        dailyHoroscope = normalizeStoredDailyHoroscope(payload);
-    } catch (error) {
-        if (error?.code !== "ENOENT") {
-            console.error("Failed to load daily horoscope.", error);
+    if (isSupabaseAdminConfigured()) {
+        try {
+            const row = await fetchPublishedEditorialRowBySlug(buildDailyHoroscopeSlug(getLocalDateKey()));
+            dailyHoroscope = row ? buildHoroscopeRecordFromEditorialRow(row) : null;
+        } catch (error) {
+            console.error("Failed to load daily horoscope from Supabase.", error);
+            dailyHoroscope = null;
         }
+    }
 
-        dailyHoroscope = null;
+    if (!dailyHoroscope) {
+        try {
+            const raw = await readFile(dailyHoroscopeCachePath, "utf8");
+            const payload = JSON.parse(raw);
+            dailyHoroscope = normalizeStoredDailyHoroscope(payload);
+        } catch (error) {
+            if (error?.code !== "ENOENT") {
+                console.error("Failed to load daily horoscope.", error);
+            }
+
+            dailyHoroscope = null;
+        }
     }
 
     dailyHoroscopeLoaded = true;
     return dailyHoroscope;
+}
+
+async function persistDailyHoroscope(horoscope) {
+    if (!horoscope) {
+        return horoscope;
+    }
+
+    const normalizedHoroscope = normalizeDailyHoroscopePayload(
+        horoscope.dateKey,
+        horoscope,
+        horoscope.publishedAt
+    );
+
+    if (!isSupabaseAdminConfigured()) {
+        return normalizedHoroscope;
+    }
+
+    await upsertEditorialItemRecord({
+        slug: buildDailyHoroscopeSlug(normalizedHoroscope.dateKey),
+        content_type: "daily_horoscope",
+        date_key: normalizedHoroscope.dateKey,
+        location_key: null,
+        generation_signature: null,
+        status: EDITORIAL_STATUS_PUBLISHED,
+        title: `Horoskoop ${normalizedHoroscope.dateKey}`,
+        summary: "Päeva horoskoop 12 tähemärgile.",
+        payload: {
+            signs: normalizedHoroscope.signs
+        },
+        source_model: client ? horoscopeModel : "fallback",
+        prompt_version: EDITORIAL_PROMPT_VERSIONS.daily_horoscope,
+        style_version: DAILY_HOROSCOPE_STYLE_VERSION,
+        published_at: normalizedHoroscope.publishedAt
+    });
+
+    return normalizedHoroscope;
 }
 
 async function saveDailyHoroscope() {
@@ -3243,47 +5001,57 @@ async function generateDailyHoroscope(dateKey) {
     }
 
     try {
-        const aiResponse = await client.responses.create({
+        const aiResponse = await runWithAiGenerationLog({
+            contentType: "daily_horoscope",
+            itemSlug: buildDailyHoroscopeSlug(dateKey),
             model: horoscopeModel,
-            max_output_tokens: 2000,
-            reasoning: {
-                effort: "low"
-            },
-            instructions: [
-                "Sa kirjutad eestikeelse päevase horoskoobi 12 tähemärgile.",
-                "Iga tähemärgi tekst peab olema seotud probleemide, hõõrdumise, otsuste, lahtiste otsade või nende lahendamisega.",
-                "Toon peab olema jutustav, voolav ja horoskoobile omane, aga samal ajal maitsekas ja usutav.",
-                "See peab lugedes mõjuma nagu päris horoskoobirubriik, mitte nagu juhend, checklist või lahenduste nimekiri.",
-                "Lauseehitus võib olla horoskoobile omane, näiteks 'täna oled...' või 'päeva peale võib selguda...'.",
-                "Ära alusta kõiki tähemärke sama mustriga ja väldi korduvat mehhaanilist rütmi.",
-                "Ära kasuta sõnu või ideid nagu universum, kosmiline energia, retrograad, vibratsioon, hinge teekond, tervenemine, manifestatsioon.",
-                "Ära maini AI-d, mudelit ega sisu loomise protsessi.",
-                "Iga märgi title peab olema lühike, kuni umbes 4 sõna.",
-                "paragraphs peab sisaldama täpselt 3 lühikest lõiku, mis loevad kokku ühe voolava horoskoobina.",
-                "Esimene lõik peab seadma päeva tooni ja näitama, kuidas lahtised teemad või probleemid sind täna mõjutavad.",
-                "Teine lõik peab kirjeldama, kus kohas pinge, hõõrdumine või mõni lahendamata küsimus end näitab.",
-                "Kolmas lõik peab andma elegantse horoskoobilaadse suuna selle kohta, mis juhtub siis, kui teema käsile võtad või õigel hetkel lõpetad.",
-                "Kirjuta konkreetselt, aga ära muutu käskivaks ega tehniliseks.",
-                "indicators peab andma kolm päeva näidikut skaalal 1 kuni 5: money, relationships, family.",
-                "Näidikud peavad sobima sama päeva tooniga, mitte olema juhuslikud.",
-                "Tagasta ainult puhas JSON."
-            ].join(" "),
-            input: [
-                `Kuupäev: ${dateKey}`,
-                "Tähemärgid ja toonid:",
-                HOROSCOPE_SIGNS.map(function (signMeta) {
-                    return `- ${signMeta.label} (${signMeta.id}): ${signMeta.prompt}`;
-                }).join("\n")
-            ].join("\n"),
-            text: {
-                verbosity: "low",
-                format: {
-                    type: "json_schema",
-                    name: "daily_horoscope",
-                    strict: true,
-                    schema: DAILY_HOROSCOPE_JSON_SCHEMA
-                }
+            promptVersion: EDITORIAL_PROMPT_VERSIONS.daily_horoscope,
+            inputPayload: {
+                dateKey
             }
+        }, async function () {
+            return await client.responses.create({
+                model: horoscopeModel,
+                max_output_tokens: 2000,
+                reasoning: {
+                    effort: "low"
+                },
+                instructions: [
+                    "Sa kirjutad eestikeelse päevase horoskoobi 12 tähemärgile.",
+                    "Iga tähemärgi tekst peab olema seotud probleemide, hõõrdumise, otsuste, lahtiste otsade või nende lahendamisega.",
+                    "Toon peab olema jutustav, voolav ja horoskoobile omane, aga samal ajal maitsekas ja usutav.",
+                    "See peab lugedes mõjuma nagu päris horoskoobirubriik, mitte nagu juhend, checklist või lahenduste nimekiri.",
+                    "Lauseehitus võib olla horoskoobile omane, näiteks 'täna oled...' või 'päeva peale võib selguda...'.",
+                    "Ära alusta kõiki tähemärke sama mustriga ja väldi korduvat mehhaanilist rütmi.",
+                    "Ära kasuta sõnu või ideid nagu universum, kosmiline energia, retrograad, vibratsioon, hinge teekond, tervenemine, manifestatsioon.",
+                    "Ära maini AI-d, mudelit ega sisu loomise protsessi.",
+                    "Iga märgi title peab olema lühike, kuni umbes 4 sõna.",
+                    "paragraphs peab sisaldama täpselt 3 lühikest lõiku, mis loevad kokku ühe voolava horoskoobina.",
+                    "Esimene lõik peab seadma päeva tooni ja näitama, kuidas lahtised teemad või probleemid sind täna mõjutavad.",
+                    "Teine lõik peab kirjeldama, kus kohas pinge, hõõrdumine või mõni lahendamata küsimus end näitab.",
+                    "Kolmas lõik peab andma elegantse horoskoobilaadse suuna selle kohta, mis juhtub siis, kui teema käsile võtad või õigel hetkel lõpetad.",
+                    "Kirjuta konkreetselt, aga ära muutu käskivaks ega tehniliseks.",
+                    "indicators peab andma kolm päeva näidikut skaalal 1 kuni 5: money, relationships, family.",
+                    "Näidikud peavad sobima sama päeva tooniga, mitte olema juhuslikud.",
+                    "Tagasta ainult puhas JSON."
+                ].join(" "),
+                input: [
+                    `Kuupäev: ${dateKey}`,
+                    "Tähemärgid ja toonid:",
+                    HOROSCOPE_SIGNS.map(function (signMeta) {
+                        return `- ${signMeta.label} (${signMeta.id}): ${signMeta.prompt}`;
+                    }).join("\n")
+                ].join("\n"),
+                text: {
+                    verbosity: "low",
+                    format: {
+                        type: "json_schema",
+                        name: "daily_horoscope",
+                        strict: true,
+                        schema: DAILY_HOROSCOPE_JSON_SCHEMA
+                    }
+                }
+            });
         });
 
         const payload = extractJsonObject(aiResponse.output_text);
@@ -3299,13 +5067,29 @@ async function ensureDailyHoroscopeForToday() {
     await loadDailyHoroscope();
 
     if (dailyHoroscope?.dateKey === todayKey) {
+        if (isSupabaseAdminConfigured()) {
+            try {
+                const remoteRow = await fetchPublishedEditorialRowBySlug(buildDailyHoroscopeSlug(todayKey));
+
+                if (!remoteRow) {
+                    dailyHoroscope = await persistDailyHoroscope(dailyHoroscope);
+                }
+            } catch (error) {
+                console.error("Failed to sync cached daily horoscope to Supabase.", error);
+            }
+        }
+
         return dailyHoroscope;
     }
 
     if (!dailyHoroscopeGenerationPromise) {
         dailyHoroscopeGenerationPromise = (async function () {
-            dailyHoroscope = await generateDailyHoroscope(todayKey);
-            await saveDailyHoroscope();
+            dailyHoroscope = await persistDailyHoroscope(await generateDailyHoroscope(todayKey));
+
+            if (!isSupabaseAdminConfigured()) {
+                await saveDailyHoroscope();
+            }
+
             return dailyHoroscope;
         }()).finally(function () {
             dailyHoroscopeGenerationPromise = null;
@@ -3464,6 +5248,7 @@ app.get("/api/health", function (_request, response) {
     response.json({
         ok: true,
         openAiConfigured: Boolean(client),
+        supabaseEditorialConfigured: isSupabaseAdminConfigured(),
         model: openAiModel
     });
 });
@@ -3472,6 +5257,55 @@ app.get("/api/recent-problems", function (_request, response) {
     response.json({
         problems: recentProblemReports
     });
+});
+
+app.get("/api/daily-cover-story", async function (_request, response) {
+    try {
+        const story = await getDailyCoverStoryForToday();
+
+        response.json({
+            date: story?.dateKey || getLocalDateKey(),
+            story: story || null
+        });
+    } catch (error) {
+        console.error("Failed to prepare daily cover story.", error);
+        response.status(500).json({
+            error: "Päeva kaaneloo laadimine ebaõnnestus."
+        });
+    }
+});
+
+app.get("/api/cover-story-image/:imageFile", async function (request, response) {
+    const imageFile = sanitizeProblemText(request.params.imageFile).replace(/[^a-z0-9_.-]/giu, "");
+    const slug = imageFile.replace(/\.(?:jpe?g|png|webp)$/iu, "");
+
+    if (!slug) {
+        response.status(400).json({
+            error: "Kaaneloo pildi võti puudub."
+        });
+        return;
+    }
+
+    try {
+        const filePath = getCoverStoryImageFilePath(slug);
+
+        if (!(await doesFileExist(filePath))) {
+            const fallbackPath = path.join(__dirname, "assets", "cover-story-feature.jpg");
+            const fallbackBuffer = await readFile(fallbackPath);
+            response.setHeader("Cache-Control", "public, max-age=3600");
+            response.type("image/jpeg").send(fallbackBuffer);
+            return;
+        }
+
+        const fileBuffer = await readFile(filePath);
+        response.setHeader("Cache-Control", "public, max-age=86400");
+        response.type("image/jpeg").send(fileBuffer);
+    } catch (error) {
+        console.error("Failed to serve cover story image.", error);
+        response.status(500).json({
+            error: "Kaaneloo pildi laadimine ebaõnnestus."
+        });
+    }
 });
 
 app.post("/api/newsletter-signups", async function (request, response) {
@@ -3593,6 +5427,11 @@ app.get("/api/weather-scene/:sceneFile", async function (request, response) {
             response.status(404).json({
                 error: "Ilmapilti ei leitud."
             });
+            return;
+        }
+
+        if (matchingEntry.coverMediaUrl) {
+            response.redirect(matchingEntry.coverMediaUrl);
             return;
         }
 
@@ -3728,6 +5567,56 @@ function getCliNumericFlag(flagName, fallbackValue) {
     return Number.isFinite(nextValue) && nextValue > 0 ? nextValue : fallbackValue;
 }
 
+async function warmupEditorialBundleForDate(dateKey) {
+    const [coverStory, article, persona, horoscope, weather] = await Promise.all([
+        ensureDailyCoverStoryForDate(dateKey),
+        ensureDailyArticleForToday(),
+        ensureDailyPersonaForToday(),
+        ensureDailyHoroscopeForToday(),
+        prepareDefaultDailyWeatherForToday()
+    ]);
+
+    lastEditorialWarmupDateKey = dateKey;
+
+    return {
+        coverStory,
+        article,
+        persona,
+        horoscope,
+        weather
+    };
+}
+
+function scheduleEditorialWarmup() {
+    const runWarmup = async function () {
+        const todayKey = getLocalDateKey();
+
+        if (lastEditorialWarmupDateKey === todayKey) {
+            return null;
+        }
+
+        if (!editorialWarmupPromise) {
+            editorialWarmupPromise = (async function () {
+                try {
+                    return await warmupEditorialBundleForDate(todayKey);
+                } catch (error) {
+                    console.error("Failed to warm up daily editorial bundle.", error);
+                    return null;
+                } finally {
+                    editorialWarmupPromise = null;
+                }
+            }());
+        }
+
+        return editorialWarmupPromise;
+    };
+
+    void runWarmup();
+    return setInterval(function () {
+        void runWarmup();
+    }, EDITORIAL_WARMUP_INTERVAL_MS);
+}
+
 async function maybeRunBackfillCli() {
     if (!process.argv.some(function (value) {
         return value === "--backfill-content" || value.startsWith("--backfill-content=");
@@ -3738,18 +5627,25 @@ async function maybeRunBackfillCli() {
     const requestedCount = getCliNumericFlag("--backfill-content", DAILY_ARTICLE_PUBLIC_LIMIT);
     const articleCount = Math.max(1, Math.min(DAILY_ARTICLE_ARCHIVE_LIMIT, requestedCount));
     const personaCount = Math.max(1, Math.min(DAILY_PERSONA_ARCHIVE_LIMIT, requestedCount));
+    const coverStoryCount = Math.max(1, Math.min(DAILY_COVER_STORY_ARCHIVE_LIMIT, requestedCount));
 
-    console.log(`Backfilling ${articleCount} Lorien articles and ${personaCount} persona stories...`);
+    console.log(`Backfilling ${coverStoryCount} cover stories, ${articleCount} Lorien articles, ${personaCount} persona stories, today's horoscope and default weather...`);
 
     try {
-        const [articles, stories] = await Promise.all([
+        const [coverStories, articles, stories, horoscope, weather] = await Promise.all([
+            backfillDailyCoverStories(coverStoryCount),
             backfillDailyArticles(articleCount),
-            backfillDailyPersonas(personaCount)
+            backfillDailyPersonas(personaCount),
+            ensureDailyHoroscopeForToday(),
+            prepareDefaultDailyWeatherForToday()
         ]);
 
         console.log("Backfill complete.");
+        console.log(`Cover story archive: ${coverStories.length} entries`);
         console.log(`Lorien archive: ${articles.length} entries`);
         console.log(`Persona archive: ${stories.length} entries`);
+        console.log(`Horoscope date: ${horoscope?.dateKey || getLocalDateKey()}`);
+        console.log(`Default weather date: ${weather?.dateKey || getLocalDateKey()}`);
         return true;
     } catch (error) {
         console.error("Backfill failed.", error);
@@ -3770,6 +5666,7 @@ if (isProduction) {
 const ranBackfillCli = await maybeRunBackfillCli();
 
 if (!ranBackfillCli) {
+    scheduleEditorialWarmup();
     app.listen(port, "0.0.0.0", function () {
         console.log(
             isProduction

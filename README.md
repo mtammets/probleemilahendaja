@@ -15,6 +15,8 @@ npm install
 ```bash
 VITE_SUPABASE_URL=https://YOUR_PROJECT_ID.supabase.co
 VITE_SUPABASE_ANON_KEY=YOUR_SUPABASE_ANON_PUBLIC_KEY
+SUPABASE_SERVICE_ROLE_KEY=YOUR_SUPABASE_SERVICE_ROLE_KEY
+SUPABASE_EDITORIAL_BUCKET=editorial-media
 OPENAI_API_KEY=YOUR_OPENAI_API_KEY
 OPENAI_MODEL=gpt-5-mini
 ```
@@ -22,6 +24,7 @@ OPENAI_MODEL=gpt-5-mini
 Näidisväärtused on failis `.env.example`.
 
 `OPENAI_MODEL` on valikuline. Kui seda ei lisa, kasutatakse vaikimisi `gpt-5-mini`.
+`SUPABASE_SERVICE_ROLE_KEY` on vajalik selleks, et server saaks OpenAI loodud lood ja pildid kirjutada Supabase'i ning võtta avalehele sealt avaldatud sisu.
 
 4. Käivita arendusserver:
 
@@ -65,10 +68,24 @@ Valmis buildi ja API serveri käivitamine ühest protsessist:
 npm run start
 ```
 
+## Päevase sisu ettevalmistus
+
+Supabase-põhise editorial voo korral on mõistlik päeva lood ette genereerida:
+
+```bash
+npm run backfill:content
+```
+
+See loob või uuendab Supabase'is viimaste päevade kaanelood, artiklid, persoonilood, nende AI-pildid, tänase horoskoobi ja vaikimisi ilmapildi. Server teeb lisaks käivitumisel tänase numbri automaatse warmup'i, aga professionaalses seadistuses tasub see ikkagi panna cron'i või Supabase Scheduled Functioni taha.
+
 ## Mida Supabase teeb
 
 - salvestab probleemiraportid tabelisse `reports`
 - salvestab rahuloluhinnangud tabelisse `report_ratings`
 - hoiab päris koguloendurit tabelis `app_metrics`
+- salvestab AI-ajakirja sisu tabelisse `editorial_items`
+- salvestab OpenAI genereeritud pildid Supabase Storage bucketisse `editorial-media`
+- salvestab pildi metaandmed tabelisse `media_assets`
+- salvestab uudiskirja liitumised tabelisse `newsletter_signups`
 
 Kui Supabase võtmed puuduvad või SQL skeem pole veel käivitatud, töötab rakendus edasi kohaliku fallback-loogikaga.

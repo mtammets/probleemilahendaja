@@ -127,8 +127,12 @@ const resetButton = document.getElementById("resetButton");
 const reportBackButton = document.getElementById("reportBackButton");
 const reportResetButton = document.getElementById("reportResetButton");
 const solvedCount = document.getElementById("solvedCount");
+const coverStoryHero = document.getElementById("coverStoryHero");
 const coverIssueDate = document.getElementById("coverIssueDate");
 const coverIssueNumber = document.getElementById("coverIssueNumber");
+const coverStoryName = document.getElementById("coverStoryName");
+const coverStoryTitle = document.getElementById("coverStoryTitle");
+const coverStorySummary = document.getElementById("coverStorySummary");
 const newsletterSection = document.getElementById("newsletter");
 const newsletterForm = document.getElementById("newsletterForm");
 const newsletterEmail = document.getElementById("newsletterEmail");
@@ -205,6 +209,8 @@ let pendingReportSave = null;
 let recentProblems = [];
 let recentProblemsSyncTimer;
 let visibleRecentProblemsCount = 0;
+let dailyCoverStory = null;
+let dailyCoverStorySyncTimer;
 let dailyArticles = [];
 let dailyArticlesSyncTimer;
 let selectedDailyArticleId = "";
@@ -228,6 +234,7 @@ let dailyWeather = null;
 let dailyWeatherSyncTimer;
 let activeWeatherLocation = null;
 let weatherSceneLoadToken = 0;
+let coverStoryImageLoadToken = 0;
 
 const MIN_SOLVE_DURATION = 3200;
 const LOADING_PROGRESS_CAP = 0.92;
@@ -240,6 +247,7 @@ const RECENT_PROBLEMS_LOAD_STEP = 3;
 const RECENT_PROBLEMS_STORAGE_KEY = "probleemilahendaja_recent_problems";
 const RECENT_PROBLEM_EQUIVALENT_WINDOW_MS = 15000;
 const RECENT_PROBLEMS_REFRESH_INTERVAL = 10000;
+const DAILY_COVER_STORY_REFRESH_INTERVAL = 60 * 60 * 1000;
 const DAILY_ARTICLES_LIMIT = 8;
 const DAILY_ARTICLES_MOBILE_INITIAL_COUNT = 1;
 const DAILY_ARTICLES_LOAD_STEP = 1;
@@ -256,6 +264,13 @@ const DEFAULT_WEATHER_LOCATION = {
     latitude: 59.437,
     longitude: 24.7536,
     source: "fallback"
+};
+const DEFAULT_COVER_STORY = {
+    subjectName: (coverStoryName?.textContent || "Helena Saar").trim(),
+    title: (coverStoryTitle?.textContent || "Üks rahulik otsus muutis kodu selgemaks").trim(),
+    summary: (coverStorySummary?.textContent || "Päeva kaanelugu toob fookusesse inimese, kes lõpetas ühe veninud küsimuse lõpuks päriselt ära.").trim(),
+    imageUrl: "",
+    imageAlt: ""
 };
 const NEWSLETTER_EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/i;
 const PUBLIC_FEED_PROFANITY_REGEX = /\b(?:pers(?:e|se|es|et|ed|ega|ele|el|esse|est|i)?|t(?:ü|y)r(?:a|ad|aga|ale|al|ast|i)?|munn(?:i|e|id|idega|ile|il|ist)?|vitt(?:u|i|e|ud|idega|ile|is|a)?|niku(?:da|n|d|b|s|tud|ga|le)?|pask(?:a|e|i|aks|aga|ale|as|ast|u)?|sit(?:t|a|ad|ane|ase|aks|aga|ale|as|ast)?|hui(?:a|i|d|ga|le|s)?|fuck(?:ing|ed|er|s)?|shit(?:ty|ted|ting|s)?)\b/giu;
@@ -307,6 +322,69 @@ function initializeCoverIssueMeta() {
     if (coverIssueNumber) {
         coverIssueNumber.textContent = "Nr " + numberFormatter.format(getISOWeekNumber(today));
     }
+}
+
+function loadCoverStoryHeroImage() {
+    if (!coverStoryHero) {
+        return;
+    }
+
+    const nextUrl = dailyCoverStory?.imageUrl || "";
+
+    if (!nextUrl) {
+        coverStoryHero.style.removeProperty("--intake-hero-image");
+        coverStoryHero.dataset.imageState = "fallback";
+        coverStoryHero.dataset.imageUrl = "";
+        return;
+    }
+
+    if (coverStoryHero.dataset.imageUrl === nextUrl && coverStoryHero.dataset.imageState === "ready") {
+        return;
+    }
+
+    const currentToken = ++coverStoryImageLoadToken;
+    const image = new Image();
+
+    coverStoryHero.dataset.imageState = "loading";
+    coverStoryHero.dataset.imageUrl = nextUrl;
+
+    image.onload = function () {
+        if (currentToken !== coverStoryImageLoadToken) {
+            return;
+        }
+
+        coverStoryHero.style.setProperty("--intake-hero-image", `url("${nextUrl}")`);
+        coverStoryHero.dataset.imageState = "ready";
+    };
+
+    image.onerror = function () {
+        if (currentToken !== coverStoryImageLoadToken) {
+            return;
+        }
+
+        coverStoryHero.style.removeProperty("--intake-hero-image");
+        coverStoryHero.dataset.imageState = "error";
+    };
+
+    image.src = nextUrl;
+}
+
+function renderDailyCoverStory() {
+    const story = dailyCoverStory || DEFAULT_COVER_STORY;
+
+    if (coverStoryName) {
+        coverStoryName.textContent = story.subjectName || DEFAULT_COVER_STORY.subjectName;
+    }
+
+    if (coverStoryTitle) {
+        coverStoryTitle.textContent = story.title || DEFAULT_COVER_STORY.title;
+    }
+
+    if (coverStorySummary) {
+        coverStorySummary.textContent = story.summary || DEFAULT_COVER_STORY.summary;
+    }
+
+    loadCoverStoryHeroImage();
 }
 
 const HOROSCOPE_SIGNS = [
@@ -1187,6 +1265,28 @@ function compactLabel(value, fallback, maxLength) {
     return result || cleaned.slice(0, maxLength).trim();
 }
 
+function normalizeDailyCoverStory(record) {
+    if (!record || typeof record !== "object") {
+        return null;
+    }
+
+    const title = truncate(sanitizeProblemText(record.title || DEFAULT_COVER_STORY.title), 96);
+
+    if (!title) {
+        return null;
+    }
+
+    return {
+        dateKey: sanitizeProblemText(record.dateKey || record.date_key || ""),
+        subjectName: truncate(sanitizeProblemText(record.subjectName || record.subject_name || DEFAULT_COVER_STORY.subjectName), 64),
+        title,
+        summary: truncate(sanitizeProblemText(record.summary || DEFAULT_COVER_STORY.summary), 220),
+        imageUrl: sanitizeProblemText(record.imageUrl || record.image_url || ""),
+        imageAlt: truncate(sanitizeProblemText(record.imageAlt || record.image_alt || ""), 180),
+        publishedAt: new Date(parseDateToTimestamp(record.publishedAt || record.published_at)).toISOString()
+    };
+}
+
 function normalizeDailyArticle(record, index) {
     if (!record || typeof record !== "object") {
         return null;
@@ -1254,6 +1354,9 @@ function normalizeDailyArticle(record, index) {
             return capitalizeFirst(compactLabel(value, ["Ruum", "Valik", "Mõju"][index], 18));
         }),
         readingTime: truncate(sanitizeProblemText(record.readingTime || record.reading_time || "4 min lugemine"), 24),
+        imageUrl: sanitizeProblemText(record.imageUrl || record.image_url || ""),
+        imageAlt: truncate(sanitizeProblemText(record.imageAlt || record.image_alt || ""), 180),
+        imageObjectPosition: sanitizeProblemText(record.imageObjectPosition || record.image_object_position || ""),
         publishedAt
     };
 }
@@ -1321,6 +1424,9 @@ function normalizeDailyPersonaStory(record, index) {
             );
         }),
         readingTime: truncate(sanitizeProblemText(record.readingTime || record.reading_time || "4 min lugemine"), 24),
+        imageUrl: sanitizeProblemText(record.imageUrl || record.image_url || ""),
+        imageAlt: truncate(sanitizeProblemText(record.imageAlt || record.image_alt || ""), 180),
+        imageObjectPosition: sanitizeProblemText(record.imageObjectPosition || record.image_object_position || ""),
         publishedAt
     };
 }
@@ -3262,7 +3368,13 @@ function pickLorienMockupImage(article) {
 }
 
 function createLorienStoryInsert(article) {
-    const mockup = pickLorienMockupImage(article);
+    const mockup = article?.imageUrl
+        ? {
+            src: article.imageUrl,
+            objectPosition: article.imageObjectPosition || "center center",
+            alt: article.imageAlt || `Lorien Velmore'i teose illustratsioon teemal "${article.theme}"`
+        }
+        : pickLorienMockupImage(article);
 
     if (!mockup) {
         return null;
@@ -3279,9 +3391,10 @@ function createLorienStoryInsert(article) {
     note.className = "science-article__mockup-note";
 
     image.src = mockup.src;
-    image.alt = `Lorien Velmore'i teose mockup teemal "${article.theme}"`;
+    image.alt = mockup.alt || `Lorien Velmore'i teose mockup teemal "${article.theme}"`;
     image.loading = "lazy";
     image.decoding = "async";
+    image.style.objectPosition = mockup.objectPosition || "center center";
 
     caption.textContent = "Lorien Velmore";
     note.textContent = article.bannerNote;
@@ -3654,12 +3767,37 @@ function getFixedPersonaStoryImageName(story) {
     return `story-${dateKey}.jpg`;
 }
 
+function getProvidedPersonaStoryImageAsset(story) {
+    if (!story?.imageUrl) {
+        return null;
+    }
+
+    return {
+        id: `remote-${story.id || story.dateKey || story.imageUrl}`,
+        src: story.imageUrl,
+        objectPosition: story.imageObjectPosition || "center center",
+        alt: story.imageAlt || `${story.characterName} persooniloo illustratsioon teemal "${story.theme}"`,
+        intent: "remote",
+        subject: "unknown",
+        tags: [],
+        name: ""
+    };
+}
+
 function getPersonaStoryImageAssignments(stories) {
     const assignments = new Map();
     const usedImageIds = new Set();
     const normalizedStories = (Array.isArray(stories) ? stories : []).filter(Boolean);
 
     normalizedStories.forEach(function (story) {
+        const providedImage = getProvidedPersonaStoryImageAsset(story);
+
+        if (providedImage && !assignments.has(story.id)) {
+            assignments.set(story.id, providedImage);
+            usedImageIds.add(providedImage.id);
+            return;
+        }
+
         const fixedImageName = getFixedPersonaStoryImageName(story);
         const fixedImage = PERSONA_STORY_IMAGE_LIBRARY.find(function (imageAsset) {
             return imageAsset.name === fixedImageName;
@@ -3749,10 +3887,10 @@ function renderFeaturedPersonaStory(story, imageAsset = null) {
 
     if (imageAsset) {
         image.src = imageAsset.src;
-        image.alt = `${story.characterName} persooniloo illustratsioon teemal "${story.theme}"`;
+        image.alt = imageAsset.alt || `${story.characterName} persooniloo illustratsioon teemal "${story.theme}"`;
         image.loading = "lazy";
         image.decoding = "async";
-        image.style.objectPosition = imageAsset.objectPosition;
+        image.style.objectPosition = imageAsset.objectPosition || "center center";
         media.append(image);
     }
 
@@ -3811,7 +3949,7 @@ function createPersonaStoryListItem(story, imageAsset = null) {
         thumbImage.alt = "";
         thumbImage.loading = "lazy";
         thumbImage.decoding = "async";
-        thumbImage.style.objectPosition = imageAsset.objectPosition;
+        thumbImage.style.objectPosition = imageAsset.objectPosition || "center center";
         thumb.append(thumbImage);
     }
 
@@ -3900,6 +4038,11 @@ function renderDailyPersonaStories() {
 
     personaStoryList.replaceChildren(listFragment);
     updatePersonaStoryMoreButton(visibleCount, otherStories.length);
+}
+
+function setDailyCoverStory(nextStory) {
+    dailyCoverStory = normalizeDailyCoverStory(nextStory);
+    renderDailyCoverStory();
 }
 
 function setDailyArticles(nextArticles) {
@@ -4159,6 +4302,26 @@ async function fetchRecentProblemsFromServer() {
     }
 }
 
+async function fetchDailyCoverStoryFromServer() {
+    try {
+        const response = await fetch("/api/daily-cover-story", {
+            headers: {
+                "Accept": "application/json"
+            }
+        });
+
+        if (!response.ok) {
+            throw new Error("Daily cover story request failed.");
+        }
+
+        const payload = await response.json();
+        return payload?.story || null;
+    } catch (error) {
+        console.error("Failed to fetch daily cover story from local server.", error);
+        return null;
+    }
+}
+
 async function fetchDailyArticlesFromServer() {
     try {
         const response = await fetch("/api/daily-articles", {
@@ -4255,6 +4418,16 @@ async function refreshRecentProblems() {
     setRecentProblems(mergeRecentProblems(serverProblems, remoteProblems, recentProblems));
 }
 
+async function refreshDailyCoverStory() {
+    const story = await fetchDailyCoverStoryFromServer();
+
+    if (story) {
+        setDailyCoverStory(story);
+    } else if (!dailyCoverStory) {
+        renderDailyCoverStory();
+    }
+}
+
 async function refreshDailyArticles() {
     const articles = await fetchDailyArticlesFromServer();
 
@@ -4338,6 +4511,23 @@ function initializeRecentProblems() {
     recentProblemsSyncTimer = window.setInterval(function () {
         void refreshRecentProblems();
     }, RECENT_PROBLEMS_REFRESH_INTERVAL);
+}
+
+function initializeDailyCoverStory() {
+    if (!coverStoryHero) {
+        return;
+    }
+
+    renderDailyCoverStory();
+
+    if (dailyCoverStorySyncTimer) {
+        window.clearInterval(dailyCoverStorySyncTimer);
+    }
+
+    void refreshDailyCoverStory();
+    dailyCoverStorySyncTimer = window.setInterval(function () {
+        void refreshDailyCoverStory();
+    }, DAILY_COVER_STORY_REFRESH_INTERVAL);
 }
 
 recentProblemsMoreButton?.addEventListener("click", function () {
@@ -4547,6 +4737,7 @@ ratingButtons.forEach(function (button) {
 setLoadingProgress(0);
 resetRating();
 initializeCoverIssueMeta();
+initializeDailyCoverStory();
 initializeDailyWeather();
 initializeRecentProblems();
 initializeDailyArticles();
