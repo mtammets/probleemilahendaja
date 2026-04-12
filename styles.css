@@ -5240,7 +5240,7 @@ body.weather-modal-open {
     z-index: 80;
     display: grid;
     place-items: center;
-    padding: 1.1rem;
+    padding: 1.25rem;
 }
 
 .weather-modal[hidden] {
@@ -5250,8 +5250,8 @@ body.weather-modal-open {
 .weather-modal__backdrop {
     position: absolute;
     inset: 0;
-    background: rgba(7, 14, 22, 0.72);
-    backdrop-filter: blur(18px);
+    background: rgba(7, 14, 22, 0.8);
+    backdrop-filter: blur(22px);
     opacity: 0;
     transition: opacity 180ms ease;
 }
@@ -5261,16 +5261,17 @@ body.weather-modal-open {
     --weather-glow: rgba(255, 204, 112, 0.24);
     --weather-secondary: #d7e8ff;
     position: relative;
-    width: min(100%, 1080px);
+    width: min(100%, 1120px);
     max-height: min(94vh, 980px);
     overflow: auto;
-    border-radius: 34px;
-    border: 1px solid rgba(225, 232, 240, 0.56);
+    border-radius: 38px;
+    border: 1px solid rgba(235, 240, 246, 0.56);
     background:
-        linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(245, 248, 252, 0.94));
+        radial-gradient(circle at 0% 0%, rgba(255, 221, 165, 0.12), transparent 24%),
+        linear-gradient(180deg, rgba(255, 255, 255, 0.97), rgba(244, 248, 253, 0.95));
     box-shadow:
-        0 38px 100px rgba(4, 12, 22, 0.36),
-        inset 0 1px 0 rgba(255, 255, 255, 0.7);
+        0 42px 120px rgba(4, 12, 22, 0.4),
+        inset 0 1px 0 rgba(255, 255, 255, 0.72);
     color: #102131;
     opacity: 0;
     transform: translateY(18px) scale(0.985);
@@ -5288,28 +5289,31 @@ body.weather-modal-open {
 
 .weather-modal__close {
     position: absolute;
-    top: 1rem;
-    right: 1rem;
+    top: 1.15rem;
+    right: 1.15rem;
     z-index: 3;
-    width: 2.7rem;
-    height: 2.7rem;
+    width: 3rem;
+    height: 3rem;
     border: 0;
     border-radius: 999px;
     display: grid;
     place-items: center;
-    background: rgba(7, 14, 22, 0.48);
+    background: rgba(7, 14, 22, 0.26);
     color: #ffffff;
-    font-size: 1.7rem;
+    font-size: 1.5rem;
     line-height: 1;
     cursor: pointer;
-    box-shadow: 0 10px 24px rgba(7, 14, 22, 0.18);
+    box-shadow:
+        0 16px 32px rgba(7, 14, 22, 0.2),
+        inset 0 1px 0 rgba(255, 255, 255, 0.12);
+    backdrop-filter: blur(14px);
 }
 
 .weather-modal__hero {
     position: relative;
     overflow: hidden;
-    min-height: 19rem;
-    border-radius: 34px 34px 0 0;
+    min-height: 22rem;
+    border-radius: 38px 38px 0 0;
     background: #13263a;
 }
 
@@ -5317,11 +5321,11 @@ body.weather-modal-open {
     position: absolute;
     inset: 0;
     background:
-        linear-gradient(135deg, rgba(19, 38, 58, 0.74), rgba(28, 53, 78, 0.52)),
-        radial-gradient(circle at 18% 20%, var(--weather-glow), transparent 34%);
+        linear-gradient(135deg, rgba(10, 20, 31, 0.42), rgba(18, 32, 48, 0.16)),
+        radial-gradient(circle at 18% 20%, var(--weather-glow), transparent 30%);
     background-size: cover;
     background-position: center;
-    transform: scale(1.02);
+    transform: scale(1.03);
 }
 
 .weather-modal__scene::after {
@@ -5329,33 +5333,40 @@ body.weather-modal-open {
     position: absolute;
     inset: 0;
     background:
-        linear-gradient(180deg, rgba(6, 13, 22, 0.08), rgba(6, 13, 22, 0.54)),
-        linear-gradient(90deg, rgba(6, 13, 22, 0.58), rgba(6, 13, 22, 0.18) 38%, rgba(6, 13, 22, 0.44));
+        linear-gradient(180deg, rgba(4, 10, 16, 0.28) 0%, rgba(4, 10, 16, 0.08) 26%, rgba(4, 10, 16, 0.5) 100%),
+        linear-gradient(90deg, rgba(4, 10, 16, 0.78) 0%, rgba(4, 10, 16, 0.44) 28%, rgba(4, 10, 16, 0.1) 58%, rgba(4, 10, 16, 0.46) 100%);
 }
 
 .weather-modal__hero-content {
     position: relative;
     z-index: 1;
     display: grid;
-    gap: 0.85rem;
-    padding: clamp(1.6rem, 4vw, 2.5rem);
+    gap: 1rem;
+    padding: clamp(1.7rem, 4vw, 2.7rem) clamp(1.7rem, 4vw, 2.6rem) 5.2rem;
     color: #f6fbff;
 }
 
 .weather-modal__title {
     margin: 0;
-    font-size: clamp(2.4rem, 5vw, 4rem);
-    line-height: 0.95;
-    letter-spacing: -0.04em;
+    max-width: 8.5ch;
+    font-size: clamp(3.1rem, 6vw, 5.2rem);
+    line-height: 0.88;
+    letter-spacing: -0.07em;
     font-family: "Space Grotesk", sans-serif;
+    color: #f8fbff;
+    text-shadow:
+        0 2px 0 rgba(255, 255, 255, 0.08),
+        0 18px 34px rgba(0, 0, 0, 0.28);
 }
 
 .weather-modal__lead {
-    max-width: 38rem;
+    max-width: 42rem;
     margin: 0;
-    font-size: 1rem;
-    line-height: 1.66;
-    color: rgba(241, 248, 255, 0.9);
+    font-size: 1.04rem;
+    font-weight: 600;
+    line-height: 1.64;
+    color: rgba(244, 249, 255, 0.92);
+    text-shadow: 0 10px 22px rgba(0, 0, 0, 0.22);
 }
 
 .weather-modal__hero-meta {
@@ -5364,36 +5375,49 @@ body.weather-modal-open {
     gap: 1rem 1.4rem;
     align-items: center;
     justify-content: space-between;
-    margin-top: 0.1rem;
+    margin-top: 0.5rem;
 }
 
-.weather-modal__hero-main {
+.weather-modal__hero-main,
+.weather-modal__hero-details {
     display: flex;
     align-items: center;
-    gap: 0.85rem;
+    gap: 0.95rem;
+    padding: 0.88rem 1rem;
+    border-radius: 24px;
+    background:
+        linear-gradient(180deg, rgba(8, 17, 27, 0.28), rgba(8, 17, 27, 0.14)),
+        rgba(8, 17, 27, 0.1);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.08),
+        0 20px 38px rgba(0, 0, 0, 0.14);
+    backdrop-filter: blur(16px);
 }
 
 .weather-modal__hero-icon {
     display: grid;
     place-items: center;
-    width: 4.5rem;
-    height: 4.5rem;
-    border-radius: 24px;
+    width: 4.2rem;
+    height: 4.2rem;
+    border-radius: 999px;
     background:
-        linear-gradient(180deg, rgba(255, 255, 255, 0.12), rgba(255, 255, 255, 0.04)),
-        rgba(255, 255, 255, 0.04);
-    border: 1px solid rgba(255, 255, 255, 0.12);
+        linear-gradient(180deg, rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0.05)),
+        rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14);
 }
 
 .weather-modal__hero-copy {
     display: grid;
-    gap: 0.15rem;
+    gap: 0.18rem;
 }
 
 .weather-modal__hero-temp {
     font-family: "Space Grotesk", sans-serif;
-    font-size: clamp(2.1rem, 5vw, 3.3rem);
-    line-height: 0.95;
+    font-size: clamp(2.8rem, 5vw, 4rem);
+    line-height: 0.84;
+    letter-spacing: -0.08em;
 }
 
 .weather-modal__hero-condition,
@@ -5403,7 +5427,8 @@ body.weather-modal-open {
 }
 
 .weather-modal__hero-condition {
-    font-size: 0.98rem;
+    font-size: 1rem;
+    font-weight: 700;
 }
 
 .weather-modal__hero-details {
@@ -5413,7 +5438,7 @@ body.weather-modal-open {
 }
 
 .weather-modal__hero-location {
-    font-size: 1rem;
+    font-size: 1.04rem;
     font-weight: 700;
 }
 
@@ -5423,27 +5448,32 @@ body.weather-modal-open {
 
 .weather-modal__content {
     display: grid;
-    gap: 1.3rem;
-    padding: clamp(1.3rem, 3vw, 2rem);
+    gap: 1.35rem;
+    position: relative;
+    z-index: 2;
+    margin-top: -3.2rem;
+    padding: 0 clamp(1.3rem, 3vw, 2rem) clamp(1.4rem, 3vw, 2rem);
 }
 
 .weather-modal__section-heading {
     display: grid;
-    gap: 0.18rem;
-    margin-bottom: 0.9rem;
+    gap: 0.22rem;
+    margin-bottom: 1rem;
 }
 
 .weather-modal__section-heading h3 {
     margin: 0;
-    font-size: clamp(1.28rem, 2.4vw, 1.8rem);
-    letter-spacing: -0.03em;
+    font-size: clamp(1.4rem, 2.8vw, 2rem);
+    line-height: 0.96;
+    letter-spacing: -0.04em;
+    color: #15283b;
 }
 
 .weather-modal__stories,
 .weather-modal__timelines {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 1rem;
+    gap: 1.1rem;
 }
 
 .weather-story,
@@ -5454,18 +5484,19 @@ body.weather-modal-open {
     --weather-secondary: #d7e8ff;
     position: relative;
     overflow: hidden;
-    border-radius: 28px;
-    border: 1px solid rgba(16, 33, 49, 0.08);
+    border-radius: 30px;
+    border: 1px solid rgba(222, 230, 239, 0.82);
     background:
-        linear-gradient(180deg, rgba(255, 255, 255, 0.86), rgba(247, 250, 254, 0.96)),
+        linear-gradient(180deg, rgba(255, 255, 255, 0.82), rgba(248, 251, 255, 0.96)),
         radial-gradient(circle at 0% 0%, var(--weather-glow), transparent 34%);
     box-shadow:
-        inset 0 1px 0 rgba(255, 255, 255, 0.9),
-        0 16px 34px rgba(13, 26, 42, 0.08);
+        inset 0 1px 0 rgba(255, 255, 255, 0.92),
+        0 20px 40px rgba(13, 26, 42, 0.08);
+    backdrop-filter: blur(20px);
 }
 
 .weather-story {
-    padding: 1.15rem;
+    padding: 1.28rem;
 }
 
 .weather-story__top {
@@ -5473,32 +5504,34 @@ body.weather-modal-open {
     justify-content: space-between;
     gap: 0.7rem;
     align-items: center;
-    margin-bottom: 0.72rem;
+    margin-bottom: 0.82rem;
 }
 
 .weather-story__date {
-    font-size: 0.86rem;
-    color: rgba(16, 33, 49, 0.56);
+    font-size: 0.82rem;
+    font-weight: 700;
+    color: rgba(16, 33, 49, 0.46);
 }
 
 .weather-story__title {
     margin: 0;
-    font-size: clamp(1.42rem, 2.4vw, 1.9rem);
-    line-height: 1.02;
-    letter-spacing: -0.03em;
+    font-size: clamp(1.7rem, 2.8vw, 2.3rem);
+    line-height: 0.94;
+    letter-spacing: -0.05em;
+    color: #15283b;
 }
 
 .weather-story__summary,
 .weather-story__details {
     margin: 0;
-    font-size: 0.96rem;
-    line-height: 1.68;
-    color: rgba(16, 33, 49, 0.8);
+    font-size: 0.97rem;
+    line-height: 1.62;
+    color: rgba(16, 33, 49, 0.76);
 }
 
 .weather-story__details {
-    margin-top: 0.58rem;
-    color: rgba(16, 33, 49, 0.62);
+    margin-top: 0.64rem;
+    color: rgba(16, 33, 49, 0.58);
 }
 
 .weather-story__metrics,
@@ -5511,10 +5544,12 @@ body.weather-modal-open {
 
 .weather-story__metric,
 .weather-day-card__metrics .weather-story__metric {
-    padding: 0.7rem 0.72rem;
-    border-radius: 18px;
-    background: rgba(16, 33, 49, 0.04);
-    border: 1px solid rgba(16, 33, 49, 0.06);
+    padding: 0.75rem 0.76rem;
+    border-radius: 20px;
+    background:
+        linear-gradient(180deg, rgba(242, 245, 250, 0.84), rgba(236, 241, 247, 0.94)),
+        rgba(16, 33, 49, 0.04);
+    border: 1px solid rgba(215, 224, 236, 0.9);
 }
 
 .weather-story__metric-label {
@@ -5534,11 +5569,11 @@ body.weather-modal-open {
 .weather-forecast {
     display: grid;
     grid-template-columns: repeat(5, minmax(0, 1fr));
-    gap: 0.85rem;
+    gap: 0.95rem;
 }
 
 .weather-day-card {
-    padding: 0.95rem;
+    padding: 1rem;
 }
 
 .weather-day-card__top {
@@ -5555,7 +5590,8 @@ body.weather-modal-open {
 }
 
 .weather-day-card__label strong {
-    font-size: 0.98rem;
+    font-size: 1rem;
+    color: #15283b;
 }
 
 .weather-day-card__label span {
@@ -5566,27 +5602,31 @@ body.weather-modal-open {
 .weather-day-card__icon {
     display: grid;
     place-items: center;
-    width: 2.7rem;
-    height: 2.7rem;
-    border-radius: 18px;
-    background: rgba(16, 33, 49, 0.04);
+    width: 2.8rem;
+    height: 2.8rem;
+    border-radius: 999px;
+    background:
+        linear-gradient(180deg, rgba(244, 247, 252, 0.94), rgba(235, 241, 247, 0.94)),
+        rgba(16, 33, 49, 0.04);
+    border: 1px solid rgba(216, 225, 237, 0.86);
 }
 
 .weather-day-card__title {
     margin: 0;
-    font-size: 1rem;
-    line-height: 1.16;
+    font-size: 1.02rem;
+    line-height: 1.12;
+    color: #1a2c3e;
 }
 
 .weather-day-card__summary {
     margin: 0.44rem 0 0;
     font-size: 0.88rem;
-    line-height: 1.55;
-    color: rgba(16, 33, 49, 0.72);
+    line-height: 1.56;
+    color: rgba(16, 33, 49, 0.68);
 }
 
 .weather-timeline-panel {
-    padding: 1rem;
+    padding: 1.05rem;
 }
 
 .weather-timeline {
@@ -5603,11 +5643,11 @@ body.weather-modal-open {
     gap: 0.22rem;
     justify-items: center;
     padding: 0.82rem 0.64rem;
-    border-radius: 20px;
+    border-radius: 22px;
     background:
         radial-gradient(circle at 50% 0%, var(--weather-glow), transparent 46%),
-        rgba(16, 33, 49, 0.04);
-    border: 1px solid rgba(16, 33, 49, 0.06);
+        rgba(16, 33, 49, 0.03);
+    border: 1px solid rgba(216, 225, 237, 0.9);
 }
 
 .weather-timeline__time {
@@ -5634,12 +5674,15 @@ body.weather-modal-open {
 }
 
 .weather-modal__tips-section {
-    padding: 1.05rem 1.08rem 1.15rem;
-    border-radius: 28px;
+    padding: 1.08rem 1.12rem 1.18rem;
+    border-radius: 30px;
     background:
-        linear-gradient(180deg, rgba(16, 33, 49, 0.02), rgba(16, 33, 49, 0.06)),
-        rgba(255, 255, 255, 0.72);
-    border: 1px solid rgba(16, 33, 49, 0.06);
+        linear-gradient(180deg, rgba(255, 255, 255, 0.84), rgba(245, 249, 254, 0.94)),
+        rgba(255, 255, 255, 0.78);
+    border: 1px solid rgba(220, 228, 238, 0.88);
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.92),
+        0 18px 36px rgba(13, 26, 42, 0.06);
 }
 
 .weather-tips {
@@ -5652,17 +5695,19 @@ body.weather-modal-open {
     padding: 0.72rem 0.92rem;
     border-radius: 999px;
     background:
-        radial-gradient(circle at 0% 0%, var(--weather-glow, rgba(255, 204, 112, 0.18)), transparent 48%),
-        rgba(16, 33, 49, 0.05);
-    border: 1px solid rgba(16, 33, 49, 0.06);
+        radial-gradient(circle at 0% 0%, var(--weather-glow, rgba(255, 204, 112, 0.14)), transparent 48%),
+        rgba(247, 250, 254, 0.9);
+    border: 1px solid rgba(215, 224, 236, 0.94);
     font-size: 0.9rem;
-    color: rgba(16, 33, 49, 0.78);
+    font-weight: 700;
+    color: rgba(16, 33, 49, 0.76);
 }
 
 .weather-modal__footnote {
-    margin: 0.1rem 0 0;
+    margin: 0.2rem 0 0;
+    padding: 0 0.15rem;
     font-size: 0.76rem;
-    color: rgba(16, 33, 49, 0.52);
+    color: rgba(16, 33, 49, 0.5);
 }
 
 @media (max-width: 980px) {
@@ -5703,12 +5748,12 @@ body.weather-modal-open {
 
     .weather-modal__dialog {
         max-height: calc(100svh - 1.6rem);
-        border-radius: 28px;
+        border-radius: 30px;
     }
 
     .weather-modal__hero {
-        min-height: 17rem;
-        border-radius: 28px 28px 0 0;
+        min-height: 18.5rem;
+        border-radius: 30px 30px 0 0;
     }
 
     .weather-modal__stories,
@@ -5721,6 +5766,14 @@ body.weather-modal-open {
 
     .weather-modal__hero-details {
         justify-items: start;
+    }
+
+    .weather-modal__hero-content {
+        padding-bottom: 4.2rem;
+    }
+
+    .weather-modal__content {
+        margin-top: -2.4rem;
     }
 
     .weather-strip {
