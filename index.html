@@ -258,22 +258,30 @@
                 <div class="urgits-banner__content">
                     <h2 class="urgits-banner__title">
                         <span>ÄRA URGITSE</span>
-                        <span>SUVALISE KEPIGA</span>
+                        <span>SUVALISE</span>
+                        <span>KEPIGA</span>
                     </h2>
                     <span class="urgits-banner__cta">urgits.ee</span>
                 </div>
             </a>
         </section>
-        <section id="dailyArticles" class="science-feed panel" aria-labelledby="scienceFeedTitle">
+        <section id="dailyArticles" class="science-feed panel" aria-label="Lorien Velmore artiklid">
             <div class="panel__frame science-feed__frame">
-                <div class="science-feed__header">
-                    <h2 id="scienceFeedTitle">Veel lugeda</h2>
-                </div>
                 <div class="science-feed__layout">
                     <article id="scienceArticleFeatured" class="science-article" aria-live="polite"></article>
                     <div class="science-feed__rail">
                         <div id="scienceArticleList" class="science-feed__list" role="listbox" aria-label="Artiklid"></div>
                     </div>
+                </div>
+            </div>
+        </section>
+        <section id="dailyPersonas" class="persona-feed panel" aria-label="Probleemilahendaja persoonilood">
+            <div class="panel__frame persona-feed__frame">
+                <div class="persona-feed__layout">
+                    <article id="personaStoryFeatured" class="persona-story" aria-live="polite"></article>
+                    <aside class="persona-feed__rail">
+                        <div id="personaStoryList" class="persona-feed__list" role="listbox" aria-label="Persoonilood"></div>
+                    </aside>
                 </div>
             </div>
         </section>
@@ -309,13 +317,35 @@
                 </div>
             </div>
         </section>
-        <section class="lorien-banner panel" aria-label="Lorien Velmore">
-            <a class="panel__frame lorien-banner__frame" href="https://lorienvelmore.com" aria-label="Ava Lorien Velmore koduleht">
-                <div class="lorien-banner__masthead">
-                    <span class="lorien-banner__brand">LORIEN VELMORE</span>
+        <section id="problemQuiz" class="problem-quiz panel" aria-labelledby="problemQuizTitle">
+            <div class="panel__frame problem-quiz__frame">
+                <div class="problem-quiz__header">
+                    <div class="problem-quiz__copy">
+                        <span class="problem-quiz__eyebrow">45 sekundi kiirtest</span>
+                        <h2 id="problemQuizTitle" class="problem-quiz__title">
+                            <span class="problem-quiz__title-kicker">TESTI,</span>
+                            <span class="problem-quiz__title-main">kui palju sul <span class="problem-quiz__title-emphasis">tegelikult</span> probleeme on!</span>
+                        </h2>
+                    </div>
+                    <div class="problem-quiz__cover-art" aria-hidden="true"></div>
                 </div>
-                <div class="lorien-banner__hero" aria-hidden="true"></div>
-            </a>
+                <div class="problem-quiz__layout">
+                    <aside class="problem-quiz__aside">
+                        <div class="problem-quiz__sidecard">
+                            <div class="problem-quiz__meter-top">
+                                <span id="problemQuizStepLabel" class="problem-quiz__meter-label">Küsimus 1 / 8</span>
+                                <button id="problemQuizRestartButton" class="problem-quiz__text-button" type="button" hidden>Alusta uuesti</button>
+                            </div>
+                            <div class="problem-quiz__progress" aria-hidden="true">
+                                <span id="problemQuizProgressBar" class="problem-quiz__progress-bar"></span>
+                            </div>
+                            <div id="problemQuizStepDots" class="problem-quiz__steps" aria-hidden="true"></div>
+                        </div>
+                        <div id="problemQuizSnapshot" class="problem-quiz__snapshot" aria-live="polite"></div>
+                    </aside>
+                    <article id="problemQuizCard" class="problem-quiz__card" aria-live="polite"></article>
+                </div>
+            </div>
         </section>
     </main>
     <script type="module" src="./script.js"></script>

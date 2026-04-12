@@ -6,6 +6,8 @@
     "dev": "concurrently \"npm:dev:server\" \"npm:dev:client\"",
     "dev:client": "vite",
     "dev:server": "node --watch server.mjs",
+    "backfill:content": "node server.mjs --backfill-content",
+    "generate:persona-images": "node scripts/generate-persona-story-images.mjs",
     "start": "node server.mjs --production",
     "build": "vite build",
     "preview": "vite preview"

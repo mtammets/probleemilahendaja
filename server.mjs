@@ -12,28 +12,36 @@ const isProduction = process.argv.includes("--production");
 const port = Number(process.env.PORT || 8787);
 const openAiModel = process.env.OPENAI_MODEL?.trim() || "gpt-5-mini";
 const publicFeedModel = process.env.OPENAI_PUBLIC_FEED_MODEL?.trim() || openAiModel;
-const articleModel = process.env.OPENAI_ARTICLE_MODEL?.trim() || openAiModel;
+const articleModel = process.env.OPENAI_ARTICLE_MODEL?.trim() || "gpt-4.1";
+const personaModel = process.env.OPENAI_PERSONA_MODEL?.trim() || "gpt-4.1";
 const horoscopeModel = process.env.OPENAI_HOROSCOPE_MODEL?.trim() || openAiModel;
 const appTimeZone = process.env.APP_TIMEZONE?.trim() || "Europe/Tallinn";
 const openAiApiKey = process.env.OPENAI_API_KEY?.trim() || "";
 const client = openAiApiKey ? new OpenAI({ apiKey: openAiApiKey }) : null;
 const recentProblemReports = [];
 const dailyArticleCachePath = path.join(__dirname, ".cache", "daily-articles.json");
+const dailyPersonaCachePath = path.join(__dirname, ".cache", "daily-personas.json");
 const dailyHoroscopeCachePath = path.join(__dirname, ".cache", "daily-horoscope.json");
 const newsletterSignupsCachePath = path.join(__dirname, ".cache", "newsletter-signups.json");
 const RECENT_PROBLEMS_LIMIT = 6;
 const DAILY_ARTICLE_ARCHIVE_LIMIT = 10;
-const DAILY_ARTICLE_PUBLIC_LIMIT = 4;
-const DAILY_ARTICLE_STYLE_VERSION = 3;
+const DAILY_ARTICLE_PUBLIC_LIMIT = 8;
+const DAILY_ARTICLE_STYLE_VERSION = 6;
+const DAILY_PERSONA_ARCHIVE_LIMIT = 10;
+const DAILY_PERSONA_PUBLIC_LIMIT = 8;
+const DAILY_PERSONA_STYLE_VERSION = 8;
 const DAILY_HOROSCOPE_STYLE_VERSION = 4;
 const NEWSLETTER_EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/i;
 const PUBLIC_FEED_TEXT_LIMIT = 180;
 const PUBLIC_FEED_FALLBACK_TEXT = "Üks terava sõnastusega probleem sai lahendatud.";
 const PUBLIC_FEED_PROFANITY_REGEX = /\b(?:pers(?:e|se|es|et|ed|ega|ele|el|esse|est|i)?|t(?:ü|y)r(?:a|ad|aga|ale|al|ast|i)?|munn(?:i|e|id|idega|ile|il|ist)?|vitt(?:u|i|e|ud|idega|ile|is|a)?|niku(?:da|n|d|b|s|tud|ga|le)?|pask(?:a|e|i|aks|aga|ale|as|ast|u)?|sit(?:t|a|ad|ane|ase|aks|aga|ale|as|ast)?|hui(?:a|i|d|ga|le|s)?|fuck(?:ing|ed|er|s)?|shit(?:ty|ted|ting|s)?)\b/giu;
-const DAILY_ARTICLE_SOFT_LANGUAGE_REGEX = /\b(?:teekond|hingetõmme|kergus|maagia|pehme|õrn|soe|inspireer|lohut|sisemine|eneseusk|päriselt|päris|hing|süda|hell)\b/iu;
+const DAILY_ARTICLE_SOFT_LANGUAGE_REGEX = /\b(?:teekond|hingetõmme|maagia|inspireer|sisemine|süda|hing|transform|muudab kõik|unelmate|täiuslik)\b/iu;
 let dailyArticles = [];
 let dailyArticlesLoaded = false;
 let dailyArticleGenerationPromise = null;
+let dailyPersonas = [];
+let dailyPersonasLoaded = false;
+let dailyPersonaGenerationPromise = null;
 let dailyHoroscope = null;
 let dailyHoroscopeLoaded = false;
 let dailyHoroscopeGenerationPromise = null;
@@ -43,36 +51,390 @@ let newsletterSignupsWritePromise = Promise.resolve();
 
 const DAILY_ARTICLE_THEMES = [
     {
-        label: "Kognitiivne koormus",
-        prompt: "miks lahendamata probleemid hoiavad tähelepanu kinni ja võtavad vaimset tööruumi",
-        lenses: ["Tähelepanu", "Mälukoormus", "Selgus"]
+        label: "Tühi sein",
+        prompt: "kuidas tühi või poolik sein jätab toa lõpetamata ja miks üks tugev teos tõmbab ruumi kokku",
+        lenses: ["Ruumitunne", "Fookus", "Valmisolek"],
+        fallback: {
+            title: "Miks tühi sein jätab toa pooleli",
+            lead: "Tuba võib olla sisustatud, aga ikkagi lõpetamata. Sageli ei puudu uus mööbel, vaid üks kindel põhjus, miks pilk seinal peatuks.",
+            highlight: "Kui seinal pole raskuskeset, jääb ka tuba ise veidi lahti.",
+            paragraphs: [
+                "Paljud ruumid ei mõju poolikult mitte seetõttu, et neis oleks liiga vähe asju, vaid seetõttu, et midagi ei seo neid visuaalselt kokku. Diivan, laud ja valgusti on olemas, aga pilk ei peatu kusagil piisavalt kaua, et ruum hakkaks tervikuna tööle.",
+                "Seinakunst lahendab selle probleemi ootamatult praktilisel viisil. Kui üks pind saab lõpuks selge rõhuasetuse, muutub kohe ka ülejäänud ruum loetavamaks. Asjad ei tundu enam lihtsalt paigutatud, vaid omavahel seotud.",
+                "Just sellepärast on Lorien Velmore'i teosed rohkem kui dekoratsioon. Need töötavad ruumis nagu viimane otsus, mis lõpetab poolelioleva lause. Tuba ei muutu tingimata uhkemaks, vaid terviklikumaks.",
+                "Selle mõju on väike, aga väga tuntav. Kui üks sein saab põhjuse olemas olla, väheneb ka see hajus tunne, et kodus oleks justkui midagi veel puudu."
+            ],
+            bannerNote: "Lorien Velmore sobib siia just selleks hetkeks, kus tuba on valmis, aga sein veel mitte.",
+            takeaways: ["Sein saab fookuse", "Tuba tundub valmis", "Pilk jääb pidama"],
+            readingTime: "4 min lugemine"
+        }
     },
     {
-        label: "Kontrollitunne",
-        prompt: "miks probleemiga tegelemine taastab mõju, suutlikkuse ja sisemise kontrollitunde",
-        lenses: ["Mõju", "Enesetõhusus", "Hoog"]
+        label: "Pärast remonti",
+        prompt: "miks valmis remonditud tuba võib ikkagi jääda iseloomuta ja kuidas kunst annab viimase vajaliku kihi",
+        lenses: ["Karakter", "Tasakaal", "Kodu"],
+        fallback: {
+            title: "Miks värskelt tehtud tuba võib jääda külmaks",
+            lead: "Pärast remonti on ruum korras, aga mitte alati päriselt kohal. Kui pinnad on uued, tuleb nähtavale järgmine probleem: iseloomu puudus.",
+            highlight: "Valmis pind ei ole veel sama asi kui valmis ruum.",
+            paragraphs: [
+                "Remont lahendab tavaliselt tehnilised küsimused. Seinad saavad värvi, valgus paika ja mööbel oma koha. Aga kui tolm on pühitud, võib jääda alles üllatav tühjus: kõik on justkui õige, kuid miski ei anna toale oma nägu.",
+                "See juhtub sageli siis, kui ruum jääb ainult taustaks. Hea tuba vajab midagi, mis ei täida lihtsalt seina, vaid loob tooni. Üks läbimõeldud teos võib teha selle töö vaiksemalt kui ükski lisamööbliese.",
+                "Lorien Velmore'i maailm töötab siin hästi just oma vaoshoituse tõttu. Teos ei pressi end ruumis ette, vaid paneb ülejäänud elemendid paremini koos kõlama. See on rohkem tooniandja kui trikk.",
+                "Kui ruum tahab pärast remonti veel üht otsust, siis enamasti ei ole see uus lamp või uus riiul. Sageli on see üks pilt, mis ütleb lõpuks ära, millise koduga on tegu."
+            ],
+            bannerNote: "Kui tuba on remonditud, aga mitte veel oma, siis teos võib olla see viimane vajalik kiht.",
+            takeaways: ["Pind saab iseloomu", "Ruum ei jää steriilseks", "Kodu tundub oma"],
+            readingTime: "4 min lugemine"
+        }
     },
     {
-        label: "Stressi vähenemine",
-        prompt: "miks lõpetatud probleem langetab pingefooni ja aitab kehal ning mõtetel rahuneda",
-        lenses: ["Stress", "Taastumine", "Kergus"]
+        label: "Kink ilma piinata",
+        prompt: "miks läbimõeldud kunstiteos lahendab kinkimise probleemi paremini kui järjekordne neutraalne ese",
+        lenses: ["Kinkimine", "Mälu", "Mõte"],
+        fallback: {
+            title: "Hea kingitus ei pea olema järjekordne ese",
+            lead: "Kõige tüütum kinkimise probleem ei ole hind, vaid tähendus. Midagi tuleb leida inimesele, kellel näib juba kõik olemas olevat.",
+            highlight: "Kõige parem kink ei täida sahtlit, vaid jääb ruumi elama.",
+            paragraphs: [
+                "Enamik viimase hetke kingitusi kukub läbi samal põhjusel: need on küll viisakad, aga vahetatavad. Küünal, tass või pudel teeb oma töö ära, kuid kaob kiiresti teiste samasuguste asjade sekka.",
+                "Seetõttu töötab kunst kinkimisena teistsugusel tasandil. See ei ole tarbeasi, mida kasutatakse ära, vaid ese, mis jääb nähtavale ja hakkab ajapikku inimese kodu osaks. Hea valik meenub uuesti iga kord, kui pilk sellele langeb.",
+                "Lorien Velmore'i teoste tugevus on selles, et need mõjuvad kingitusena isiklikult ilma liiga otsese seletamiseta. Need ei karju, vaid jäävad kestma. See teeb neist palju tugevama valiku kui mis tahes neutraalse viisakusostu.",
+                "Kui kinkimine tundub keeruline, siis enamasti otsitakse mitte asja, vaid tunnet, et valik oli läbimõeldud. Kunst annab selle tunde palju kindlamini kui järjekordne ese, mis täidab ainult kohustuse."
+            ],
+            bannerNote: "Kui küsimus on, mida kinkida inimesele, kellele ei taha osta lihtsalt järjekordset eset, siis siit algab palju tugevam vastus.",
+            takeaways: ["Kingitus jääb nähtavale", "Valik mõjub isiklikult", "Ese ei kao ära"],
+            readingTime: "4 min lugemine"
+        }
     },
     {
-        label: "Otsustusjõud",
-        prompt: "miks lahendatud takistus vabastab otsustusruumi järgmiste sammude jaoks",
-        lenses: ["Valikud", "Suund", "Fookus"]
+        label: "Üürikodu oma nägu",
+        prompt: "kuidas ajutine elukoht saab tunda vähem juhuslik, kui ruumi tuleb üks selge isiklik märk",
+        lenses: ["Ajutisus", "Omatunne", "Rütm"],
+        fallback: {
+            title: "Kuidas üürikodu vähem ajutiseks muuta",
+            lead: "Ajutine kodu ei pea mõjuma ajutiselt. Sageli piisab ühest nähtavast otsusest, et ruum hakkaks lõpuks sinu moodi kõlama.",
+            highlight: "Ajutisus väheneb siis, kui ruumis on midagi, mis on selgelt sinu valik.",
+            paragraphs: [
+                "Üürikodu kõige tüütum probleem on see, et kõik vajalik võib olla olemas, aga miski ei kinnita, et see koht päriselt kuulub sinu ellu. Mööbel on neutraalne, seinad viisakad ja üldmulje talutav, kuid side ruumiga jääb õhukeseks.",
+                "Seda ei lahenda alati suur ümbertegemine. Tihti piisab ühest tugevast visuaalsest märgist, mis näitab, et keegi on siin teinud teadliku valiku. Just seepärast töötab kunst ajutises kodus nii hästi.",
+                "Lorien Velmore'i teos annab üürikodule midagi, mida standardlahendused ei anna: isikliku raskuskeskme. See ei nõua kapitaalset muutust, aga muudab taju sellest, kelle ruum see on.",
+                "Kui kodu tundub liiga neutraalne, siis probleem ei ole enamasti ruutmeetrites. Probleem on selles, et ruumis puudub nähtav otsus. Kunst võib olla kõige lihtsam viis see otsus lõpuks teha."
+            ],
+            bannerNote: "Üürikodus ei saa alati kõike muuta, aga ühe seina saab panna selgelt enda kasuks tööle.",
+            takeaways: ["Ajutisus väheneb", "Ruum tundub oma", "Sein annab märgi"],
+            readingTime: "4 min lugemine"
+        }
     },
     {
-        label: "Suhted ja usaldus",
-        prompt: "miks probleemide lahendamine hoiab usaldust, koostööd ja suhteid tervemana",
-        lenses: ["Usaldus", "Koostöö", "Turvatunne"]
+        label: "Töötoa fookus",
+        prompt: "kuidas visuaalne rahutus või tühjus töönurgas hajutab tähelepanu ja miks üks teos võib ruumi paremini paika panna",
+        lenses: ["Fookus", "Rahutus", "Keskkond"],
+        fallback: {
+            title: "Hea töönurk ei vaja rohkem asju",
+            lead: "Kui töönurk ei toeta keskendumist, on probleem harva ainult lauas. Sageli on küsimus hoopis selles, millise tooniga ruum sind vastu vaatab.",
+            highlight: "Fookus ei sõltu ainult ülesannetest, vaid ka sellest, mida ruum kogu aeg kaasa räägib.",
+            paragraphs: [
+                "Kodune töökoht kipub minema kahte äärmusesse. Kas on seda liiga palju täis või siis nii tühi, et see ei anna mingit tunnet, mille sees töötada. Mõlemal juhul jääb ruum ise tähelepanu hajutama.",
+                "Hea teos ei lahenda tööpäeva sinu eest, aga ta võib lahendada ruumi ühe olulise vea. Kui ümbrus on visuaalselt paigas, ei pea aju kogu aeg tegelema taustaga, mis tundub juhuslik või lõpetamata.",
+                "Lorien Velmore'i teosed mõjuvad siin hästi, sest need on piisavalt selged, et ruumi raamida, ja piisavalt vaoshoitud, et mitte hakata ise tööd segama. See on oluline vahe dekoratsiooni ja päriselt toimiva ruumimärgi vahel.",
+                "Kui töönurk ei tundu kunagi päriselt valmis, ei tasu alati lisada uut korraldajat või valgustit. Vahel on probleem hoopis selles, et ruumil puudub üks kindel keskpunkt."
+            ],
+            bannerNote: "Kui töökoht on funktsionaalne, aga mitte veel paigas, siis just siin saab üks teos teha rohkem kui uus organiseerimiskarp.",
+            takeaways: ["Ruum rahuneb", "Fookus püsib kauem", "Taust ei sega"],
+            readingTime: "4 min lugemine"
+        }
     },
     {
-        label: "Harjumused ja hoog",
-        prompt: "miks isegi väikesed lahendused kasvatavad tegutsemisharjumust ja eneseusku",
-        lenses: ["Harjumus", "Tegutsemine", "Eneseusk"]
+        label: "Esimene mulje",
+        prompt: "kuidas esik või elutuba mõjutab esimese mulje kvaliteeti ja miks üks teos võib ruumi hetkega täpsemaks muuta",
+        lenses: ["Mulje", "Toon", "Vastuvõtt"],
+        fallback: {
+            title: "Esimene mulje sünnib tihti ühe seina peal",
+            lead: "Külalise esimene tunne kodust tekib kiiremini, kui omanik märkab. Sageli otsustab selle üks vaade, mis ütleb kohe ära ruumi tooni.",
+            highlight: "Kui sisse astudes pole midagi, mis ruumi kokku tõmbaks, hajub mulje laiali.",
+            paragraphs: [
+                "Esik ja elutuba on kodu kõige nähtavamad kohad, aga just need jäävad sageli viimaseks. Kõik põhiline on olemas, kuid ruum ei tee veel seda tööd, mida ta peaks: ta ei loo kohe üht selget tunnet.",
+                "See tunne ei teki tavaliselt detailide kuhjamisest. Vastupidi, liiga palju väikseid signaale teeb mulje hajusaks. Üks tugev teos töötab paremini, sest annab pilgule koha, kuhu pidama jääda.",
+                "Lorien Velmore sobib sellesse rolli hästi, sest selle visuaalne keel on piisavalt tugev, et jätta märk, aga piisavalt puhas, et mitte hakata ruumi enda eest rääkima. See aitab kodul mõjuda läbimõeldult, mitte üles ehitatud muljena.",
+                "Kui kodu jätab liiga neutraalse või juhusliku esmamulje, ei ole vaja kõike ümber teha. Väga sageli piisab ühest hästi valitud teosest, mis paneb ülejäänud ruumi ühte rütmi."
+            ],
+            bannerNote: "Kui probleem on, et kodu ei jäta saabudes mingit tunnet, siis üks tugev teos võib selle muuta kohe esimesel pilgul.",
+            takeaways: ["Mulje muutub selgeks", "Ruum saab tooni", "Kodu tundub läbimõeldud"],
+            readingTime: "4 min lugemine"
+        }
     }
 ];
+
+const DAILY_PERSONA_THEMES = [
+    {
+        label: "Töö ja tempo",
+        prompt: "fiktiivne, aga usutav persoonilugu inimesest, kelle peas keerles liiga palju tööga seotud lahtisi otsi korraga",
+        fallback: {
+            characterName: "Kärt",
+            characterMeta: "34, pagar Viljandist",
+            title: "Kärt ei vajanud uut süsteemi, vaid üht selget lauset",
+            lead: "Kõige raskem polnud töö maht, vaid see, et ükski lahtine ots ei seisnud lõpuni paigal.",
+            highlight: "Kui probleem sai lõpuks õigesti sõnastatud, muutus ka tööpäev kohe lühemaks.",
+            resultNote: "Probleemilahendaja aitas Kärdil valida ühe teema, mille lõpetamine vabastas korraga rohkem ruumi kui kolm uut to-do listi.",
+            paragraphs: [
+                "Kärt kirjeldas oma nädalat kaua lihtsalt sõnaga \"palju\". Koosolekuid jagus, kirju samuti, aga päris väsitav polnud mitte tempo ise, vaid see, et tal oli kogu aeg tunne, et midagi olulist jääb kuskile vahepeale rippuma.",
+                "Ta oli proovinud probleemi enda jaoks kergemaks mõelda. Vahel nimetas ta seda ajapuuduseks, vahel kehvaks prioriseerimiseks. Tegelikult oli tuum lihtsam: üks konkreetne tööteema venis juba mitmendat nädalat ja tõmbas kõik ülejäänud asjad endaga kaasa.",
+                "Probleemilahendaja juures tuli see esimest korda piisavalt täpselt välja. Kui üldine stress tõmmati üheks selgeks lauseks kokku, kadus vajadus kõike korraga parandada. Selgus, et tal ei olnud vaja uut süsteemi, vaid ühte lõpetatud otsust.",
+                "Järgmisel hommikul lahendas Kärt kõigepealt selle ühe veniva teema ära. Päev ei muutunud imekombel tühjaks, kuid tähelepanu ei jooksnud enam igasse suunda korraga. Just see vahe oligi suurem, kui ta enne arvas."
+            ],
+            takeaways: ["üks prioriteet", "vähem taustamüra", "päev liigub edasi"],
+            readingTime: "4 min lugemine"
+        }
+    },
+    {
+        label: "Raha ja asjaajamine",
+        prompt: "fiktiivne, aga usutav persoonilugu inimesest, kes lükkas üht raha või asjaajamisega seotud asja liiga kaua edasi",
+        fallback: {
+            characterName: "Marten",
+            characterMeta: "39, bussijuht Tartust",
+            title: "Marteni suurim koormus polnud arve, vaid vältimine",
+            lead: "Mõni teema ei võta päevas palju aega, aga võtab sellest hoolimata liiga palju ruumi.",
+            highlight: "Kõige kergemaks ei läinud asi siis, kui see ära maksti, vaid siis, kui see sai lõpuks ausa nime.",
+            resultNote: "Probleemilahendaja aitas Martenil näha, et ta ei väldi numbreid, vaid ebamugavust, mis nendega koos pähe tuleb.",
+            paragraphs: [
+                "Marten ei rääkinud sellest kui suurest probleemist. Ta nimetas seda \"üheks tüütuks asjaks\", mis tuleb ära teha siis, kui tekib rahulikum õhtu. Need õhtud aga ei saabunud, ja nii kogus üks raha ning paberimajandusega seotud teema nädal nädalalt juurde kaalu.",
+                "Kõige kurnavam ei olnud isegi võimalik kulu. Kurnav oli see, et teema tuli iga päev korraks meelde, aga mitte kunagi piisavalt kaua, et ta selle päriselt ette võtaks. Just selline hajus surve sõi rohkem energiat kui ükski konkreetne toiming.",
+                "Probleemilahendajas sõnastas Marten esimest korda, mis teda selle teema juures tegelikult tagasi hoiab. Niipea kui see lause muutus täpseks, muutus ka ülesanne väiksemaks. Ta ei pidanud enam lahendama abstraktset asjaajamist, vaid ühe konkreetse sammu.",
+                "Järgnenud lahendus ei olnud dramaatiline. Ta tegi ära kõne, vaatas numbri üle ja pani asja kinni. Suur muutus tuli alles pärast: taustal ei tiksunud enam tunnet, et midagi on pooleli, kuigi see võiks juba ammu läbi olla."
+            ],
+            takeaways: ["vähem vältimist", "üks konkreetne samm", "pea jääb vaiksemaks"],
+            readingTime: "4 min lugemine"
+        }
+    },
+    {
+        label: "Kahepeale kodu",
+        prompt: "fiktiivne, aga usutav persoonilugu paarist, kelle vahel pingestas õhku üks kodune või praktiline otsus",
+        fallback: {
+            characterName: "Mari ja Rain",
+            characterMeta: "33 ja 35, keraamik ja ehituspoe müüja, Tartu lähistelt",
+            title: "Mari ja Rain lõpetasid vaidluse siis, kui lõpetasid ringid",
+            lead: "Mõni kodune tüli ei püsi üleval suure asja pärast, vaid seepärast, et üks ja sama teema tuleb liiga tihti tagasi.",
+            highlight: "Neil polnud vaja uut kompromissi, vaid lõpuks selget sõnastust sellele, mille üle nad üldse vaidlevad.",
+            resultNote: "Probleemilahendaja aitas neil lahutada emotsiooni ja päris küsimuse, mis oli seni igas vestluses omavahel sassi läinud.",
+            paragraphs: [
+                "Mari ja Rain tundsid mõlemad, et nad räägivad kodus ühest ja samast asjast juba liiga kaua. Vestlused algasid näiteks kappidest, nädalaplaanist või laste logistikat puudutavast detailist, aga lõppesid ikka sellega, et mõlemal oli tunne, et teda ei kuulatud.",
+                "Selline probleem on petlik, sest väljast paistab see väikese majapidamisküsimusena. Tegelikult koguneb sinna alla väsimus, vastutuse jagamine ja see tuttav ärritus, mis tekib siis, kui üks lause on liiga kaua õhus, aga pole kordagi piisavalt täpseks saanud.",
+                "Probleemilahendaja juures tegid nad midagi, mida nad polnud omavahel seni päriselt teinud: kirjeldasid sama olukorda mitte oma poolelt, vaid ühe ühise tuumprobleemina. See muutis vestluse tooni kiiresti. Väikese tüli asemele tuli asi, mille üle sai päriselt otsustada.",
+                "Lahendus ise ei olnud kuigi suur. Nad tegid ühe kokkuleppe, panid vastutuse selgelt paika ja jätsid ülejäänu sinnapaika. Suurim muutus oli see, et sama teema ei hakanud järgmisel õhtul uuesti nullist pihta."
+            ],
+            takeaways: ["üks ühine sõnastus", "vähem ringe", "kodune õhk rahuneb"],
+            readingTime: "4 min lugemine"
+        }
+    },
+    {
+        label: "Kolimise järel",
+        prompt: "fiktiivne, aga usutav persoonilugu inimesest, kelle uus kodu või uus eluetapp jäi pooleldi lahti praktiliste väiketeemade tõttu",
+        fallback: {
+            characterName: "Liis",
+            characterMeta: "41, raamatukoguhoidja Pärnust",
+            title: "Liis sai kolitud siis, kui üks asi lõpuks lukku läks",
+            lead: "Kolimine ei jää pooleli kastide pärast, vaid sageli ühe väikese otsuse pärast, mida keegi ei taha teha.",
+            highlight: "Kodu ei hakanud tunduma oma siis, kui kõik lahti pakiti, vaid siis, kui üks veniv teema lõpuks kinni pandi.",
+            resultNote: "Probleemilahendaja aitas Liisil näha, milline väike lahtine ots hoidis kogu uut algust tegelikult tagurpidi kinni.",
+            paragraphs: [
+                "Liis oli uues korteris olnud juba mitu nädalat, aga ei öelnud veel kordagi päris veenvalt, et nüüd on kõik paigas. Kastid olid enamasti lahti, köök töötas ja töölaud samuti. Ometi jäi päeva sisse tunne, et midagi olulist alles ootab teda kuskil nurgas.",
+                "Sellises seisus on lihtne eksida detailidesse. Inimene arvab, et ta peab lihtsalt veel paar riiulit paika saama või midagi ära sorteerima. Liisi puhul ei olnud küsimus siiski asjade hulgas, vaid ühes otsuses, mida ta oli korduvalt edasi lükanud, sest see tundus liiga tüütu ja liiga väike korraga.",
+                "Probleemilahendaja kaudu sõnastades tuli see koht kiiresti välja. Kui kogu \"pooleli kodu\" tõmmati kokku üheks päris probleemiks, oli lahendus lõpuks üllatavalt konkreetne. Edasi ei olnud enam vaja korrastada elu tervikuna, vaid lõpetada üks segav saba.",
+                "Pärast seda muutus ka uus kodu tajutavalt vaiksemaks. Mitte seepärast, et tegemisi oleks vähem olnud, vaid seepärast, et üks alateadlikult tiksumas olnud asi ei tõmmanud enam kogu tunnetust enda poole."
+            ],
+            takeaways: ["uus algus lukku", "vähem hajusust", "kodu tundub päris"],
+            readingTime: "4 min lugemine"
+        }
+    },
+    {
+        label: "Ütlemata jutt",
+        prompt: "fiktiivne, aga usutav persoonilugu inimesest, kes lükkas üht vajalikku vestlust liiga kaua edasi",
+        fallback: {
+            characterName: "Andra",
+            characterMeta: "36, pereõde Viljandist",
+            title: "Andra väsimus ei kadunud enne, kui kõne sai kuju",
+            lead: "Kõige raskem polnud see, mida ta ütlema pidi, vaid see, et vestlus elas kogu aeg enne kõnet tema peas.",
+            highlight: "Kui sõnastus muutus konkreetseks, lakkas ka vestlus tundumast suuremana kui ta päriselt oli.",
+            resultNote: "Probleemilahendaja aitas Andral ehitada selle vestluse enda jaoks väiksemaks, ilma et teema ise kuidagi pehmemaks muutuks.",
+            paragraphs: [
+                "Andra teadis juba mitu päeva, et ta peab ühe inimesega rääkima. Jutt ei olnud katastroofiline ega isegi väga erakordne, kuid ta lükkas seda edasi sama järjekindlalt, nagu mõni teine inimene lükkab edasi arveid või maksudeklaratsiooni.",
+                "Selliste vestluste juures väsitab tihti mitte konflikt ise, vaid lõputu eelsoojendus. Mõte läheb ikka tagasi sama koha juurde, proovib ette kujutada erinevaid reaktsioone ja kasvatab teema suuremaks, kui üks rahulik jutt hiljem tegelikult välja näeb.",
+                "Probleemilahendaja kaudu pani Andra esimest korda paika, mida ta tegelikult tahab öelda, mis on selle vestluse eesmärk ja mis ei kuulu enam tema vastutuse alla. Sellest piisas, et kõne ei tundunud enam määramatu pingepallina, vaid ühe konkreetse tegevusena.",
+                "Vestlus ise läks lühemalt, kui ta kartis. Kõige suurem muutus ei olnud isegi teise inimese reaktsioon, vaid see, et sama mõte ei pidanud järgmise päeva hommikul enam uuesti nullist käima hakkama."
+            ],
+            takeaways: ["kõne saab kuju", "vähem peas kordamist", "jõud tuleb tagasi"],
+            readingTime: "4 min lugemine"
+        }
+    }
+];
+
+const PERSONA_EDITORIAL_GUIDES = {
+    work: [
+        {
+            ageHint: "22",
+            occupations: ["sisearhitektuuri tudeng"],
+            place: "Tallinn",
+            scene: "ülikooli stuudio või projektisein makettide ja visanditega",
+            mood: "kaasaegne, keskendunud, veidi ülekoormatud, aga elus"
+        },
+        {
+            ageHint: "31",
+            occupations: ["laulja", "vokaalõpetaja"],
+            place: "Tartu",
+            scene: "prooviruum või backstage pärast pikka päeva, mikrofon ja märkmed nähtaval",
+            mood: "vahetu, tänapäevane, inimlik"
+        },
+        {
+            ageHint: "39",
+            occupations: ["projektijuht"],
+            place: "Tallinn",
+            scene: "koosolekuruum või coworking'u vaikne nurk pärast pikka tööpäeva",
+            mood: "terav, päris, tänapäevane"
+        },
+        {
+            ageHint: "47",
+            occupations: ["muusikaõpetaja"],
+            place: "Võru",
+            scene: "tühi muusikaklass pärast tunde, noodid ja pillikohvrid taustal",
+            mood: "rahulik, mõtlik, inimlik"
+        },
+        {
+            ageHint: "53",
+            occupations: ["osakonnajuht"],
+            place: "Pärnu",
+            scene: "kaasaegne klaasseintega tööruum või vaikne juhtimiskabinett õhtu eel",
+            mood: "rahulik, intelligentne, mitte poseeritud"
+        }
+    ],
+    finance: [
+        {
+            ageHint: "41",
+            occupations: ["kohvikupidaja"],
+            place: "Haapsalu",
+            scene: "väikese kohviku leti taga sulgemise järel",
+            mood: "soe, kergelt väsinud, lootusrikas"
+        },
+        {
+            ageHint: "29",
+            occupations: ["laulja", "vabakutseline esineja"],
+            place: "Tallinn",
+            scene: "prooviruumi kõrval või koduse töölaudadega stuudionurgas, lepingud ja arved laual",
+            mood: "kaasaegne, veidi ärevil, siiski loomulik"
+        },
+        {
+            ageHint: "34",
+            occupations: ["tootejuht"],
+            place: "Tallinn",
+            scene: "coworking'u lounge või helge kööginurk kuludokumentide ja sülearvutiga",
+            mood: "täpne, tänapäevane, eluline"
+        },
+        {
+            ageHint: "46",
+            occupations: ["perearstikeskuse juht"],
+            place: "Rapla",
+            scene: "tervisekeskuse kabinet päeva lõpus, rahulikult arveid või eelarvet üle vaadates",
+            mood: "korralik, inimlik, vaikne"
+        },
+        {
+            ageHint: "52",
+            occupations: ["ettevõtja", "kahe lapse lapsevanem"],
+            place: "Tartu",
+            scene: "söögilaud koolikirjade, maksuteadete ja sülearvutiga",
+            mood: "päris, kaasaegne, mitte sünge"
+        }
+    ],
+    couple: [
+        {
+            ageHint: "32 ja 34",
+            occupations: ["keraamik", "ehituspoe müüja"],
+            place: "Tartu",
+            scene: "köögilaud materjaliproovide, mõõdulindi ja kohvitassidega",
+            mood: "soe, elav, kergelt vaidlevalt humoorikas"
+        },
+        {
+            ageHint: "19 ja 24",
+            occupations: ["üliõpilane", "vanem vend"],
+            place: "Tallinn",
+            scene: "ühika või väikese üürikorteri köök, jagatud ostunimekirjad ja kastid laual",
+            mood: "noor, päris, sõbralikult terav"
+        },
+        {
+            ageHint: "44 ja 47",
+            occupations: ["lapsevanemad", "tootejuht ja pereõde"],
+            place: "Tartu",
+            scene: "pere söögilaud pärast pikka päeva, kodu ümberkorraldamise plaanid laiali",
+            mood: "eluline, tänapäevane, lähedane"
+        },
+        {
+            ageHint: "48 ja 51",
+            occupations: ["lasteaiaõpetaja", "bussijuht"],
+            place: "Elva",
+            scene: "vana maja köök või esik, kuivatusrest ja kapiskeemid kõrval",
+            mood: "tögav, tuttav, kahe inimese päris dünaamika"
+        }
+    ],
+    moving: [
+        {
+            ageHint: "21",
+            occupations: ["üliõpilane"],
+            place: "Tallinn",
+            scene: "uus üürikorter plakatitorude, kastide ja sülearvutiga",
+            mood: "energiline, veidi kaootiline, tänapäevane"
+        },
+        {
+            ageHint: "33",
+            occupations: ["laulja"],
+            place: "Tartu",
+            scene: "pooleldi lahti pakitud korter, mikrofonikohver ja raamitud plakatid seina najal",
+            mood: "elav, kaasaegne, mitte poseeritud"
+        },
+        {
+            ageHint: "41",
+            occupations: ["lapsevanem", "raamatukoguhoidja"],
+            place: "Pärnu",
+            scene: "uus elutuba kastide, lasteasjade ja poolelioleva raamaturiiuliga",
+            mood: "rahulik, helge, päris"
+        },
+        {
+            ageHint: "52",
+            occupations: ["ettevõtja"],
+            place: "Rakvere",
+            scene: "kaasaegse korteri esik pooleli kastide ja tööasjadega",
+            mood: "praktiline, soe, täiskasvanud"
+        }
+    ],
+    conversation: [
+        {
+            ageHint: "36",
+            occupations: ["pereõde"],
+            place: "Viljandi",
+            scene: "tervisekeskuse vaikne kõrvalkoridor või õueala pärast vahetust",
+            mood: "mõtlik, avatud, inimlik"
+        },
+        {
+            ageHint: "24",
+            occupations: ["juuksur"],
+            place: "Narva",
+            scene: "salong pärast sulgemist, telefon käes, peegel ja töövahendid taustal",
+            mood: "elav, veidi pinges, siiski soe"
+        },
+        {
+            ageHint: "33",
+            occupations: ["projektijuht"],
+            place: "Tallinn",
+            scene: "kaasaegne trepikoda või klaasseintega kontorikorrus enne keerulist vestlust",
+            mood: "terav, tänapäevane, päris"
+        },
+        {
+            ageHint: "42",
+            occupations: ["õde", "vanem vend"],
+            place: "Pärnu",
+            scene: "mereäärse maja köök või verandanurk enne perekõnet",
+            mood: "vaikne, isiklik, ajakirjalik"
+        }
+    ]
+};
 
 const HOROSCOPE_SIGNS = [
     {
@@ -299,16 +661,17 @@ const PUBLIC_FEED_JSON_SCHEMA = {
 const DAILY_ARTICLE_JSON_SCHEMA = {
     type: "object",
     additionalProperties: false,
-    required: ["theme", "title", "lead", "highlight", "paragraphs", "takeaways", "lenses", "readingTime"],
+    required: ["theme", "title", "lead", "highlight", "bannerNote", "paragraphs", "takeaways", "lenses", "readingTime"],
     properties: {
         theme: { type: "string" },
         title: { type: "string" },
         lead: { type: "string" },
         highlight: { type: "string" },
+        bannerNote: { type: "string" },
         paragraphs: {
             type: "array",
-            minItems: 3,
-            maxItems: 3,
+            minItems: 4,
+            maxItems: 4,
             items: { type: "string" }
         },
         takeaways: {
@@ -318,6 +681,35 @@ const DAILY_ARTICLE_JSON_SCHEMA = {
             items: { type: "string" }
         },
         lenses: {
+            type: "array",
+            minItems: 3,
+            maxItems: 3,
+            items: { type: "string" }
+        },
+        readingTime: { type: "string" }
+    }
+};
+
+const DAILY_PERSONA_JSON_SCHEMA = {
+    type: "object",
+    additionalProperties: false,
+    required: ["theme", "characterName", "characterMeta", "title", "lead", "highlight", "resultNote", "paragraphs", "takeaways", "readingTime", "photoBrief"],
+    properties: {
+        theme: { type: "string" },
+        characterName: { type: "string" },
+        characterMeta: { type: "string" },
+        title: { type: "string" },
+        lead: { type: "string" },
+        highlight: { type: "string" },
+        resultNote: { type: "string" },
+        photoBrief: { type: "string" },
+        paragraphs: {
+            type: "array",
+            minItems: 4,
+            maxItems: 4,
+            items: { type: "string" }
+        },
+        takeaways: {
             type: "array",
             minItems: 3,
             maxItems: 3,
@@ -426,6 +818,73 @@ function normalizeField(value, fallback, maxLength) {
     }
 
     return maxLength ? truncate(cleaned, maxLength) : cleaned;
+}
+
+function sanitizeLorienBrandText(value) {
+    return String(value || "")
+        .replace(/\bkollektsioonist\b/giu, "valikust")
+        .replace(/\bkollektsiooniga\b/giu, "valikuga")
+        .replace(/\bkollektsiooni\b/giu, "valikut")
+        .replace(/\bkollektsioon\b/giu, "valik")
+        .replace(/\bmaalidega\b/giu, "teostega")
+        .replace(/\bmaalid\b/giu, "teosed")
+        .replace(/\bmaale\b/giu, "teoseid")
+        .replace(/\bmaali\b/giu, "teose")
+        .replace(/\bmaal\b/giu, "teos")
+        .replace(/\s+/g, " ")
+        .trim();
+}
+
+function normalizeLorienField(value, fallback, maxLength) {
+    const sanitizedFallback = sanitizeLorienBrandText(fallback);
+    const sanitizedValue = typeof value === "string"
+        ? sanitizeLorienBrandText(value)
+        : value;
+
+    return normalizeField(sanitizedValue, sanitizedFallback, maxLength);
+}
+
+function normalizeLorienTextList(values, fallbackValues, maxItems, maxLength) {
+    const normalizedValues = (Array.isArray(values) ? values : [])
+        .map(function (value) {
+            return normalizeLorienField(value, "", maxLength);
+        })
+        .filter(Boolean)
+        .slice(0, maxItems);
+
+    if (normalizedValues.length > 0) {
+        return normalizedValues;
+    }
+
+    return fallbackValues
+        .map(function (value) {
+            return normalizeLorienField(value, "", maxLength);
+        })
+        .filter(Boolean)
+        .slice(0, maxItems);
+}
+
+function normalizeReadingTime(value, fallback) {
+    const fallbackValue = normalizeField(fallback, "4 min lugemine", 24);
+    const normalizedValue = normalizeField(value, fallbackValue, 24);
+    const minuteMatch = String(normalizedValue).match(/(\d{1,2})/);
+
+    if (!minuteMatch) {
+        return fallbackValue;
+    }
+
+    const minutes = Math.max(2, Math.min(9, Number(minuteMatch[1]) || 4));
+    return `${minutes} min lugemine`;
+}
+
+function sanitizeAdministrativeLanguage(value) {
+    return String(value || "")
+        .replace(/\badmin-asju\b/giu, "asjaajamisi")
+        .replace(/\badminiga\b/giu, "asjaajamisega")
+        .replace(/\badminni\b/giu, "asjaajamist")
+        .replace(/\badmin\b/giu, "asjaajamine")
+        .replace(/\s+/g, " ")
+        .trim();
 }
 
 function normalizeTextList(values, fallbackValues, maxItems, maxLength) {
@@ -544,9 +1003,139 @@ function getLocalDateKey(date = new Date()) {
     return `${parts.year}-${parts.month}-${parts.day}`;
 }
 
+function getRecentDateKeys(count, anchorDate = new Date()) {
+    const safeCount = Math.max(1, Math.min(DAILY_ARTICLE_ARCHIVE_LIMIT, Number(count) || 1));
+    return Array.from({ length: safeCount }, function (_value, index) {
+        const date = new Date(anchorDate);
+        date.setDate(date.getDate() - index);
+        return getLocalDateKey(date);
+    });
+}
+
 function getThemeForDate(dateKey) {
     const numericKey = Number(String(dateKey).replaceAll("-", "")) || 0;
     return DAILY_ARTICLE_THEMES[numericKey % DAILY_ARTICLE_THEMES.length];
+}
+
+function getPersonaThemeForDate(dateKey) {
+    const numericKey = Number(String(dateKey).replaceAll("-", "")) || 0;
+    return DAILY_PERSONA_THEMES[numericKey % DAILY_PERSONA_THEMES.length];
+}
+
+function getPersonaThemeKey(theme) {
+    const label = String(theme?.label || theme || "").toLocaleLowerCase("et-EE");
+
+    if (label.includes("töö")) {
+        return "work";
+    }
+
+    if (label.includes("raha")) {
+        return "finance";
+    }
+
+    if (label.includes("kahepeale")) {
+        return "couple";
+    }
+
+    if (label.includes("kolimise")) {
+        return "moving";
+    }
+
+    if (label.includes("ütlemata")) {
+        return "conversation";
+    }
+
+    return "work";
+}
+
+function buildPersonaPhotoBriefFromGuide(guide, themeKey) {
+    if (!guide) {
+        return "Create a world-class editorial magazine photo of a believable Estonian interview subject in a real environment, warm and natural, not posed, not stock-like.";
+    }
+
+    const occupationLine = Array.isArray(guide.occupations) ? guide.occupations.join(" and ") : "working person";
+    const activityHintByTheme = {
+        work: "captured mid-task or just after a demanding work moment",
+        finance: "captured while going through a practical paperwork or money decision",
+        couple: "captured in a shared domestic decision moment between two people",
+        moving: "captured in the middle of a half-finished move or settling-in moment",
+        conversation: "captured around a conversation that has been difficult to start"
+    };
+    const activityHint = activityHintByTheme[themeKey] || "captured in a real everyday moment";
+
+    return [
+        `World-class Nordic editorial portrait of a believable Estonian ${guide.ageHint}-year-old ${occupationLine} in ${guide.place}.`,
+        `Scene: ${guide.scene}.`,
+        `Show the subject ${activityHint}.`,
+        `Mood: ${guide.mood}.`,
+        "Natural daylight or soft practical interior light, lived-in textures, subtle warmth, premium magazine quality, candid rather than posed, no corporate office feel, no generic stock-photo smile."
+    ].join(" ");
+}
+
+function buildFallbackPersonaPhotoBrief(theme, fallbackStory) {
+    const themeKey = getPersonaThemeKey(theme);
+    const actionHintByTheme = {
+        work: "in the real workplace just after a long or busy stretch of the day",
+        finance: "while dealing with one concrete paperwork or money decision in a real everyday setting",
+        couple: "during a shared home decision moment between two people who clearly know each other well",
+        moving: "in the middle of a half-finished move, with a real sense of settling into a new home",
+        conversation: "just before or after a conversation that has been difficult to start"
+    };
+    const actionHint = actionHintByTheme[themeKey] || "in a real everyday situation linked to the story";
+
+    return [
+        `World-class Nordic editorial portrait of ${fallbackStory.characterName}, ${fallbackStory.characterMeta}, in Estonia.`,
+        `Show the subject ${actionHint}.`,
+        "Warm, candid, environmental photography with believable lived-in detail, premium magazine quality, not posed, not stock-photo, not corporate."
+    ].join(" ");
+}
+
+function getRecentPersonaReferenceLines(stories, dateKey) {
+    return (Array.isArray(stories) ? stories : [])
+        .filter(function (story) {
+            return story && story.dateKey !== dateKey;
+        })
+        .slice(0, 6)
+        .map(function (story) {
+            return `${story.characterName} — ${story.characterMeta} — ${story.theme}`;
+        });
+}
+
+function getPersonaEditorialGuide(dateKey, theme, recentStories = []) {
+    const themeKey = getPersonaThemeKey(theme);
+    const guides = PERSONA_EDITORIAL_GUIDES[themeKey] || [];
+
+    if (guides.length === 0) {
+        return null;
+    }
+
+    const numericKey = Number(String(dateKey).replaceAll("-", "")) || 0;
+    const recentText = getRecentPersonaReferenceLines(recentStories, dateKey)
+        .join(" ")
+        .toLocaleLowerCase("et-EE");
+
+    return guides
+        .map(function (guide, index) {
+            let score = 0;
+            const keywords = [guide.place, guide.scene, ...(Array.isArray(guide.occupations) ? guide.occupations : [])]
+                .map(function (value) {
+                    return String(value || "").toLocaleLowerCase("et-EE");
+                })
+                .filter(Boolean);
+
+            keywords.forEach(function (keyword) {
+                if (recentText.includes(keyword)) {
+                    score -= 50;
+                }
+            });
+
+            score -= Math.abs((numericKey % guides.length) - index) * 2;
+
+            return { guide, score };
+        })
+        .sort(function (firstGuide, secondGuide) {
+            return secondGuide.score - firstGuide.score;
+        })[0]?.guide || guides[numericKey % guides.length];
 }
 
 function parseTimestamp(value) {
@@ -555,8 +1144,13 @@ function parseTimestamp(value) {
     return Number.isFinite(timestamp) ? timestamp : 0;
 }
 
+function getArchiveSortTimestamp(record) {
+    return parseTimestamp(record?.dateKey) || parseTimestamp(record?.publishedAt);
+}
+
 function buildFallbackDailyArticle(dateKey) {
     const theme = getThemeForDate(dateKey);
+    const fallbackArticle = theme.fallback;
 
     return {
         id: dateKey,
@@ -564,26 +1158,21 @@ function buildFallbackDailyArticle(dateKey) {
         styleVersion: DAILY_ARTICLE_STYLE_VERSION,
         publishedAt: new Date().toISOString(),
         theme: theme.label,
-        title: "Miks lõpetatud probleem vähendab vaimset koormust",
-        lead: "Lahendamata küsimus jääb tähelepanu külge. Kui teema saab lõpetatud, väheneb hajus koormus ja järgmised otsused muutuvad lihtsamaks.",
-        highlight: "Lõpetatud teema võtab vähem tähelepanu.",
-        paragraphs: [
-            "Lõpetamata probleemid jäävad töömälu ja tähelepanu külge ka siis, kui inimene tegeleb juba millegi muuga. See tähendab, et osa vaimsest ressursist on kogu aeg broneeritud lahtise teema jaoks.",
-            "Kui küsimus saab otsuse või lahenduse, langeb vajadus seda peas uuesti läbi mängida. Tulemuseks ei ole tingimata hea tuju, vaid pigem väiksem taustakoormus ja selgem järgmine samm.",
-            "Sellepärast on probleemide lahendamine praktiline viis vähendada vaimset müra. Vähem lahtisi otsi tähendab vähem hajumist, vähem pingeid ja täpsemat keskendumist."
-        ],
-        takeaways: [
-            "Vähem taustamüra",
-            "Rohkem otsustusruumi",
-            "Selgem järgmine samm"
-        ],
+        title: fallbackArticle.title,
+        lead: fallbackArticle.lead,
+        highlight: fallbackArticle.highlight,
+        bannerNote: fallbackArticle.bannerNote,
+        paragraphs: fallbackArticle.paragraphs,
+        takeaways: fallbackArticle.takeaways,
         lenses: theme.lenses,
-        readingTime: "3 min lugemine"
+        readingTime: fallbackArticle.readingTime
     };
 }
 
 function isDailyArticleTooSoft(article) {
-    const compactText = [article.title, article.lead, article.highlight].join(" ");
+    const compactText = [article.title, article.lead, article.highlight, article.bannerNote].join(" ");
+    const fullText = [compactText, ...article.paragraphs].join(" ");
+    const brandMentions = fullText.match(/\bLorien Velmore\b/giu) || [];
 
     if (DAILY_ARTICLE_SOFT_LANGUAGE_REGEX.test(compactText)) {
         return true;
@@ -601,6 +1190,10 @@ function isDailyArticleTooSoft(article) {
         return true;
     }
 
+    if (brandMentions.length > 2) {
+        return true;
+    }
+
     return false;
 }
 
@@ -614,18 +1207,19 @@ function normalizeDailyArticlePayload(dateKey, payload, publishedAt = new Date()
         dateKey,
         styleVersion: DAILY_ARTICLE_STYLE_VERSION,
         publishedAt,
-        theme: normalizeField(payload.theme, fallbackArticle.theme, 42),
-        title: normalizeField(payload.title, fallbackArticle.title, 98),
-        lead: normalizeField(payload.lead, fallbackArticle.lead, 180),
-        highlight: normalizeField(payload.highlight, fallbackArticle.highlight, 210),
-        paragraphs: normalizeTextList(payload.paragraphs, fallbackArticle.paragraphs, 3, 360),
+        theme: normalizeLorienField(payload.theme, fallbackArticle.theme, 42),
+        title: normalizeLorienField(payload.title, fallbackArticle.title, 98),
+        lead: normalizeLorienField(payload.lead, fallbackArticle.lead, 180),
+        highlight: normalizeLorienField(payload.highlight, fallbackArticle.highlight, 210),
+        bannerNote: normalizeLorienField(payload.bannerNote, fallbackArticle.bannerNote, 190),
+        paragraphs: normalizeLorienTextList(payload.paragraphs, fallbackArticle.paragraphs, 4, 360),
         takeaways: normalizeTextList(payload.takeaways, fallbackTakeaways, 3, 52).map(function (value, index) {
-            return compactLabel(value, fallbackTakeaways[index], 34);
+            return compactLabel(sanitizeLorienBrandText(value), sanitizeLorienBrandText(fallbackTakeaways[index]), 34);
         }),
         lenses: normalizeTextList(payload.lenses, fallbackLenses, 3, 28).map(function (value, index) {
-            return compactLabel(value, fallbackLenses[index], 18);
+            return compactLabel(sanitizeLorienBrandText(value), sanitizeLorienBrandText(fallbackLenses[index]), 18);
         }),
-        readingTime: normalizeField(payload.readingTime, fallbackArticle.readingTime, 24)
+        readingTime: normalizeReadingTime(payload.readingTime, fallbackArticle.readingTime)
     };
 
     if (isDailyArticleTooSoft(normalizedArticle)) {
@@ -654,6 +1248,7 @@ function normalizeStoredDailyArticle(record) {
             title: record.title,
             lead: record.lead,
             highlight: record.highlight,
+            bannerNote: record.bannerNote || record.banner_note,
             paragraphs: record.paragraphs,
             takeaways: record.takeaways,
             lenses: record.lenses,
@@ -682,8 +1277,7 @@ async function loadDailyArticles() {
     }
 
     dailyArticles.sort(function (firstArticle, secondArticle) {
-        return parseTimestamp(secondArticle.publishedAt || secondArticle.dateKey)
-            - parseTimestamp(firstArticle.publishedAt || firstArticle.dateKey);
+        return getArchiveSortTimestamp(secondArticle) - getArchiveSortTimestamp(firstArticle);
     });
     dailyArticles = dailyArticles.slice(0, DAILY_ARTICLE_ARCHIVE_LIMIT);
     dailyArticlesLoaded = true;
@@ -787,6 +1381,66 @@ async function addNewsletterSignup(email) {
     };
 }
 
+async function requestDailyArticleFromModel(model, dateKey, theme) {
+    const articleTextVerbosity = /^gpt-4\.1/i.test(model) ? "medium" : "low";
+    const aiResponse = await client.responses.create({
+        model,
+        max_output_tokens: 1200,
+        instructions: [
+            "Sa kirjutad eestikeelse päevase digi-ajakirja artikli Lorien Velmore'i brändist.",
+            "Lorien Velmore mõjub selle rakenduse visuaali põhjal elegantse, moodsa ja galeriiliku seinakunsti brändina.",
+            "Kirjuta nagu tugev Eesti interjööri- või elustiiliajakirja toimetaja, mitte nagu reklaamtekstide generaator.",
+            "Iga artikkel peab lähtuma ühest väikesest, aga päriselt äratuntavast probleemist: tühi sein, iseloomuta tuba, kinkimise ummik, ajutine kodu, rahutu töönurk või muu sarnane kodu- ja ruumiprobleem.",
+            "Näita, kuidas hästi valitud teos aitab seda probleemi lahendada praktiliselt ja esteetiliselt.",
+            "Püsi ainult antud päevateemas. Ära ava loos teisi probleemitüüpe ega kõrvalteemasid.",
+            "Lase Lorien Velmore'il loos loomulikult esineda 1 kuni 2 korda, mitte igas lõigus.",
+            "Ära tee kõva müügijuttu. Ära kasuta kampaania-, hinnapakkumise-, allahindluse- ega üleskutselist reklaamikeelt.",
+            "Ära mõtle välja brändi ajalugu, asutajat, tootmisviisi, materjale, kollektsioone ega muid fakte, mida sisendis pole.",
+            "Ära maini AI-d, mudelit, prompti, sisu genereerimist ega ühtegi muud meta- või töövoo elementi.",
+            "Ära kirjuta terapeutiliselt, spirituaalselt ega liiga pehme elustiiliblogi toonis.",
+            "Väldi sõnastusi nagu 'teekond', 'maagia', 'inspireeriv', 'sisemine', 'täiuslik', 'unistuste' või muu udune müügikeel.",
+            "Ära kasuta väljamõeldud uuringuid, protsente või eksperte.",
+            "Kirjuta loomulikult, vaoshoitult, täpselt ja loetavalt. Lauseehitus peab vahelduma ja iga lõik peab lisama ühe uue tähelepaneku.",
+            "Ära kirjuta pikki sissejuhatavaid üldsõnalisi lauseid. Mine teemasse kiiresti.",
+            "title peab olema konkreetne, ajakirjalik ja kuni umbes 9 sõna.",
+            "lead peab olema lühike, selge ja kuni umbes 24 sõna.",
+            "highlight peab olema üks tugev, meeldejääv lause ilma koolonita.",
+            "bannerNote peab olema üks lühike lause, mis seob Lorien Velmore'i teose artikli probleemiga loomulikul viisil.",
+            "paragraphs peab sisaldama täpselt 4 lõiku, igaüks lühike kuni keskmine, hästi loetav ja sisukas.",
+            "takeaways peab sisaldama täpselt 3 lühikest meeldejäävat rida, igaüks maksimaalselt umbes 4 sõna.",
+            "lenses peab sisaldama täpselt 3 lühikest märksõna või vaatenurka, igaüks maksimaalselt umbes 2 sõna.",
+            "theme peab olema väga lühike, umbes 2 kuni 4 sõna.",
+            "readingTime peab olema lühike eestikeelne lugemisaja märge kujul '4 min lugemine'.",
+            "Tagasta ainult puhas JSON."
+        ].join(" "),
+        input: [
+            `Kuupäev: ${dateKey}`,
+            `Tänane vaatenurk: ${theme.prompt}`,
+            `Lensi märksõnad: ${theme.lenses.join(", ")}`,
+            "Keskendu ainult sellele ühele tänasele olukorrale ja ära vii lugu teiste koduprobleemide juurde.",
+            "Kirjuta lugu nii, et lugeja tunneks pärast lugemist väga selgelt, miks üks Lorien Velmore'i teos võiks tema koju või kingituseks päriselt sobida.",
+            "Lugu peab tunduma toimetatud, rahulik ja inimlik, mitte automaatselt kokku pandud."
+        ].join("\n"),
+        text: {
+            verbosity: articleTextVerbosity,
+            format: {
+                type: "json_schema",
+                name: "daily_science_article",
+                strict: true,
+                schema: DAILY_ARTICLE_JSON_SCHEMA
+            }
+        }
+    });
+
+    if (aiResponse.status && aiResponse.status !== "completed") {
+        const reason = aiResponse.incomplete_details?.reason || aiResponse.status;
+        throw new Error(`Daily article response incomplete: ${reason}`);
+    }
+
+    const payload = extractJsonObject(aiResponse.output_text);
+    return normalizeDailyArticlePayload(dateKey, payload);
+}
+
 async function generateDailyArticle(dateKey) {
     const fallbackArticle = buildFallbackDailyArticle(dateKey);
     const theme = getThemeForDate(dateKey);
@@ -795,57 +1449,20 @@ async function generateDailyArticle(dateKey) {
         return fallbackArticle;
     }
 
-    try {
-        const aiResponse = await client.responses.create({
-            model: articleModel,
-            max_output_tokens: 1100,
-            reasoning: {
-                effort: "low"
-            },
-            instructions: [
-                "Sa kirjutad eestikeelse päevase miniartikli probleemide lahendamise väärtusest.",
-                "Artikkel peab tunduma tark, täpne, rahulik ja usutav.",
-                "Toetu üldisele teadmisele käitumisteadusest, stressipsühholoogiast, tähelepanu uurimisest, otsustuspsühholoogiast või sotsiaalpsühholoogiast.",
-                "Ära mõtle välja konkreetseid uuringuid, teadlasi, ülikoole, aastaarve ega täpseid protsente.",
-                "Kui põhjendad midagi teaduspõhiselt, tee seda kontseptsioonide tasemel, mitte väljamõeldud viidetega.",
-                "Ära kirjuta tervisealaseid lubadusi, diagnoose ega teraapiasoovitusi.",
-                "Kirjuta nagu hea ajakirjanduslik lühitekst: selge, otse, ilma loosungite ja ilustamiseta.",
-                "Ära ole poeetiline, inspireeriv, terapeutiline, lohutav ega sentimentaalne.",
-                "Ära kasuta metafoore, kujundeid, loosungeid ega sõnamänge.",
-                "Väldi sõnastusi nagu 'päriselt', 'teekond', 'sisemine kindlus', 'kergus', 'hoog', 'hingetõmme' või muud pehmet müügikeelt.",
-                "Eelista põhjus-tagajärg lauseid ja konkreetset keelt.",
-                "title peab olema lühike ja konkreetne, kuni umbes 8 sõna.",
-                "lead peab olema kuni umbes 22 sõna.",
-                "highlight peab olema üks lühike, kuiv lause ilma koolonita.",
-                "paragraphs peab sisaldama täpselt 3 lühikest, sisukat lõiku.",
-                "takeaways peab sisaldama täpselt 3 lühikest meeldejäävat rida, igaüks maksimaalselt umbes 4 sõna.",
-                "lenses peab sisaldama täpselt 3 lühikest märksõna või vaatenurka, igaüks maksimaalselt umbes 2 sõna.",
-                "theme peab olema väga lühike, umbes 2 kuni 4 sõna.",
-                "readingTime peab olema lühike eestikeelne lugemisaja märge kujul '3 min lugemine'.",
-                "Tagasta ainult puhas JSON."
-            ].join(" "),
-            input: [
-                `Kuupäev: ${dateKey}`,
-                `Tänane vaatenurk: ${theme.prompt}`,
-                "Selgita, miks probleemi lahendamine vähendab vaimset koormust, muudab otsustamise lihtsamaks ja jätab vähem lahtisi otsi."
-            ].join("\n"),
-            text: {
-                verbosity: "low",
-                format: {
-                    type: "json_schema",
-                    name: "daily_science_article",
-                    strict: true,
-                    schema: DAILY_ARTICLE_JSON_SCHEMA
-                }
-            }
-        });
+    const candidateModels = [...new Set([articleModel, "gpt-4.1"])];
+    let lastError = null;
 
-        const payload = extractJsonObject(aiResponse.output_text);
-        return normalizeDailyArticlePayload(dateKey, payload);
-    } catch (error) {
-        console.error("Failed to generate daily article.", error);
-        return fallbackArticle;
+    for (const model of candidateModels) {
+        try {
+            return await requestDailyArticleFromModel(model, dateKey, theme);
+        } catch (error) {
+            lastError = error;
+            console.error(`Failed to generate daily article with model ${model}.`, error);
+        }
     }
+
+    console.error("Failed to generate daily article.", lastError);
+    return fallbackArticle;
 }
 
 async function ensureDailyArticleForToday() {
@@ -887,10 +1504,372 @@ async function getDailyArticleArchive() {
     return dailyArticles
         .slice()
         .sort(function (firstArticle, secondArticle) {
-            return parseTimestamp(secondArticle.publishedAt || secondArticle.dateKey)
-                - parseTimestamp(firstArticle.publishedAt || firstArticle.dateKey);
+            return getArchiveSortTimestamp(secondArticle) - getArchiveSortTimestamp(firstArticle);
         })
         .slice(0, DAILY_ARTICLE_PUBLIC_LIMIT);
+}
+
+async function backfillDailyArticles(count = DAILY_ARTICLE_PUBLIC_LIMIT) {
+    await loadDailyArticles();
+
+    const targetDateKeys = getRecentDateKeys(count);
+
+    for (const dateKey of targetDateKeys) {
+        const existingArticle = dailyArticles.find(function (article) {
+            return article.dateKey === dateKey || article.id === dateKey;
+        });
+
+        if (!existingArticle) {
+            const article = await generateDailyArticle(dateKey);
+            dailyArticles = [
+                article,
+                ...dailyArticles.filter(function (existing) {
+                    return existing.id !== article.id && existing.dateKey !== article.dateKey;
+                })
+            ];
+        }
+    }
+
+    dailyArticles = dailyArticles
+        .slice()
+        .sort(function (firstArticle, secondArticle) {
+            return getArchiveSortTimestamp(secondArticle) - getArchiveSortTimestamp(firstArticle);
+        })
+        .slice(0, DAILY_ARTICLE_ARCHIVE_LIMIT);
+
+    await saveDailyArticles();
+    return dailyArticles.slice(0, Math.max(1, Number(count) || DAILY_ARTICLE_PUBLIC_LIMIT));
+}
+
+function buildFallbackDailyPersona(dateKey) {
+    const theme = getPersonaThemeForDate(dateKey);
+    const fallbackStory = theme.fallback;
+
+    return {
+        id: dateKey,
+        dateKey,
+        styleVersion: DAILY_PERSONA_STYLE_VERSION,
+        publishedAt: new Date().toISOString(),
+        theme: theme.label,
+        characterName: fallbackStory.characterName,
+        characterMeta: fallbackStory.characterMeta,
+        title: fallbackStory.title,
+        lead: fallbackStory.lead,
+        highlight: fallbackStory.highlight,
+        resultNote: fallbackStory.resultNote,
+        photoBrief: buildFallbackPersonaPhotoBrief(theme, fallbackStory),
+        paragraphs: fallbackStory.paragraphs,
+        takeaways: fallbackStory.takeaways,
+        readingTime: fallbackStory.readingTime
+    };
+}
+
+function isDailyPersonaTooSoft(story) {
+    const compactText = [story.title, story.lead, story.highlight, story.resultNote].join(" ");
+    const fullText = [compactText, ...story.paragraphs].join(" ");
+    const brandMentions = fullText.match(/\bProbleemilahendaja\b/giu) || [];
+
+    if (DAILY_ARTICLE_SOFT_LANGUAGE_REGEX.test(compactText)) {
+        return true;
+    }
+
+    if (story.title.split(/\s+/).filter(Boolean).length > 12) {
+        return true;
+    }
+
+    if (story.lead.split(/\s+/).filter(Boolean).length > 28) {
+        return true;
+    }
+
+    if (brandMentions.length < 1 || brandMentions.length > 3) {
+        return true;
+    }
+
+    return false;
+}
+
+function normalizeDailyPersonaPayload(dateKey, payload, publishedAt = new Date().toISOString()) {
+    const fallbackStory = buildFallbackDailyPersona(dateKey);
+    const fallbackTakeaways = fallbackStory.takeaways;
+
+    const normalizedStory = {
+        id: dateKey,
+        dateKey,
+        styleVersion: DAILY_PERSONA_STYLE_VERSION,
+        publishedAt,
+        theme: compactLabel(
+            normalizeField(sanitizeAdministrativeLanguage(payload.theme), sanitizeAdministrativeLanguage(fallbackStory.theme), 42),
+            sanitizeAdministrativeLanguage(fallbackStory.theme),
+            28
+        ),
+        characterName: normalizeField(payload.characterName, fallbackStory.characterName, 48),
+        characterMeta: normalizeField(payload.characterMeta, fallbackStory.characterMeta, 72),
+        title: normalizeField(sanitizeAdministrativeLanguage(payload.title), sanitizeAdministrativeLanguage(fallbackStory.title), 110),
+        lead: normalizeField(sanitizeAdministrativeLanguage(payload.lead), sanitizeAdministrativeLanguage(fallbackStory.lead), 190),
+        highlight: normalizeField(sanitizeAdministrativeLanguage(payload.highlight), sanitizeAdministrativeLanguage(fallbackStory.highlight), 190),
+        resultNote: normalizeField(sanitizeAdministrativeLanguage(payload.resultNote), sanitizeAdministrativeLanguage(fallbackStory.resultNote), 210),
+        photoBrief: normalizeField(payload.photoBrief, fallbackStory.photoBrief, 320),
+        paragraphs: normalizeTextList(
+            Array.isArray(payload.paragraphs) ? payload.paragraphs.map(sanitizeAdministrativeLanguage) : payload.paragraphs,
+            fallbackStory.paragraphs.map(sanitizeAdministrativeLanguage),
+            4,
+            360
+        ),
+        takeaways: normalizeTextList(payload.takeaways, fallbackTakeaways, 3, 54).map(function (value, index) {
+            return compactLabel(sanitizeAdministrativeLanguage(value), sanitizeAdministrativeLanguage(fallbackTakeaways[index]), 34);
+        }),
+        readingTime: normalizeReadingTime(payload.readingTime, fallbackStory.readingTime)
+    };
+
+    if (isDailyPersonaTooSoft(normalizedStory)) {
+        return {
+            ...fallbackStory,
+            publishedAt
+        };
+    }
+
+    return normalizedStory;
+}
+
+function normalizeStoredDailyPersona(record) {
+    if (!record || typeof record !== "object") {
+        return null;
+    }
+
+    if ((record.styleVersion ?? 0) !== DAILY_PERSONA_STYLE_VERSION) {
+        return null;
+    }
+
+    const publishedAt = new Date(parseTimestamp(record.publishedAt || record.published_at) || Date.now()).toISOString();
+
+    return normalizeDailyPersonaPayload(normalizeField(record.dateKey || record.id, getLocalDateKey(), 20), {
+        theme: record.theme,
+        characterName: record.characterName || record.character_name,
+        characterMeta: record.characterMeta || record.character_meta,
+        title: record.title,
+        lead: record.lead,
+        highlight: record.highlight,
+        resultNote: record.resultNote || record.result_note,
+        photoBrief: record.photoBrief || record.photo_brief,
+        paragraphs: record.paragraphs,
+        takeaways: record.takeaways,
+        readingTime: record.readingTime
+    }, publishedAt);
+}
+
+async function loadDailyPersonas() {
+    if (dailyPersonasLoaded) {
+        return dailyPersonas;
+    }
+
+    try {
+        const raw = await readFile(dailyPersonaCachePath, "utf8");
+        const payload = JSON.parse(raw);
+
+        dailyPersonas = Array.isArray(payload?.stories)
+            ? payload.stories.map(normalizeStoredDailyPersona).filter(Boolean)
+            : [];
+    } catch (error) {
+        if (error?.code !== "ENOENT") {
+            console.error("Failed to load daily persona archive.", error);
+        }
+
+        dailyPersonas = [];
+    }
+
+    dailyPersonas.sort(function (firstStory, secondStory) {
+        return getArchiveSortTimestamp(secondStory) - getArchiveSortTimestamp(firstStory);
+    });
+    dailyPersonas = dailyPersonas.slice(0, DAILY_PERSONA_ARCHIVE_LIMIT);
+    dailyPersonasLoaded = true;
+
+    return dailyPersonas;
+}
+
+async function saveDailyPersonas() {
+    await mkdir(path.dirname(dailyPersonaCachePath), { recursive: true });
+    await writeFile(
+        dailyPersonaCachePath,
+        JSON.stringify({ stories: dailyPersonas.slice(0, DAILY_PERSONA_ARCHIVE_LIMIT) }, null, 2),
+        "utf8"
+    );
+}
+
+async function requestDailyPersonaFromModel(model, dateKey, theme, recentStories = []) {
+    const personaTextVerbosity = /^gpt-4\.1/i.test(model) ? "medium" : "low";
+    const editorialGuide = getPersonaEditorialGuide(dateKey, theme, recentStories);
+    const recentPersonaReferenceLines = getRecentPersonaReferenceLines(recentStories, dateKey);
+    const aiResponse = await client.responses.create({
+        model,
+        max_output_tokens: 1300,
+        instructions: [
+            "Sa kirjutad eestikeelse päevase personaalse digi-ajakirja loo Probleemilahendaja rubriiki.",
+            "Lugu peab olema fiktiivne, aga täiesti usutav: üks väljamõeldud inimene või paar, üks päris probleem, üks selge muutus.",
+            "Kirjuta nagu tugev Eesti ajakirja persooni- või case-lugu, mitte nagu testimonial, pressiteade ega reklaamtekst.",
+            "Probleem peab olema praktiline ja äratuntav: veniv tööteema, rahaasi, asjaajamine, kodune hõõrumine, edasi lükatud vestlus, pooleli kolimine või muu sarnane.",
+            "Ära jää kinni ainult ühte tüüpi ametitesse. Vahelda teadlikult avalikku sektorit, loovtööd, teenindust, ettevõtlust, kontoritööd, õppureid ja lapsevanemaid.",
+            "Kasuta konkreetseid ja Eestis äratuntavaid rolle: tudeng, laulja, projektijuht, tippjuht, lapsevanem, pereõde, õpetaja, pagar, kohvikupidaja, muusikaõpetaja, väikeettevõtja või muu samasugune päris inimene.",
+            "Hoia tegelaste vanused varieeruvana. Kõik lood ei tohi olla 30ndates inimesed. Vahelda teadlikult 20ndaid, 30ndaid, 40ndaid ja 50ndaid.",
+            "Paari või kahe inimese loos ei pea tegu olema ainult romantilise paariga. See võib olla ka õde ja vend, ema ja täiskasvanud tütar, isa ja poeg või muu usutav kahe inimese dünaamika.",
+            "characterMeta peab mõjuma nagu päris Eesti ajakirja identifitseeriv rida: vanus, konkreetne amet ja linn või koht Eestis.",
+            "Kui loos on tööteema, ei pea tegevus toimuma kodukontoris. Vali rolli järgi loogiline päris keskkond.",
+            "Väldi neutraalset helget kodukontorit, ümarat stock-portreed ja üldist 'inimene laua taga' lahendust, kui loos on võimalik anda eristuvam ja tänapäevasem keskkond.",
+            "Probleemilahendaja peab loos aitama probleemi sõnastada ja väiksemaks teha, mitte lahendama seda maagiliselt.",
+            "Maini Probleemilahendajat loomulikult 1 kuni 2 korda kogu loos.",
+            "Ära muuda lugu liiga dramaatiliseks. Väldi elumuutva, terapeutilise või liiga reklaamiliku tooni kasutamist.",
+            "Ära maini AI-d, prompti, mudelit ega sisu genereerimist.",
+            "Ära kasuta väljamõeldud uuringuid, protsente, eksperte ega muud põhjendamata autoriteeti.",
+            "Kasuta lihtsat, loomulikku ja tänapäevast eesti keelt.",
+            "Ära leiuta kummalisi metafoore, tõlkelisi väljendeid ega uusi sõnu.",
+            "Lugu peab tunduma nagu päris ajakirja hästi toimetatud persoonilugu: konkreetne, rahulik, täpne ja loetav.",
+            "characterName peab olema lühike eesnimi või kaks eesnime.",
+            "characterMeta peab olema lühike identifitseeriv rida, näiteks vanus, roll ja linn.",
+            "title peab olema ajakirjalik, konkreetne ja kuni umbes 11 sõna.",
+            "lead peab olema lühike, selge ja kuni umbes 28 sõna.",
+            "highlight peab olema üks tugev lause, mis mõjub nagu loo tuum või tsitaaditaolise rõhuga vahepealkiri.",
+            "resultNote peab olema üks lühike lause selle kohta, mis pärast selgemaks läks või muutus.",
+            "paragraphs peab sisaldama täpselt 4 lõiku.",
+            "takeaways peab sisaldama täpselt 3 lühikest rida, igaüks maksimaalselt umbes 4 sõna.",
+            "theme peab olema väga lühike teema või rubriigisilt, umbes 2 kuni 4 sõna.",
+            "readingTime peab olema kujul '4 min lugemine'.",
+            "photoBrief peab olema ingliskeelne 2 kuni 4 lausega editorial photography brief selle loo peapildi jaoks.",
+            "photoBrief peab ütlema inimese vanuse, tegevusala, keskkonna, meeleolu ja visuaalse tegevuse.",
+            "photoBrief peab mõjuma nagu päris ajakirja fotograafi tööjuhis: candid, environmental, warm, premium, not stock-photo, not corporate, not studio headshot.",
+            "Tagasta ainult puhas JSON."
+        ].join(" "),
+        input: [
+            `Kuupäev: ${dateKey}`,
+            `Tänane vaatenurk: ${theme.prompt}`,
+            "Hoia lugu ühes teemas. Ära too sisse teisi kõrvalprobleeme ega hajuta fookust.",
+            "Kirjelda lühidalt, mis inimest enne väsitas, kuidas Probleemilahendaja aitas asja õigesti sõnastada ja mis pärast muutus.",
+            "Lugu peab mõjuma nagu päris inimese päevast välja lõigatud hästi kirjutatud ajakirja lugu.",
+            editorialGuide
+                ? `Toimetaja soovituslik värske suund tänaseks looks: ${editorialGuide.ageHint}-aastane ${editorialGuide.occupations.join(" ja ")} ${editorialGuide.place} kandist. Keskkond: ${editorialGuide.scene}. Toon: ${editorialGuide.mood}.`
+                : "",
+            recentPersonaReferenceLines.length > 0
+                ? `Hiljutised lood, mille tegevusala, vanust või õhustikku ei tohi liiga lähedalt korrata:\n- ${recentPersonaReferenceLines.join("\n- ")}`
+                : "",
+            "Tänane lugu peab eristuma viimastest lugudest nii rolli, vanuse kui ka keskkonna poolest."
+        ].join("\n"),
+        text: {
+            verbosity: personaTextVerbosity,
+            format: {
+                type: "json_schema",
+                name: "daily_persona_story",
+                strict: true,
+                schema: DAILY_PERSONA_JSON_SCHEMA
+            }
+        }
+    });
+
+    if (aiResponse.status && aiResponse.status !== "completed") {
+        const reason = aiResponse.incomplete_details?.reason || aiResponse.status;
+        throw new Error(`Daily persona response incomplete: ${reason}`);
+    }
+
+    const payload = extractJsonObject(aiResponse.output_text);
+    return normalizeDailyPersonaPayload(dateKey, payload);
+}
+
+async function generateDailyPersona(dateKey) {
+    await loadDailyPersonas();
+    const fallbackStory = buildFallbackDailyPersona(dateKey);
+    const theme = getPersonaThemeForDate(dateKey);
+
+    if (!client) {
+        return fallbackStory;
+    }
+
+    const candidateModels = [...new Set([personaModel, "gpt-4.1"])];
+    let lastError = null;
+
+    for (const model of candidateModels) {
+        try {
+            return await requestDailyPersonaFromModel(model, dateKey, theme, dailyPersonas);
+        } catch (error) {
+            lastError = error;
+            console.error(`Failed to generate daily persona with model ${model}.`, error);
+        }
+    }
+
+    console.error("Failed to generate daily persona.", lastError);
+    return fallbackStory;
+}
+
+async function ensureDailyPersonaForToday() {
+    const todayKey = getLocalDateKey();
+    await loadDailyPersonas();
+
+    const existingStory = dailyPersonas.find(function (story) {
+        return story.dateKey === todayKey || story.id === todayKey;
+    });
+
+    if (existingStory) {
+        return existingStory;
+    }
+
+    if (!dailyPersonaGenerationPromise) {
+        dailyPersonaGenerationPromise = (async function () {
+            const story = await generateDailyPersona(todayKey);
+
+            dailyPersonas = [
+                story,
+                ...dailyPersonas.filter(function (existing) {
+                    return existing.id !== story.id && existing.dateKey !== story.dateKey;
+                })
+            ].slice(0, DAILY_PERSONA_ARCHIVE_LIMIT);
+
+            await saveDailyPersonas();
+            return story;
+        }()).finally(function () {
+            dailyPersonaGenerationPromise = null;
+        });
+    }
+
+    return dailyPersonaGenerationPromise;
+}
+
+async function getDailyPersonaArchive() {
+    await ensureDailyPersonaForToday();
+
+    return dailyPersonas
+        .slice()
+        .sort(function (firstStory, secondStory) {
+            return getArchiveSortTimestamp(secondStory) - getArchiveSortTimestamp(firstStory);
+        })
+        .slice(0, DAILY_PERSONA_PUBLIC_LIMIT);
+}
+
+async function backfillDailyPersonas(count = DAILY_PERSONA_PUBLIC_LIMIT) {
+    await loadDailyPersonas();
+
+    const targetDateKeys = getRecentDateKeys(count);
+
+    for (const dateKey of targetDateKeys) {
+        const existingStory = dailyPersonas.find(function (story) {
+            return story.dateKey === dateKey || story.id === dateKey;
+        });
+
+        if (!existingStory) {
+            const story = await generateDailyPersona(dateKey);
+            dailyPersonas = [
+                story,
+                ...dailyPersonas.filter(function (existing) {
+                    return existing.id !== story.id && existing.dateKey !== story.dateKey;
+                })
+            ];
+        }
+    }
+
+    dailyPersonas = dailyPersonas
+        .slice()
+        .sort(function (firstStory, secondStory) {
+            return getArchiveSortTimestamp(secondStory) - getArchiveSortTimestamp(firstStory);
+        })
+        .slice(0, DAILY_PERSONA_ARCHIVE_LIMIT);
+
+    await saveDailyPersonas();
+    return dailyPersonas.slice(0, Math.max(1, Number(count) || DAILY_PERSONA_PUBLIC_LIMIT));
 }
 
 function buildFallbackDailyHoroscope(dateKey) {
@@ -1281,6 +2260,22 @@ app.get("/api/daily-articles", async function (_request, response) {
     }
 });
 
+app.get("/api/daily-personas", async function (_request, response) {
+    try {
+        const stories = await getDailyPersonaArchive();
+
+        response.json({
+            date: getLocalDateKey(),
+            stories
+        });
+    } catch (error) {
+        console.error("Failed to prepare daily persona stories.", error);
+        response.status(500).json({
+            error: "Päeva persooniloo laadimine ebaõnnestus."
+        });
+    }
+});
+
 app.get("/api/daily-horoscope", async function (_request, response) {
     try {
         const horoscope = await getDailyHoroscopeForToday();
@@ -1374,6 +2369,56 @@ app.post("/api/report", async function (request, response) {
     }
 });
 
+function getCliNumericFlag(flagName, fallbackValue) {
+    const directFlag = process.argv.find(function (value) {
+        return value.startsWith(`${flagName}=`);
+    });
+
+    if (directFlag) {
+        const directValue = Number(directFlag.split("=")[1]);
+        return Number.isFinite(directValue) && directValue > 0 ? directValue : fallbackValue;
+    }
+
+    const flagIndex = process.argv.indexOf(flagName);
+
+    if (flagIndex === -1) {
+        return fallbackValue;
+    }
+
+    const nextValue = Number(process.argv[flagIndex + 1]);
+    return Number.isFinite(nextValue) && nextValue > 0 ? nextValue : fallbackValue;
+}
+
+async function maybeRunBackfillCli() {
+    if (!process.argv.some(function (value) {
+        return value === "--backfill-content" || value.startsWith("--backfill-content=");
+    })) {
+        return false;
+    }
+
+    const requestedCount = getCliNumericFlag("--backfill-content", DAILY_ARTICLE_PUBLIC_LIMIT);
+    const articleCount = Math.max(1, Math.min(DAILY_ARTICLE_ARCHIVE_LIMIT, requestedCount));
+    const personaCount = Math.max(1, Math.min(DAILY_PERSONA_ARCHIVE_LIMIT, requestedCount));
+
+    console.log(`Backfilling ${articleCount} Lorien articles and ${personaCount} persona stories...`);
+
+    try {
+        const [articles, stories] = await Promise.all([
+            backfillDailyArticles(articleCount),
+            backfillDailyPersonas(personaCount)
+        ]);
+
+        console.log("Backfill complete.");
+        console.log(`Lorien archive: ${articles.length} entries`);
+        console.log(`Persona archive: ${stories.length} entries`);
+        return true;
+    } catch (error) {
+        console.error("Backfill failed.", error);
+        process.exitCode = 1;
+        return true;
+    }
+}
+
 if (isProduction) {
     const distPath = path.join(__dirname, "dist");
 
@@ -1383,10 +2428,14 @@ if (isProduction) {
     });
 }
 
-app.listen(port, "0.0.0.0", function () {
-    console.log(
-        isProduction
-            ? `Probleemilahendaja server listening on http://0.0.0.0:${port}`
-            : `Probleemilahendaja API listening on http://0.0.0.0:${port}`
-    );
-});
+const ranBackfillCli = await maybeRunBackfillCli();
+
+if (!ranBackfillCli) {
+    app.listen(port, "0.0.0.0", function () {
+        console.log(
+            isProduction
+                ? `Probleemilahendaja server listening on http://0.0.0.0:${port}`
+                : `Probleemilahendaja API listening on http://0.0.0.0:${port}`
+        );
+    });
+}
