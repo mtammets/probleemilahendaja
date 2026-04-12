@@ -31,86 +31,6 @@ const LORIEN_MOCKUP_IMAGES = Object.entries(lorienMockupModules)
             name: filePath.split("/").pop() || "mockup"
         };
     });
-const personaStoryImageModules = import.meta.glob("./assets/persona-stories/story-*.{png,jpg,jpeg,webp,avif}", {
-    eager: true,
-    import: "default"
-});
-const PERSONA_STORY_IMAGE_METADATA = {
-    "story-2026-04-12.jpg": {
-        intent: "couple",
-        subject: "pair",
-        tags: ["paar", "köök", "kodune otsus", "30s", "eesti", "kaasaegne"],
-        objectPosition: "center center"
-    },
-    "story-2026-04-11.jpg": {
-        intent: "finance",
-        subject: "male",
-        tags: ["mees", "raha", "arve", "asjaajamine", "bussijuht", "30s", "40s", "eesti"],
-        objectPosition: "center center"
-    },
-    "story-2026-04-10.jpg": {
-        intent: "work",
-        subject: "female",
-        tags: ["naine", "töö", "tudeng", "stuudio", "20s", "eesti", "kaasaegne"],
-        objectPosition: "center center"
-    },
-    "story-2026-04-09.jpg": {
-        intent: "conversation",
-        subject: "female",
-        tags: ["naine", "telefon", "vestlus", "juuksur", "20s", "eesti", "kaasaegne"],
-        objectPosition: "center center"
-    },
-    "story-2026-04-08.jpg": {
-        intent: "moving",
-        subject: "female",
-        tags: ["naine", "kolimine", "kastid", "uus kodu", "40s", "eesti"],
-        objectPosition: "center center"
-    },
-    "story-2026-04-07.jpg": {
-        intent: "couple",
-        subject: "pair",
-        tags: ["paar", "kodu", "otsus", "40s", "50s", "eesti"],
-        objectPosition: "center center"
-    },
-    "story-2026-04-06.jpg": {
-        intent: "finance",
-        subject: "female",
-        tags: ["naine", "raha", "asjaajamine", "kohvik", "40s", "eesti"],
-        objectPosition: "center center"
-    },
-    "story-2026-04-05.jpg": {
-        intent: "work",
-        subject: "female",
-        tags: ["naine", "töö", "muusikaõpetaja", "40s", "eesti"],
-        objectPosition: "center center"
-    }
-};
-const PERSONA_STORY_FEMALE_NAMES = new Set([
-    "Airi", "Andra", "Anna", "Anni", "Birgit", "Egle", "Eha", "Ene", "Eve", "Heleri", "Kaire", "Karin", "Kärt", "Katrin", "Kristina", "Külli", "Liina", "Liis", "Maarja", "Margit", "Mariliis", "Marje", "Marju", "Reet", "Sandra", "Sirje", "Tiina"
-]);
-const PERSONA_STORY_MALE_NAMES = new Set([
-    "Ain", "Jaan", "Karl", "Kaur", "Kristjan", "Marten", "Rain", "Rasmus", "Toomas", "Vahur"
-]);
-const PERSONA_STORY_IMAGE_LIBRARY = Object.entries(personaStoryImageModules)
-    .sort(function ([firstPath], [secondPath]) {
-        const firstName = firstPath.split("/").pop() || "";
-        const secondName = secondPath.split("/").pop() || "";
-        return firstName.localeCompare(secondName, "et");
-    })
-    .map(function ([filePath, src]) {
-        const name = filePath.split("/").pop() || "persona-story";
-        const metadata = PERSONA_STORY_IMAGE_METADATA[name] || {};
-
-        return {
-            id: name.replace(/\.[^.]+$/, ""),
-            src,
-            name,
-            intent: metadata.intent || "general",
-            subject: metadata.subject || "unknown",
-            tags: Array.isArray(metadata.tags) ? metadata.tags : [],
-            objectPosition: metadata.objectPosition || "center center"
-        };
-    });
 
 const body = document.body;
 const container = document.querySelector(".container");
@@ -132,7 +52,6 @@ const coverIssueDate = document.getElementById("coverIssueDate");
 const coverIssueNumber = document.getElementById("coverIssueNumber");
 const coverStoryName = document.getElementById("coverStoryName");
 const coverStoryTitle = document.getElementById("coverStoryTitle");
-const coverStorySummary = document.getElementById("coverStorySummary");
 const newsletterSection = document.getElementById("newsletter");
 const newsletterForm = document.getElementById("newsletterForm");
 const newsletterEmail = document.getElementById("newsletterEmail");
@@ -256,6 +175,7 @@ const DAILY_PERSONA_STORIES_LIMIT = 8;
 const DAILY_PERSONA_STORIES_MOBILE_INITIAL_COUNT = 1;
 const DAILY_PERSONA_STORIES_LOAD_STEP = 1;
 const DAILY_PERSONA_STORIES_REFRESH_INTERVAL = 60 * 60 * 1000;
+const DAILY_PERSONA_REFRESH_SIGNAL_KEY = "probleemilahendaja:daily-persona-refresh";
 const DAILY_HOROSCOPE_REFRESH_INTERVAL = 60 * 60 * 1000;
 const DAILY_WEATHER_REFRESH_INTERVAL = 20 * 60 * 1000;
 const WEATHER_LOCATION_TIMEOUT = 6500;
@@ -264,13 +184,6 @@ const DEFAULT_WEATHER_LOCATION = {
     latitude: 59.437,
     longitude: 24.7536,
     source: "fallback"
-};
-const DEFAULT_COVER_STORY = {
-    subjectName: (coverStoryName?.textContent || "Helena Saar").trim(),
-    title: (coverStoryTitle?.textContent || "Üks rahulik otsus muutis kodu selgemaks").trim(),
-    summary: (coverStorySummary?.textContent || "Päeva kaanelugu toob fookusesse inimese, kes lõpetas ühe veninud küsimuse lõpuks päriselt ära.").trim(),
-    imageUrl: "",
-    imageAlt: ""
 };
 const NEWSLETTER_EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/i;
 const PUBLIC_FEED_PROFANITY_REGEX = /\b(?:pers(?:e|se|es|et|ed|ega|ele|el|esse|est|i)?|t(?:ü|y)r(?:a|ad|aga|ale|al|ast|i)?|munn(?:i|e|id|idega|ile|il|ist)?|vitt(?:u|i|e|ud|idega|ile|is|a)?|niku(?:da|n|d|b|s|tud|ga|le)?|pask(?:a|e|i|aks|aga|ale|as|ast|u)?|sit(?:t|a|ad|ane|ase|aks|aga|ale|as|ast)?|hui(?:a|i|d|ga|le|s)?|fuck(?:ing|ed|er|s)?|shit(?:ty|ted|ting|s)?)\b/giu;
@@ -370,18 +283,9 @@ function loadCoverStoryHeroImage() {
 }
 
 function renderDailyCoverStory() {
-    const story = dailyCoverStory || DEFAULT_COVER_STORY;
-
     if (coverStoryName) {
-        coverStoryName.textContent = story.subjectName || DEFAULT_COVER_STORY.subjectName;
-    }
-
-    if (coverStoryTitle) {
-        coverStoryTitle.textContent = story.title || DEFAULT_COVER_STORY.title;
-    }
-
-    if (coverStorySummary) {
-        coverStorySummary.textContent = story.summary || DEFAULT_COVER_STORY.summary;
+        coverStoryName.hidden = !dailyCoverStory?.subjectName;
+        coverStoryName.textContent = dailyCoverStory?.subjectName || "";
     }
 
     loadCoverStoryHeroImage();
@@ -1270,18 +1174,20 @@ function normalizeDailyCoverStory(record) {
         return null;
     }
 
-    const title = truncate(sanitizeProblemText(record.title || DEFAULT_COVER_STORY.title), 96);
+    const subjectName = truncate(sanitizeProblemText(record.subjectName || record.subject_name || ""), 64);
+    const imageUrl = sanitizeProblemText(record.imageUrl || record.image_url || "");
+    const title = truncate(sanitizeProblemText(record.title || ""), 96);
 
-    if (!title) {
+    if (!subjectName && !imageUrl && !title) {
         return null;
     }
 
     return {
         dateKey: sanitizeProblemText(record.dateKey || record.date_key || ""),
-        subjectName: truncate(sanitizeProblemText(record.subjectName || record.subject_name || DEFAULT_COVER_STORY.subjectName), 64),
+        subjectName,
         title,
-        summary: truncate(sanitizeProblemText(record.summary || DEFAULT_COVER_STORY.summary), 220),
-        imageUrl: sanitizeProblemText(record.imageUrl || record.image_url || ""),
+        summary: truncate(sanitizeProblemText(record.summary || ""), 220),
+        imageUrl,
         imageAlt: truncate(sanitizeProblemText(record.imageAlt || record.image_alt || ""), 180),
         publishedAt: new Date(parseDateToTimestamp(record.publishedAt || record.published_at)).toISOString()
     };
@@ -1373,60 +1279,60 @@ function normalizeDailyPersonaStory(record, index) {
     }
 
     const publishedAt = new Date(parseDateToTimestamp(record.publishedAt || record.published_at)).toISOString();
-    const fallbackName = "Kärt";
-    const fallbackMeta = "34, turundusjuht Tallinnast";
-    const fallbackLead = "Üks õigesti sõnastatud probleem võib olla palju suurem kergendus kui järgmine eneseabi-trikk.";
+    const galleryImages = (Array.isArray(record.galleryImages) ? record.galleryImages : [])
+        .slice(0, 4)
+        .map(function (image, imageIndex) {
+            if (!image || typeof image !== "object") {
+                return null;
+            }
+
+            const url = sanitizeProblemText(image.url || image.src || "");
+
+            if (!url) {
+                return null;
+            }
+
+            return {
+                id: sanitizeProblemText(image.id || `${record.id || record.dateKey || "persona"}-gallery-${imageIndex + 1}`),
+                slot: Math.max(1, Math.min(4, Number(image.slot) || imageIndex + 1)),
+                url,
+                alt: truncate(sanitizeProblemText(image.alt || ""), 180),
+                caption: truncate(sanitizeAdministrativeUiText(sanitizeProblemText(image.caption || "")), 180)
+            };
+        })
+        .filter(Boolean);
 
     return {
         id: sanitizeProblemText(record.id || record.dateKey || record.date_key || String(index + 1)),
         dateKey: sanitizeProblemText(record.dateKey || record.date_key || ""),
         theme: capitalizeFirst(truncate(sanitizeAdministrativeUiText(sanitizeProblemText(record.theme || "Persoonilugu")), 42)),
-        characterName: truncate(sanitizeProblemText(record.characterName || record.character_name || fallbackName), 48),
-        characterMeta: truncate(sanitizeProblemText(record.characterMeta || record.character_meta || fallbackMeta), 72),
+        characterName: truncate(sanitizeProblemText(record.characterName || record.character_name || ""), 48),
+        characterMeta: truncate(sanitizeProblemText(record.characterMeta || record.character_meta || ""), 72),
         title: truncate(sanitizeAdministrativeUiText(title), 110),
-        lead: truncate(sanitizeAdministrativeUiText(sanitizeProblemText(record.lead || fallbackLead)), 190),
-        highlight: truncate(
-            sanitizeAdministrativeUiText(sanitizeProblemText(
-                record.highlight
-                || "Kui probleem sai lõpuks õigesti sõnastatud, muutus ka järgmine samm palju väiksemaks."
-            )),
-            190
-        ),
-        resultNote: truncate(
-            sanitizeAdministrativeUiText(sanitizeProblemText(
-                record.resultNote
-                || record.result_note
-                || "Probleemilahendaja aitas selle loo peategelasel tõmmata ühe suure hägu tagasi üheks päris lahendatavaks küsimuseks."
-            )),
-            210
-        ),
+        lead: truncate(sanitizeAdministrativeUiText(sanitizeProblemText(record.lead || "")), 190),
+        highlight: truncate(sanitizeAdministrativeUiText(sanitizeProblemText(record.highlight || "")), 190),
+        resultNote: truncate(sanitizeAdministrativeUiText(sanitizeProblemText(record.resultNote || record.result_note || "")), 210),
         paragraphs: normalizeTextArray(
             Array.isArray(record.paragraphs) ? record.paragraphs.map(sanitizeAdministrativeUiText) : record.paragraphs,
-            [
-                fallbackLead,
-                "Tüütu ei olnud ainult probleem ise, vaid see, kui palju ruumi see inimese peas iga päev märkamatult ära võttis.",
-                "Kui teema sai lõpuks piisavalt täpseks, muutus ka lahendus ootamatult praktiliseks.",
-                "Suur muutus ei olnud draama, vaid see, et sama asi ei hakanud järgmisel päeval enam nullist uuesti pihta."
-            ],
+            [],
             4,
             360
-        ),
+        ).filter(Boolean),
         takeaways: normalizeTextArray(
             Array.isArray(record.takeaways) ? record.takeaways.map(sanitizeAdministrativeUiText) : record.takeaways,
-            ["üks selge tuum", "vähem taustapinget", "järgmine samm olemas"],
+            [],
             3,
             48
-        ).map(function (value, index) {
-            return compactLabel(
-                value,
-                ["üks selge tuum", "vähem taustapinget", "järgmine samm olemas"][index],
-                34
-            );
-        }),
-        readingTime: truncate(sanitizeProblemText(record.readingTime || record.reading_time || "4 min lugemine"), 24),
+        )
+            .map(function (value) {
+                return compactLabel(value, "", 34);
+            })
+            .filter(Boolean),
+        readingTime: truncate(sanitizeProblemText(record.readingTime || record.reading_time || ""), 24),
         imageUrl: sanitizeProblemText(record.imageUrl || record.image_url || ""),
         imageAlt: truncate(sanitizeProblemText(record.imageAlt || record.image_alt || ""), 180),
         imageObjectPosition: sanitizeProblemText(record.imageObjectPosition || record.image_object_position || ""),
+        galleryImages,
         publishedAt
     };
 }
@@ -3590,249 +3496,6 @@ function getSelectedDailyPersonaStory() {
     }) || dailyPersonaStories[0];
 }
 
-function extractPersonaAge(story) {
-    const ageMatch = String(story?.characterMeta || "").match(/\b(\d{2})\b/);
-    return ageMatch ? Number(ageMatch[1]) : null;
-}
-
-function getPersonaImageAgeTags(age) {
-    if (!Number.isFinite(age)) {
-        return [];
-    }
-
-    if (age < 30) {
-        return ["20s"];
-    }
-
-    if (age < 40) {
-        return ["30s"];
-    }
-
-    if (age < 50) {
-        return ["40s"];
-    }
-
-    return ["50s", "senior"];
-}
-
-function isPersonaPairStory(story) {
-    const nameText = String(story?.characterName || "").toLocaleLowerCase("et-EE");
-    const metaText = String(story?.characterMeta || "").toLocaleLowerCase("et-EE");
-    const themeText = String(story?.theme || "").toLocaleLowerCase("et-EE");
-
-    return /\b.+\sja\s.+\b/.test(nameText) || /paar|vanemad|kahepeale/.test(`${metaText} ${themeText}`);
-}
-
-function inferPersonaStorySubject(story) {
-    if (isPersonaPairStory(story)) {
-        return "pair";
-    }
-
-    const firstName = String(story?.characterName || "")
-        .split(/\s|,/)
-        .map(function (value) {
-            return value.trim();
-        })
-        .filter(Boolean)[0] || "";
-
-    if (PERSONA_STORY_FEMALE_NAMES.has(firstName)) {
-        return "female";
-    }
-
-    if (PERSONA_STORY_MALE_NAMES.has(firstName)) {
-        return "male";
-    }
-
-    return "unknown";
-}
-
-function getPersonaStoryIntent(story) {
-    const priorityText = [
-        story?.theme,
-        story?.title,
-        story?.lead
-    ].join(" ").toLocaleLowerCase("et-EE");
-
-    if (/kolim|korter|kast|uus kodu/.test(priorityText)) {
-        return "moving";
-    }
-
-    if (/raha|arve|asjaaj|nõude|raamatupid|paberi/.test(priorityText)) {
-        return "finance";
-    }
-
-    if (isPersonaPairStory(story)) {
-        return "couple";
-    }
-
-    if (/vestlus|jutu|rääki|kõne|kolleeg/.test(priorityText)) {
-        return "conversation";
-    }
-
-    if (/töö|projekt|ülesann|tempo|koosolek|kontor/.test(priorityText)) {
-        return "work";
-    }
-
-    return "general";
-}
-
-function scorePersonaStoryImage(story, imageAsset) {
-    const combinedText = [
-        story?.theme,
-        story?.title,
-        story?.lead,
-        story?.characterName,
-        story?.characterMeta,
-        ...(Array.isArray(story?.paragraphs) ? story.paragraphs : [])
-    ].join(" ").toLocaleLowerCase("et-EE");
-    const ageTags = getPersonaImageAgeTags(extractPersonaAge(story));
-    const storyIntent = getPersonaStoryIntent(story);
-    const isPairStory = isPersonaPairStory(story);
-    const storySubject = inferPersonaStorySubject(story);
-    let score = 0;
-
-    if (imageAsset.intent === storyIntent) {
-        score += 90;
-    } else if (storyIntent === "finance" && imageAsset.intent === "work") {
-        score += 12;
-    } else if (storyIntent === "work" && imageAsset.intent === "finance") {
-        score += 8;
-    }
-
-    if (isPairStory && imageAsset.tags.includes("paar")) {
-        score += 36;
-    }
-
-    if (!isPairStory && imageAsset.tags.includes("paar")) {
-        score -= 60;
-    }
-
-    if (storySubject !== "unknown") {
-        if (imageAsset.subject === storySubject) {
-            score += 70;
-        } else if (imageAsset.subject !== "unknown") {
-            score -= 120;
-        }
-    }
-
-    if (storyIntent !== "conversation" && imageAsset.intent === "conversation") {
-        score -= 10;
-    }
-
-    imageAsset.tags.forEach(function (tag) {
-        if (combinedText.includes(tag)) {
-            score += 10;
-        }
-    });
-
-    if ((/kolim|korter|kast|uus kodu/.test(combinedText)) && imageAsset.intent === "moving") {
-        score += 32;
-    }
-
-    if ((/vestlus|jutu|rääki|kõne|kolleeg/.test(combinedText)) && imageAsset.intent === "conversation") {
-        score += 32;
-    }
-
-    if ((/raha|arve|asjaaj|paberi|numbri/.test(combinedText)) && imageAsset.intent === "finance") {
-        score += 32;
-    }
-
-    if ((/töö|projekt|ülesann|tempo|kontor/.test(combinedText)) && imageAsset.intent === "work") {
-        score += 32;
-    }
-
-    ageTags.forEach(function (tag) {
-        if (imageAsset.tags.includes(tag)) {
-            score += 18;
-        }
-    });
-
-    const tieBreakerSeed = `${story?.id || story?.dateKey || ""}:${imageAsset.id}`;
-    let tieBreaker = 0;
-
-    for (const character of tieBreakerSeed) {
-        tieBreaker = ((tieBreaker * 31) + character.charCodeAt(0)) >>> 0;
-    }
-
-    return score + ((tieBreaker % 1000) / 1000);
-}
-
-function getFixedPersonaStoryImageName(story) {
-    const dateKey = String(story?.dateKey || story?.id || "").trim();
-
-    if (!dateKey) {
-        return "";
-    }
-
-    return `story-${dateKey}.jpg`;
-}
-
-function getProvidedPersonaStoryImageAsset(story) {
-    if (!story?.imageUrl) {
-        return null;
-    }
-
-    return {
-        id: `remote-${story.id || story.dateKey || story.imageUrl}`,
-        src: story.imageUrl,
-        objectPosition: story.imageObjectPosition || "center center",
-        alt: story.imageAlt || `${story.characterName} persooniloo illustratsioon teemal "${story.theme}"`,
-        intent: "remote",
-        subject: "unknown",
-        tags: [],
-        name: ""
-    };
-}
-
-function getPersonaStoryImageAssignments(stories) {
-    const assignments = new Map();
-    const usedImageIds = new Set();
-    const normalizedStories = (Array.isArray(stories) ? stories : []).filter(Boolean);
-
-    normalizedStories.forEach(function (story) {
-        const providedImage = getProvidedPersonaStoryImageAsset(story);
-
-        if (providedImage && !assignments.has(story.id)) {
-            assignments.set(story.id, providedImage);
-            usedImageIds.add(providedImage.id);
-            return;
-        }
-
-        const fixedImageName = getFixedPersonaStoryImageName(story);
-        const fixedImage = PERSONA_STORY_IMAGE_LIBRARY.find(function (imageAsset) {
-            return imageAsset.name === fixedImageName;
-        });
-
-        if (fixedImage && !assignments.has(story.id)) {
-            assignments.set(story.id, fixedImage);
-            usedImageIds.add(fixedImage.id);
-        }
-    });
-
-    normalizedStories.forEach(function (story) {
-        if (assignments.has(story.id)) {
-            return;
-        }
-
-        const availableImages = PERSONA_STORY_IMAGE_LIBRARY.filter(function (imageAsset) {
-            return !usedImageIds.has(imageAsset.id);
-        });
-        const candidateImages = availableImages.length > 0 ? availableImages : PERSONA_STORY_IMAGE_LIBRARY;
-        const bestImage = candidateImages
-            .slice()
-            .sort(function (firstImage, secondImage) {
-                return scorePersonaStoryImage(story, secondImage) - scorePersonaStoryImage(story, firstImage);
-            })[0] || null;
-
-        if (bestImage) {
-            assignments.set(story.id, bestImage);
-            usedImageIds.add(bestImage.id);
-        }
-    });
-
-    return assignments;
-}
-
 function createPersonaStoryPlaceholder() {
     const fragment = document.createDocumentFragment();
     const title = document.createElement("h3");
@@ -3840,11 +3503,37 @@ function createPersonaStoryPlaceholder() {
 
     title.className = "persona-story__title";
     lead.className = "persona-story__lead";
-    title.textContent = "Persoonilugu valmistub";
-    lead.textContent = "Probleemilahendaja järgmine päevane case-lugu laeb ennast sisse.";
+    title.textContent = "Persoonilugusid veel ei ole";
+    lead.textContent = "See rubriik täitub alles siis, kui intervjuu on tehtud ja avaldatud.";
     fragment.append(title, lead);
 
     return fragment;
+}
+
+function getPersonaCoverImage(story) {
+    if (story?.imageUrl) {
+        return {
+            src: story.imageUrl,
+            alt: story.imageAlt || `${story.characterName || "Persoonilugu"} foto`,
+            objectPosition: story.imageObjectPosition || "center center"
+        };
+    }
+
+    const firstGalleryImage = Array.isArray(story?.galleryImages)
+        ? story.galleryImages.find(function (image) {
+            return image?.url;
+        })
+        : null;
+
+    if (!firstGalleryImage) {
+        return null;
+    }
+
+    return {
+        src: firstGalleryImage.url,
+        alt: firstGalleryImage.alt || `${story.characterName || "Persoonilugu"} foto`,
+        objectPosition: "center center"
+    };
 }
 
 function renderFeaturedPersonaStory(story, imageAsset = null) {
@@ -3870,8 +3559,10 @@ function renderFeaturedPersonaStory(story, imageAsset = null) {
     const highlight = document.createElement("blockquote");
     const body = document.createElement("div");
     const result = document.createElement("p");
-    const takeawaysLabel = document.createElement("span");
-    const takeaways = document.createElement("div");
+    const gallery = document.createElement("div");
+    const galleryImages = (Array.isArray(story.galleryImages) ? story.galleryImages : []).filter(function (galleryImage) {
+        return galleryImage?.url && galleryImage.url !== imageAsset?.src;
+    });
 
     media.className = "persona-story__media";
     image.className = "persona-story__image";
@@ -3882,12 +3573,11 @@ function renderFeaturedPersonaStory(story, imageAsset = null) {
     highlight.className = "persona-story__highlight";
     body.className = "persona-story__body";
     result.className = "persona-story__result";
-    takeawaysLabel.className = "persona-story__section-label";
-    takeaways.className = "persona-story__takeaways";
+    gallery.className = "persona-story__gallery";
 
     if (imageAsset) {
         image.src = imageAsset.src;
-        image.alt = imageAsset.alt || `${story.characterName} persooniloo illustratsioon teemal "${story.theme}"`;
+        image.alt = imageAsset.alt || `${story.characterName || "Persoonilugu"} foto`;
         image.loading = "lazy";
         image.decoding = "async";
         image.style.objectPosition = imageAsset.objectPosition || "center center";
@@ -3896,27 +3586,80 @@ function renderFeaturedPersonaStory(story, imageAsset = null) {
 
     date.textContent = formatEditorialDate(story);
     title.textContent = story.title;
-    lead.textContent = story.lead;
-    highlight.textContent = story.highlight;
-    result.textContent = story.resultNote;
-    takeawaysLabel.textContent = "Mis muutus";
 
-    story.paragraphs.forEach(function (paragraphText) {
+    (story.paragraphs || []).filter(Boolean).forEach(function (paragraphText) {
         const paragraph = document.createElement("p");
         paragraph.textContent = paragraphText;
         body.append(paragraph);
     });
 
-    story.takeaways.forEach(function (takeawayText) {
-        const pill = document.createElement("span");
-        pill.className = "persona-story__takeaway";
-        pill.textContent = takeawayText;
-        takeaways.append(pill);
+    galleryImages.forEach(function (galleryImage) {
+        const figure = document.createElement("figure");
+        const galleryImageElement = document.createElement("img");
+        const caption = document.createElement("figcaption");
+
+        figure.className = "persona-story__gallery-item";
+        galleryImageElement.className = "persona-story__gallery-image";
+        caption.className = "persona-story__gallery-caption";
+        galleryImageElement.src = galleryImage.url;
+        galleryImageElement.alt = galleryImage.alt || `${story.characterName} persooniloo lisafoto`;
+        galleryImageElement.loading = "lazy";
+        galleryImageElement.decoding = "async";
+        caption.textContent = galleryImage.caption || "";
+
+        figure.append(galleryImageElement);
+
+        if (caption.textContent) {
+            figure.append(caption);
+        }
+
+        gallery.append(figure);
     });
 
-    content.append(date, title, lead, highlight, body, result, takeawaysLabel, takeaways);
-    fragment.append(media, content);
+    if (imageAsset) {
+        fragment.append(media);
+    }
+
+    content.append(date, title);
+
+    if (story.lead) {
+        lead.textContent = story.lead;
+        content.append(lead);
+    }
+
+    if (story.highlight) {
+        highlight.textContent = story.highlight;
+        content.append(highlight);
+    }
+
+    if (body.childElementCount > 0) {
+        content.append(body);
+    }
+
+    if (story.resultNote) {
+        result.textContent = story.resultNote;
+        content.append(result);
+    }
+
+    if (gallery.childElementCount > 0) {
+        content.append(gallery);
+    }
+
+    fragment.append(content);
     personaStoryFeatured.replaceChildren(fragment);
+}
+
+function scrollFeaturedPersonaStoryIntoView() {
+    if (!personaStoryFeatured) {
+        return;
+    }
+
+    window.requestAnimationFrame(function () {
+        personaStoryFeatured.scrollIntoView({
+            behavior: "smooth",
+            block: "start"
+        });
+    });
 }
 
 function createPersonaStoryListItem(story, imageAsset = null) {
@@ -3959,10 +3702,15 @@ function createPersonaStoryListItem(story, imageAsset = null) {
 
     meta.append(date, theme);
     body.append(meta, title);
-    button.append(thumb, body);
+    if (imageAsset) {
+        button.append(thumb);
+    }
+
+    button.append(body);
     button.addEventListener("click", function () {
         selectedDailyPersonaStoryId = story.id;
         renderDailyPersonaStories();
+        scrollFeaturedPersonaStoryIntoView();
     });
 
     return button;
@@ -4011,28 +3759,27 @@ function renderDailyPersonaStories() {
         return story.id !== selectedStory?.id;
     });
     const visibleCount = getVisiblePersonaStories(otherStories);
-    const imageAssignments = getPersonaStoryImageAssignments(dailyPersonaStories);
     const listFragment = document.createDocumentFragment();
 
-    renderFeaturedPersonaStory(selectedStory, imageAssignments.get(selectedStory?.id || "") || null);
+    renderFeaturedPersonaStory(selectedStory, getPersonaCoverImage(selectedStory));
 
     if (dailyPersonaStories.length === 0) {
         const emptyItem = document.createElement("div");
         emptyItem.className = "persona-feed__list-empty";
-        emptyItem.textContent = "Laadimine";
+        emptyItem.textContent = "Avaldatud intervjuud ilmuvad siia.";
         personaStoryList.replaceChildren(emptyItem);
         updatePersonaStoryMoreButton(0, 0);
         return;
     }
 
     otherStories.slice(0, visibleCount).forEach(function (story) {
-        listFragment.append(createPersonaStoryListItem(story, imageAssignments.get(story.id) || null));
+        listFragment.append(createPersonaStoryListItem(story, getPersonaCoverImage(story)));
     });
 
     if (visibleCount >= otherStories.length && otherStories.length < DAILY_PERSONA_STORIES_LIMIT - 1) {
         const note = document.createElement("div");
         note.className = "persona-feed__list-empty";
-        note.textContent = "Arhiiv täieneb iga päev. Homme tuleb siia järgmine persoonilugu.";
+        note.textContent = "Uued intervjuupõhised persoonilood ilmuvad siia pärast avaldamist.";
         listFragment.append(note);
     }
 
@@ -4732,6 +4479,12 @@ ratingButtons.forEach(function (button) {
         setRating(rating);
         persistRatingSelection(rating);
     });
+});
+
+window.addEventListener("storage", function (event) {
+    if (event.key === DAILY_PERSONA_REFRESH_SIGNAL_KEY) {
+        void refreshDailyPersonaStories();
+    }
 });
 
 setLoadingProgress(0);

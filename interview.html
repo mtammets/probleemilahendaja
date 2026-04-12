@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="et">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#f3eee8">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <title>Probleemilahendaja Intervjuu</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@600;700&family=Manrope:wght@400;500;600;700;800&family=Rajdhani:wght@600;700&display=swap"
+        rel="stylesheet">
+    <link rel="stylesheet" href="interviews.css">
+</head>
+
+<body class="workspace-page">
+    <main class="public-interview-page">
+        <section class="editor-card public-stage">
+            <p id="interviewFeedback" class="feedback" hidden></p>
+
+            <div id="interviewContent" hidden>
+                <section class="public-section">
+                    <div id="publicInterviewMessages" class="conversation-log"></div>
+
+                    <form id="interviewMessageForm" class="conversation-composer" novalidate>
+                        <label class="field">
+                            <span>Sinu vastus</span>
+                            <textarea id="interviewMessageInput" rows="4" placeholder="Kirjuta siia oma vastus"></textarea>
+                        </label>
+                        <div class="composer-actions">
+                            <button id="sendInterviewMessageButton" class="primary-button" type="submit">Saada</button>
+                        </div>
+                    </form>
+                </section>
+
+                <section id="uploadSection" class="public-section" hidden>
+                    <p class="muted-copy">Lisa kaks pilti. Kui mõlemad on kohal, saad intervjuu toimetusele saata.</p>
+
+                    <div class="upload-grid">
+                        <div id="uploadFormSlot1" class="upload-tile">
+                            <strong>Pilt 1</strong>
+                            <label class="upload-dropzone">
+                                <input id="uploadFileSlot1" type="file" accept="image/jpeg,image/png,image/webp,image/avif">
+                                <span>Vali fail</span>
+                            </label>
+                            <button id="uploadReplaceSlot1" class="ghost-button upload-replace-button" type="button" hidden>Asenda pilt</button>
+                            <label class="field">
+                                <span>Lühike kirjeldus</span>
+                                <input id="uploadCaptionSlot1" type="text" placeholder="Mis pildil toimub?">
+                            </label>
+                            <div id="uploadPreviewSlot1" class="upload-preview"></div>
+                            <p id="uploadStatusSlot1" class="upload-status" hidden></p>
+                        </div>
+
+                        <div id="uploadFormSlot2" class="upload-tile">
+                            <strong>Pilt 2</strong>
+                            <label class="upload-dropzone">
+                                <input id="uploadFileSlot2" type="file" accept="image/jpeg,image/png,image/webp,image/avif">
+                                <span>Vali fail</span>
+                            </label>
+                            <button id="uploadReplaceSlot2" class="ghost-button upload-replace-button" type="button" hidden>Asenda pilt</button>
+                            <label class="field">
+                                <span>Lühike kirjeldus</span>
+                                <input id="uploadCaptionSlot2" type="text" placeholder="Mis pildil toimub?">
+                            </label>
+                            <div id="uploadPreviewSlot2" class="upload-preview"></div>
+                            <p id="uploadStatusSlot2" class="upload-status" hidden></p>
+                        </div>
+                    </div>
+
+                    <div class="public-preview-actions">
+                        <button id="previewInterviewButton" class="ghost-button" type="button">Vaata eelvaadet</button>
+                        <button id="submitInterviewButton" class="accent-button public-submit" type="button">Saada toimetusele</button>
+                    </div>
+                </section>
+
+                <section id="storyPreviewSection" class="public-section" hidden>
+                    <div class="section-head">
+                        <div>
+                            <span class="section-kicker">Eelvaade</span>
+                            <h2>Vaata oma lugu üle</h2>
+                        </div>
+                        <button id="hidePreviewButton" class="ghost-button" type="button">Peida</button>
+                    </div>
+                    <p id="storyPreviewNote" class="muted-copy">Siin saad enne saatmist teksti rahulikult üle vaadata ja vajadusel muuta.</p>
+                    <div id="storyPreviewContainer" class="public-story-preview"></div>
+                    <form id="storyEditorForm" class="story-editor" hidden>
+                        <div id="storyEditorFields" class="story-editor__grid"></div>
+                        <div class="inline-actions">
+                            <button id="saveStoryEditsButton" class="primary-button" type="button">Salvesta tekstimuudatused</button>
+                        </div>
+                    </form>
+                </section>
+
+                <section id="submittedState" class="editor-card success-card" hidden>
+                    <span class="section-kicker">Valmis</span>
+                    <h2>Intervjuu on toimetuses</h2>
+                    <p>Sinu vastused ja pildid on käes. Järgmine samm on toimetuse ülevaatus ja avaldamine.</p>
+                </section>
+            </div>
+        </section>
+    </main>
+
+    <script type="module" src="interview.js"></script>
+</body>
+
+</html>

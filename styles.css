@@ -1,4 +1,5 @@
 :root {
+    color-scheme: light;
     --canvas: #f1e8df;
     --canvas-deep: #e5d4ca;
     --surface: rgba(253, 247, 241, 0.92);
@@ -45,7 +46,7 @@ html {
 body {
     min-height: 100vh;
     margin: 0;
-    padding: clamp(1rem, 3vw, 2rem);
+    padding: calc(env(safe-area-inset-top, 0px) + clamp(1rem, 3vw, 2rem)) clamp(1rem, 3vw, 2rem) clamp(1rem, 3vw, 2rem);
     display: grid;
     place-items: center;
     font-family: "Manrope", sans-serif;
@@ -2631,6 +2632,36 @@ button:disabled {
     color: #44576b;
 }
 
+.persona-story__gallery {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
+    gap: 0.85rem;
+}
+
+.persona-story__gallery-item {
+    display: grid;
+    gap: 0.55rem;
+    margin: 0;
+}
+
+.persona-story__gallery-image {
+    display: block;
+    width: 100%;
+    aspect-ratio: 4 / 3;
+    object-fit: cover;
+    border-radius: 24px;
+    border: 1px solid rgba(17, 29, 45, 0.08);
+    background: rgba(255, 255, 255, 0.72);
+}
+
+.persona-story__gallery-caption {
+    margin: 0;
+    font-family: "Manrope", sans-serif;
+    font-size: 0.78rem;
+    line-height: 1.55;
+    color: #607183;
+}
+
 .persona-feed__rail {
     display: grid;
     gap: 0.9rem;
@@ -4674,7 +4705,16 @@ button:disabled {
 @media (max-width: 640px) {
     body {
         align-items: stretch;
-        padding: 0.9rem;
+        padding: calc(env(safe-area-inset-top, 0px) + 0.4rem) 0.3rem 0.4rem;
+    }
+
+    body,
+    body[data-state="loading"],
+    body[data-state="done"],
+    body[data-state="report"] {
+        background:
+            linear-gradient(180deg, rgba(7, 16, 26, 0.94) 0%, rgba(10, 21, 34, 0.96) 44%, rgba(16, 30, 45, 0.98) 100%);
+        background-attachment: scroll;
     }
 
     body::before {
@@ -4685,21 +4725,26 @@ button:disabled {
         width: 100%;
         display: grid;
         align-items: center;
+        gap: 0.7rem;
+    }
+
+    .app-shell::before {
+        display: none;
     }
 
     .panel__frame {
-        padding: 1.15rem;
-        border-radius: 24px;
+        padding: 1rem;
+        border-radius: 22px;
     }
 
     .panel__frame::after {
-        inset: 12px;
-        border-radius: 16px;
+        inset: 10px;
+        border-radius: 15px;
     }
 
     .container .panel__frame {
         gap: 1.15rem;
-        padding: 1.05rem;
+        padding: 0.85rem;
         background:
             radial-gradient(circle at 12% 18%, rgba(220, 118, 88, 0.16), transparent 20%),
             radial-gradient(circle at 84% 12%, rgba(68, 181, 202, 0.16), transparent 24%),
@@ -4709,7 +4754,7 @@ button:disabled {
     }
 
     .container .panel__frame::after {
-        inset: 10px;
+        inset: 8px;
     }
 
     .intake-shell {
@@ -4721,7 +4766,7 @@ button:disabled {
         gap: 1rem;
         align-items: end;
         min-height: 24.75rem;
-        padding: 1rem;
+        padding: 0.9rem;
         background:
             linear-gradient(104deg, rgba(5, 11, 19, 0.74) 0%, rgba(8, 17, 27, 0.58) 30%, rgba(7, 16, 26, 0.2) 54%, rgba(7, 16, 26, 0.07) 74%, rgba(7, 16, 26, 0.02) 100%),
             linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0) 22%),
@@ -4729,7 +4774,7 @@ button:disabled {
     }
 
     .intake-hero::after {
-        inset: 10px;
+        inset: 8px;
         border-radius: 18px;
     }
 
@@ -5229,6 +5274,10 @@ button:disabled {
     }
 
     .persona-feed__list-item {
+        grid-template-columns: 1fr;
+    }
+
+    .persona-story__gallery {
         grid-template-columns: 1fr;
     }
 

@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="et">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#f3eee8">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <title>Probleemilahendaja Toimetus</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@600;700&family=Manrope:wght@400;500;600;700;800&family=Plus+Jakarta+Sans:wght@600;700;800&family=Rajdhani:wght@600;700&display=swap"
+        rel="stylesheet">
+    <link rel="stylesheet" href="interviews.css">
+</head>
+
+<body class="workspace-page" data-editor-auth="locked">
+    <main class="editor-page">
+        <section id="adminLoginCard" class="auth-shell">
+            <div class="editor-card auth-card">
+                <span class="eyebrow">Toimetus</span>
+                <h1>Probleemilahendaja toimetus</h1>
+                <p>Logi sisse, et saata intervjuu linke ja avaldada valmis lugusid.</p>
+                <form id="adminLoginForm" class="editor-form" novalidate>
+                    <label class="field">
+                        <span>Ligipääsukood</span>
+                        <input id="adminAccessCode" type="password" autocomplete="current-password" placeholder="Sisesta admini kood">
+                    </label>
+                    <button class="primary-button" type="submit">Sisene</button>
+                    <p id="adminLoginFeedback" class="feedback" hidden></p>
+                </form>
+            </div>
+        </section>
+
+        <section id="adminApp" class="editor-app" hidden>
+            <header class="editor-topbar">
+                <div>
+                    <span class="eyebrow">Toimetus</span>
+                    <h1>Intervjuud ja lood</h1>
+                </div>
+                <button id="adminLogoutButton" class="ghost-button" type="button">Logi välja</button>
+            </header>
+
+            <div class="editor-grid">
+                <aside class="editor-sidebar">
+                    <section class="editor-card compose-card">
+                        <div class="section-head">
+                            <div>
+                                <span class="section-kicker">Uus kutse</span>
+                                <h2>Saada intervjuu link</h2>
+                            </div>
+                        </div>
+
+                        <div class="story-kind-picker" role="tablist" aria-label="Vali loo tüüp">
+                            <button id="createStoryKindPersona" class="story-kind-button is-active" type="button" data-story-kind="persona">
+                                <strong>Persoonilugu</strong>
+                                <span>Pikem intervjuupõhine lugu fotodega.</span>
+                            </button>
+                            <button id="createStoryKindCover" class="story-kind-button" type="button" data-story-kind="cover">
+                                <strong>Kaanelugu</strong>
+                                <span>Avalehe suur kaanelugu ühest inimesest.</span>
+                            </button>
+                        </div>
+
+                        <form id="createInterviewForm" class="editor-form" novalidate>
+                            <label class="field">
+                                <span>Kellega intervjuu teha?</span>
+                                <input id="createInterviewName" type="text" autocomplete="name" placeholder="Näiteks Mari Saar">
+                            </label>
+                            <label class="field">
+                                <span>E-post</span>
+                                <input id="createInterviewEmail" type="email" inputmode="email" autocomplete="email" placeholder="inimene@naide.ee">
+                            </label>
+                            <label class="field">
+                                <span>Fookus</span>
+                                <textarea id="createInterviewBrief" rows="4" placeholder="Mis nurga alt seda inimest intervjueerida?"></textarea>
+                            </label>
+                            <button class="primary-button" type="submit">Saada link</button>
+                            <p id="createInterviewFeedback" class="feedback" hidden></p>
+                        </form>
+
+                        <div id="createInviteLinkBox" class="link-card" hidden>
+                            <p class="link-card__label">Intervjuu link</p>
+                            <p id="createInviteLinkValue" class="link-card__value"></p>
+                            <button id="copyInviteLinkButton" class="ghost-button" type="button">Kopeeri link</button>
+                        </div>
+                    </section>
+
+                    <section class="editor-card queue-card">
+                        <div class="section-head">
+                            <div>
+                                <span class="section-kicker">Järjekord</span>
+                                <h2>Saabunud lood</h2>
+                            </div>
+                        </div>
+                        <div id="interviewFilterBar" class="filter-bar" aria-label="Intervjuude filtrid"></div>
+                        <div id="interviewList" class="queue-list" aria-live="polite"></div>
+                    </section>
+                </aside>
+
+                <section class="editor-main">
+                    <div id="adminEmptyState" class="editor-card empty-card">
+                        <span class="eyebrow">Valik puudub</span>
+                        <h2>Saada uus intervjuu või vali vasakult lugu</h2>
+                        <p>Kui keegi vastused toimetusele saadab, ilmub siia kohe eelvaade, mida saad tekstile vajutades muuta.</p>
+                    </div>
+
+                    <div id="adminDetail" class="detail-shell" hidden>
+                        <section class="editor-card story-shell">
+                            <header class="story-shell__header">
+                                <div class="story-shell__meta">
+                                    <div class="story-badges">
+                                        <span id="detailStoryKind" class="status-pill">Persoonilugu</span>
+                                        <span id="detailStatus" class="status-pill status-pill--soft">Toimetuses</span>
+                                    </div>
+                                    <h2 id="detailInvitee">Valitud intervjuu</h2>
+                                    <p id="detailMeta" class="muted-copy"></p>
+                                    <p id="detailBrief" class="story-brief"></p>
+                                </div>
+                                <div class="story-shell__actions">
+                                    <button id="sendInviteButton" class="ghost-button" type="button">Saada uuesti</button>
+                                    <button id="publishStoryButton" class="accent-button" type="button">Avalda lugu</button>
+                                    <button id="deleteInterviewButton" class="ghost-button" type="button">Kustuta</button>
+                                </div>
+                            </header>
+
+                            <p id="adminDetailFeedback" class="feedback" hidden></p>
+
+                            <div id="detailProgress" class="progress-strip" aria-label="Intervjuu edenemine"></div>
+
+                            <div id="detailInviteLinkBox" class="link-card" hidden>
+                                <p class="link-card__label">Intervjuu link</p>
+                                <p id="detailInviteLinkValue" class="link-card__value"></p>
+                                <button id="detailCopyInviteLinkButton" class="ghost-button" type="button">Kopeeri link</button>
+                            </div>
+
+                            <div class="detail-tabbar" role="tablist" aria-label="Valitud loo vaated">
+                                <button id="detailTabPreview" class="detail-tab is-active" type="button" data-tab="preview">Eelvaade</button>
+                                <button id="detailTabMessages" class="detail-tab" type="button" data-tab="messages">Vestlus</button>
+                                <button id="detailTabAssets" class="detail-tab" type="button" data-tab="assets">Pildid</button>
+                            </div>
+
+                            <div class="detail-layout">
+                                <div class="detail-stage">
+                                    <section id="previewPanel" class="panel-view"></section>
+                                    <section id="messagesPanel" class="panel-view" hidden></section>
+                                    <section id="assetsPanel" class="panel-view" hidden></section>
+                                </div>
+
+                                <aside class="detail-side">
+                                    <section id="inspectorSummary" class="editor-card inspector-card"></section>
+
+                                    <section id="inlineEditorCard" class="editor-card inspector-card" hidden>
+                                        <div class="section-head">
+                                            <div>
+                                                <span class="section-kicker">Muuda teksti</span>
+                                                <h3 id="editorFieldLabel">Vali tekst eelvaatest</h3>
+                                            </div>
+                                        </div>
+                                        <p id="editorFieldHint" class="muted-copy">Puuduta eelvaates pealkirja, lõiku või tsitaati.</p>
+                                        <label class="field">
+                                            <span>Sisu</span>
+                                            <textarea id="editorFieldInput" rows="6"></textarea>
+                                        </label>
+                                        <div class="inline-actions">
+                                            <button id="saveFieldButton" class="primary-button" type="button">Salvesta muudatus</button>
+                                            <button id="cancelFieldButton" class="ghost-button" type="button">Tühista</button>
+                                        </div>
+                                    </section>
+                                </aside>
+                            </div>
+                        </section>
+                    </div>
+                </section>
+            </div>
+        </section>
+    </main>
+
+    <script type="module" src="admin.js"></script>
+</body>
+
+</html>
