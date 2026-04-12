@@ -133,10 +133,13 @@ const newsletterEmail = document.getElementById("newsletterEmail");
 const newsletterSubmitButton = document.getElementById("newsletterSubmitButton");
 const newsletterFeedback = document.getElementById("newsletterFeedback");
 const recentProblemsList = document.getElementById("recentProblemsList");
+const recentProblemsMoreButton = document.getElementById("recentProblemsMoreButton");
 const scienceArticleFeatured = document.getElementById("scienceArticleFeatured");
 const scienceArticleList = document.getElementById("scienceArticleList");
+const scienceArticleMoreButton = document.getElementById("scienceArticleMoreButton");
 const personaStoryFeatured = document.getElementById("personaStoryFeatured");
 const personaStoryList = document.getElementById("personaStoryList");
+const personaStoryMoreButton = document.getElementById("personaStoryMoreButton");
 const horoscopeFeatured = document.getElementById("horoscopeFeatured");
 const horoscopeSignGrid = document.getElementById("horoscopeSignGrid");
 const problemQuizSection = document.getElementById("problemQuiz");
@@ -199,12 +202,15 @@ let currentReportId = null;
 let pendingReportSave = null;
 let recentProblems = [];
 let recentProblemsSyncTimer;
+let visibleRecentProblemsCount = 0;
 let dailyArticles = [];
 let dailyArticlesSyncTimer;
 let selectedDailyArticleId = "";
+let visibleDailyArticleCount = 0;
 let dailyPersonaStories = [];
 let dailyPersonaStoriesSyncTimer;
 let selectedDailyPersonaStoryId = "";
+let visiblePersonaStoryCount = 0;
 let dailyHoroscopeSigns = [];
 let dailyHoroscopeSyncTimer;
 let selectedHoroscopeSignId = "";
@@ -226,12 +232,19 @@ const LOADING_PROGRESS_CAP = 0.92;
 const REMOTE_METRICS_REFRESH_INTERVAL = 15000;
 const REPORT_REQUEST_TIMEOUT = 18000;
 const RECENT_PROBLEMS_LIMIT = 6;
+const RECENT_PROBLEMS_MOBILE_INITIAL_COUNT = 1;
+const RECENT_PROBLEMS_DESKTOP_INITIAL_COUNT = 3;
+const RECENT_PROBLEMS_LOAD_STEP = 3;
 const RECENT_PROBLEMS_STORAGE_KEY = "probleemilahendaja_recent_problems";
 const RECENT_PROBLEM_EQUIVALENT_WINDOW_MS = 15000;
 const RECENT_PROBLEMS_REFRESH_INTERVAL = 10000;
 const DAILY_ARTICLES_LIMIT = 8;
+const DAILY_ARTICLES_MOBILE_INITIAL_COUNT = 1;
+const DAILY_ARTICLES_LOAD_STEP = 1;
 const DAILY_ARTICLES_REFRESH_INTERVAL = 60 * 60 * 1000;
 const DAILY_PERSONA_STORIES_LIMIT = 8;
+const DAILY_PERSONA_STORIES_MOBILE_INITIAL_COUNT = 1;
+const DAILY_PERSONA_STORIES_LOAD_STEP = 1;
 const DAILY_PERSONA_STORIES_REFRESH_INTERVAL = 60 * 60 * 1000;
 const DAILY_HOROSCOPE_REFRESH_INTERVAL = 60 * 60 * 1000;
 const DAILY_WEATHER_REFRESH_INTERVAL = 20 * 60 * 1000;
@@ -261,6 +274,12 @@ const weatherFullDateFormatter = new Intl.DateTimeFormat("et-EE", {
     day: "numeric",
     month: "long"
 });
+const recentProblemsViewportQuery = window.matchMedia("(max-width: 640px)");
+let lastRecentProblemsInitialCount = recentProblemsViewportQuery.matches
+    ? RECENT_PROBLEMS_MOBILE_INITIAL_COUNT
+    : RECENT_PROBLEMS_DESKTOP_INITIAL_COUNT;
+let lastDailyArticlesMobileView = recentProblemsViewportQuery.matches;
+let lastPersonaStoriesMobileView = recentProblemsViewportQuery.matches;
 const weatherTimeFormatter = new Intl.DateTimeFormat("et-EE", {
     hour: "2-digit",
     minute: "2-digit"
@@ -3111,10 +3130,48 @@ function createRecentProblemCard(problem) {
     return article;
 }
 
+function getInitialRecentProblemsCount() {
+    return recentProblemsViewportQuery.matches
+        ? RECENT_PROBLEMS_MOBILE_INITIAL_COUNT
+        : RECENT_PROBLEMS_DESKTOP_INITIAL_COUNT;
+}
+
+function syncRecentProblemsVisibleCount() {
+    const initialCount = getInitialRecentProblemsCount();
+
+    if (visibleRecentProblemsCount === 0 || visibleRecentProblemsCount <= lastRecentProblemsInitialCount) {
+        visibleRecentProblemsCount = initialCount;
+    }
+
+    lastRecentProblemsInitialCount = initialCount;
+
+    if (recentProblems.length > 0) {
+        visibleRecentProblemsCount = Math.min(
+            Math.max(initialCount, visibleRecentProblemsCount),
+            recentProblems.length
+        );
+    }
+}
+
+function updateRecentProblemsMoreButton() {
+    if (!recentProblemsMoreButton) {
+        return;
+    }
+
+    const hasMoreProblems = recentProblems.length > 0 && visibleRecentProblemsCount < recentProblems.length;
+    recentProblemsMoreButton.hidden = !hasMoreProblems;
+
+    if (hasMoreProblems) {
+        recentProblemsMoreButton.textContent = "Vaata veel";
+    }
+}
+
 function renderRecentProblems() {
     if (!recentProblemsList) {
         return;
     }
+
+    syncRecentProblemsVisibleCount();
 
     const fragment = document.createDocumentFragment();
 
@@ -3132,12 +3189,13 @@ function renderRecentProblems() {
         emptyCard.append(emptyTitle, emptyNote);
         fragment.append(emptyCard);
     } else {
-        recentProblems.forEach(function (problem) {
+        recentProblems.slice(0, visibleRecentProblemsCount).forEach(function (problem) {
             fragment.append(createRecentProblemCard(problem));
         });
     }
 
     recentProblemsList.replaceChildren(fragment);
+    updateRecentProblemsMoreButton();
 }
 
 function getSelectedDailyArticle() {
@@ -3222,13 +3280,7 @@ function renderFeaturedDailyArticle(article) {
     scienceArticleFeatured.classList.remove("science-article--empty");
 
     const fragment = document.createDocumentFragment();
-    const top = document.createElement("div");
-    const eyebrowRow = document.createElement("div");
-    const metaRow = document.createElement("div");
-    const eyebrow = document.createElement("span");
-    const theme = document.createElement("span");
     const date = document.createElement("span");
-    const readingTime = document.createElement("span");
     const title = document.createElement("h3");
     const lead = document.createElement("p");
     const highlight = document.createElement("blockquote");
@@ -3237,13 +3289,7 @@ function renderFeaturedDailyArticle(article) {
     const takeaways = document.createElement("div");
     const takeawaysLabel = document.createElement("span");
 
-    top.className = "science-article__top";
-    eyebrowRow.className = "science-article__eyebrow-row";
-    metaRow.className = "science-article__meta-row";
-    eyebrow.className = "science-article__eyebrow";
-    theme.className = "science-article__theme";
     date.className = "science-article__date";
-    readingTime.className = "science-article__reading-time";
     title.className = "science-article__title";
     lead.className = "science-article__lead";
     highlight.className = "science-article__highlight";
@@ -3252,18 +3298,11 @@ function renderFeaturedDailyArticle(article) {
     takeaways.className = "science-article__takeaways";
     takeawaysLabel.className = "science-article__section-label";
 
-    eyebrow.textContent = "Kunst";
-    theme.textContent = article.theme;
     date.textContent = formatEditorialDate(article);
-    readingTime.textContent = article.readingTime;
     title.textContent = article.title;
     lead.textContent = article.lead;
     highlight.textContent = article.highlight;
     takeawaysLabel.textContent = "Miks see töötab";
-
-    eyebrowRow.append(eyebrow, theme);
-    metaRow.append(date, readingTime);
-    top.append(eyebrowRow, metaRow);
 
     article.lenses.forEach(function (label) {
         const pill = document.createElement("span");
@@ -3293,7 +3332,7 @@ function renderFeaturedDailyArticle(article) {
         takeaways.append(pill);
     });
 
-    fragment.append(top, title, lead, highlight, tags, body, takeawaysLabel, takeaways);
+    fragment.append(date, title, lead, highlight, tags, body, takeawaysLabel, takeaways);
     scienceArticleFeatured.replaceChildren(fragment);
 }
 
@@ -3342,6 +3381,7 @@ function renderDailyArticles() {
     const otherArticles = dailyArticles.filter(function (article) {
         return article.id !== selectedArticle?.id;
     });
+    const visibleCount = getVisibleDailyArticles(otherArticles);
     const listFragment = document.createDocumentFragment();
 
     renderFeaturedDailyArticle(selectedArticle);
@@ -3351,14 +3391,15 @@ function renderDailyArticles() {
         emptyItem.className = "science-feed__list-empty";
         emptyItem.textContent = "Laadimine";
         scienceArticleList.replaceChildren(emptyItem);
+        updateScienceArticleMoreButton(0, 0);
         return;
     }
 
-    otherArticles.forEach(function (article) {
+    otherArticles.slice(0, visibleCount).forEach(function (article) {
         listFragment.append(createDailyArticleListItem(article));
     });
 
-    if (otherArticles.length < DAILY_ARTICLES_LIMIT - 1) {
+    if (visibleCount >= otherArticles.length && otherArticles.length < DAILY_ARTICLES_LIMIT - 1) {
         const note = document.createElement("div");
         note.className = "science-feed__list-empty";
         note.textContent = "Arhiiv täieneb iga päev. Homme tuleb siia järgmine Lorien Velmore'i lugu.";
@@ -3366,6 +3407,40 @@ function renderDailyArticles() {
     }
 
     scienceArticleList.replaceChildren(listFragment);
+    updateScienceArticleMoreButton(visibleCount, otherArticles.length);
+}
+
+function getVisibleDailyArticles(otherArticles) {
+    const totalArticles = otherArticles.length;
+
+    if (!recentProblemsViewportQuery.matches) {
+        lastDailyArticlesMobileView = false;
+        return totalArticles;
+    }
+
+    if (!lastDailyArticlesMobileView || visibleDailyArticleCount === 0) {
+        visibleDailyArticleCount = DAILY_ARTICLES_MOBILE_INITIAL_COUNT;
+    }
+
+    lastDailyArticlesMobileView = true;
+
+    return Math.min(
+        Math.max(DAILY_ARTICLES_MOBILE_INITIAL_COUNT, visibleDailyArticleCount),
+        totalArticles
+    );
+}
+
+function updateScienceArticleMoreButton(visibleCount, totalArticles) {
+    if (!scienceArticleMoreButton) {
+        return;
+    }
+
+    const hasMoreArticles = recentProblemsViewportQuery.matches && visibleCount < totalArticles;
+    scienceArticleMoreButton.hidden = !hasMoreArticles;
+
+    if (hasMoreArticles) {
+        scienceArticleMoreButton.textContent = "Veel lugusid";
+    }
 }
 
 function getSelectedDailyPersonaStory() {
@@ -3626,16 +3701,8 @@ function renderFeaturedPersonaStory(story, imageAsset = null) {
     const fragment = document.createDocumentFragment();
     const media = document.createElement("div");
     const image = document.createElement("img");
-    const mediaMeta = document.createElement("div");
-    const eyebrow = document.createElement("span");
-    const theme = document.createElement("span");
     const content = document.createElement("div");
-    const metaRow = document.createElement("div");
-    const profile = document.createElement("div");
-    const name = document.createElement("strong");
-    const characterMeta = document.createElement("span");
     const date = document.createElement("span");
-    const readingTime = document.createElement("span");
     const title = document.createElement("h3");
     const lead = document.createElement("p");
     const highlight = document.createElement("blockquote");
@@ -3646,16 +3713,8 @@ function renderFeaturedPersonaStory(story, imageAsset = null) {
 
     media.className = "persona-story__media";
     image.className = "persona-story__image";
-    mediaMeta.className = "persona-story__media-meta";
-    eyebrow.className = "persona-story__eyebrow";
-    theme.className = "persona-story__theme";
     content.className = "persona-story__content";
-    metaRow.className = "persona-story__meta-row";
-    profile.className = "persona-story__profile";
-    name.className = "persona-story__name";
-    characterMeta.className = "persona-story__character-meta";
     date.className = "persona-story__date";
-    readingTime.className = "persona-story__reading-time";
     title.className = "persona-story__title";
     lead.className = "persona-story__lead";
     highlight.className = "persona-story__highlight";
@@ -3673,22 +3732,12 @@ function renderFeaturedPersonaStory(story, imageAsset = null) {
         media.append(image);
     }
 
-    eyebrow.textContent = "Persoonilugu";
-    theme.textContent = story.theme;
-    name.textContent = story.characterName;
-    characterMeta.textContent = story.characterMeta;
     date.textContent = formatEditorialDate(story);
-    readingTime.textContent = story.readingTime;
     title.textContent = story.title;
     lead.textContent = story.lead;
     highlight.textContent = story.highlight;
     result.textContent = story.resultNote;
     takeawaysLabel.textContent = "Mis muutus";
-
-    mediaMeta.append(eyebrow, theme);
-    media.append(mediaMeta);
-    profile.append(name, characterMeta);
-    metaRow.append(profile, date, readingTime);
 
     story.paragraphs.forEach(function (paragraphText) {
         const paragraph = document.createElement("p");
@@ -3703,7 +3752,7 @@ function renderFeaturedPersonaStory(story, imageAsset = null) {
         takeaways.append(pill);
     });
 
-    content.append(metaRow, title, lead, highlight, body, result, takeawaysLabel, takeaways);
+    content.append(date, title, lead, highlight, body, result, takeawaysLabel, takeaways);
     fragment.append(media, content);
     personaStoryFeatured.replaceChildren(fragment);
 }
@@ -3717,7 +3766,6 @@ function createPersonaStoryListItem(story, imageAsset = null) {
     const date = document.createElement("span");
     const theme = document.createElement("span");
     const title = document.createElement("strong");
-    const person = document.createElement("span");
     const isSelected = story.id === getSelectedDailyPersonaStory()?.id;
 
     button.type = "button";
@@ -3733,7 +3781,6 @@ function createPersonaStoryListItem(story, imageAsset = null) {
     date.className = "persona-feed__list-date";
     theme.className = "persona-feed__list-theme";
     title.className = "persona-feed__list-title";
-    person.className = "persona-feed__list-person";
 
     if (imageAsset) {
         thumbImage.src = imageAsset.src;
@@ -3747,10 +3794,9 @@ function createPersonaStoryListItem(story, imageAsset = null) {
     date.textContent = formatEditorialDate(story);
     theme.textContent = story.theme;
     title.textContent = story.title;
-    person.textContent = `${story.characterName} · ${story.characterMeta}`;
 
     meta.append(date, theme);
-    body.append(meta, title, person);
+    body.append(meta, title);
     button.append(thumb, body);
     button.addEventListener("click", function () {
         selectedDailyPersonaStoryId = story.id;
@@ -3758,6 +3804,39 @@ function createPersonaStoryListItem(story, imageAsset = null) {
     });
 
     return button;
+}
+
+function getVisiblePersonaStories(otherStories) {
+    const totalStories = otherStories.length;
+
+    if (!recentProblemsViewportQuery.matches) {
+        lastPersonaStoriesMobileView = false;
+        return totalStories;
+    }
+
+    if (!lastPersonaStoriesMobileView || visiblePersonaStoryCount === 0) {
+        visiblePersonaStoryCount = DAILY_PERSONA_STORIES_MOBILE_INITIAL_COUNT;
+    }
+
+    lastPersonaStoriesMobileView = true;
+
+    return Math.min(
+        Math.max(DAILY_PERSONA_STORIES_MOBILE_INITIAL_COUNT, visiblePersonaStoryCount),
+        totalStories
+    );
+}
+
+function updatePersonaStoryMoreButton(visibleCount, totalStories) {
+    if (!personaStoryMoreButton) {
+        return;
+    }
+
+    const hasMoreStories = recentProblemsViewportQuery.matches && visibleCount < totalStories;
+    personaStoryMoreButton.hidden = !hasMoreStories;
+
+    if (hasMoreStories) {
+        personaStoryMoreButton.textContent = "Veel lugusid";
+    }
 }
 
 function renderDailyPersonaStories() {
@@ -3769,6 +3848,7 @@ function renderDailyPersonaStories() {
     const otherStories = dailyPersonaStories.filter(function (story) {
         return story.id !== selectedStory?.id;
     });
+    const visibleCount = getVisiblePersonaStories(otherStories);
     const imageAssignments = getPersonaStoryImageAssignments(dailyPersonaStories);
     const listFragment = document.createDocumentFragment();
 
@@ -3779,14 +3859,15 @@ function renderDailyPersonaStories() {
         emptyItem.className = "persona-feed__list-empty";
         emptyItem.textContent = "Laadimine";
         personaStoryList.replaceChildren(emptyItem);
+        updatePersonaStoryMoreButton(0, 0);
         return;
     }
 
-    otherStories.forEach(function (story) {
+    otherStories.slice(0, visibleCount).forEach(function (story) {
         listFragment.append(createPersonaStoryListItem(story, imageAssignments.get(story.id) || null));
     });
 
-    if (otherStories.length < DAILY_PERSONA_STORIES_LIMIT - 1) {
+    if (visibleCount >= otherStories.length && otherStories.length < DAILY_PERSONA_STORIES_LIMIT - 1) {
         const note = document.createElement("div");
         note.className = "persona-feed__list-empty";
         note.textContent = "Arhiiv täieneb iga päev. Homme tuleb siia järgmine persoonilugu.";
@@ -3794,6 +3875,7 @@ function renderDailyPersonaStories() {
     }
 
     personaStoryList.replaceChildren(listFragment);
+    updatePersonaStoryMoreButton(visibleCount, otherStories.length);
 }
 
 function setDailyArticles(nextArticles) {
@@ -4232,6 +4314,54 @@ function initializeRecentProblems() {
     recentProblemsSyncTimer = window.setInterval(function () {
         void refreshRecentProblems();
     }, RECENT_PROBLEMS_REFRESH_INTERVAL);
+}
+
+recentProblemsMoreButton?.addEventListener("click", function () {
+    visibleRecentProblemsCount = Math.min(
+        recentProblems.length,
+        visibleRecentProblemsCount + RECENT_PROBLEMS_LOAD_STEP
+    );
+    renderRecentProblems();
+});
+
+scienceArticleMoreButton?.addEventListener("click", function () {
+    const selectedArticle = getSelectedDailyArticle();
+    const otherArticlesCount = dailyArticles.filter(function (article) {
+        return article.id !== selectedArticle?.id;
+    }).length;
+
+    visibleDailyArticleCount = Math.min(
+        otherArticlesCount,
+        visibleDailyArticleCount + DAILY_ARTICLES_LOAD_STEP
+    );
+    renderDailyArticles();
+});
+
+personaStoryMoreButton?.addEventListener("click", function () {
+    const selectedStory = getSelectedDailyPersonaStory();
+    const otherStoriesCount = dailyPersonaStories.filter(function (story) {
+        return story.id !== selectedStory?.id;
+    }).length;
+
+    visiblePersonaStoryCount = Math.min(
+        otherStoriesCount,
+        visiblePersonaStoryCount + DAILY_PERSONA_STORIES_LOAD_STEP
+    );
+    renderDailyPersonaStories();
+});
+
+if (typeof recentProblemsViewportQuery.addEventListener === "function") {
+    recentProblemsViewportQuery.addEventListener("change", function () {
+        renderRecentProblems();
+        renderDailyArticles();
+        renderDailyPersonaStories();
+    });
+} else if (typeof recentProblemsViewportQuery.addListener === "function") {
+    recentProblemsViewportQuery.addListener(function () {
+        renderRecentProblems();
+        renderDailyArticles();
+        renderDailyPersonaStories();
+    });
 }
 
 function initializeDailyArticles() {

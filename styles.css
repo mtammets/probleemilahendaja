@@ -1552,6 +1552,17 @@ button:disabled {
     gap: 0.9rem;
 }
 
+.recent-feed__controls {
+    display: flex;
+    justify-content: center;
+}
+
+.recent-feed__more {
+    width: auto;
+    min-width: 10.5rem;
+    padding: 0.82rem 1.15rem;
+}
+
 .recent-problem {
     position: relative;
     overflow: hidden;
@@ -2091,6 +2102,17 @@ button:disabled {
     gap: 0.8rem;
 }
 
+.science-feed__controls {
+    display: flex;
+    justify-content: center;
+}
+
+.science-feed__more {
+    width: auto;
+    min-width: 11rem;
+    padding: 0.82rem 1.15rem;
+}
+
 .science-feed__list-item,
 .science-feed__list-empty {
     position: relative;
@@ -2418,6 +2440,17 @@ button:disabled {
 .persona-feed__list {
     display: grid;
     gap: 0.82rem;
+}
+
+.persona-feed__controls {
+    display: flex;
+    justify-content: center;
+}
+
+.persona-feed__more {
+    width: auto;
+    min-width: 11rem;
+    padding: 0.82rem 1.15rem;
 }
 
 .persona-feed__list-item,
@@ -4646,6 +4679,14 @@ button:disabled {
         text-align: left;
     }
 
+    .recent-feed__controls {
+        justify-content: stretch;
+    }
+
+    .recent-feed__more {
+        width: 100%;
+    }
+
     .newsletter__copy h2 {
         max-width: none;
         font-size: clamp(2.1rem, 9vw, 3rem);
@@ -4777,17 +4818,31 @@ button:disabled {
 
     .horoscope-feed__signs {
         grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 0.65rem;
     }
 
     .horoscope-sign {
-        padding: 0.82rem 0.72rem;
+        flex-direction: column;
+        align-items: center;
         justify-content: center;
+        gap: 0.52rem;
+        min-height: 6.1rem;
+        padding: 0.8rem 0.46rem 0.76rem;
         text-align: center;
     }
 
+    .horoscope-sign__glyph {
+        width: clamp(2.55rem, 11vw, 3rem);
+        font-size: clamp(1.28rem, 5vw, 1.45rem);
+    }
+
     .horoscope-sign__name {
-        font-size: 0.84rem;
+        display: block;
+        width: 100%;
+        font-size: clamp(0.72rem, 2.5vw, 0.8rem);
+        line-height: 1.15;
         text-align: center;
+        text-wrap: balance;
     }
 
     .horoscope-card__indicators {
@@ -4845,6 +4900,14 @@ button:disabled {
         line-height: 1.66;
     }
 
+    .science-feed__controls {
+        justify-content: stretch;
+    }
+
+    .science-feed__more {
+        width: 100%;
+    }
+
     .persona-story__media {
         min-height: 15rem;
     }
@@ -4875,6 +4938,14 @@ button:disabled {
 
     .persona-feed__thumb {
         height: 10rem;
+    }
+
+    .persona-feed__controls {
+        justify-content: stretch;
+    }
+
+    .persona-feed__more {
+        width: 100%;
     }
 
     .persona-feed__list-title {
