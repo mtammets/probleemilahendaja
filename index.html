@@ -39,6 +39,30 @@
                             <button id="solveButton">Lahenda probleem!</button>
                         </div>
                     </div>
+                    <section class="weather-slot" aria-labelledby="weatherStripTitle">
+                        <button id="weatherStrip" class="weather-strip" type="button" aria-haspopup="dialog" aria-controls="weatherModal">
+                            <span class="weather-strip__glow" aria-hidden="true"></span>
+                            <div class="weather-strip__icon-shell" aria-hidden="true">
+                                <span id="weatherStripIcon" class="weather-strip__icon"></span>
+                            </div>
+                            <div class="weather-strip__copy">
+                                <span id="weatherStripTitle" class="weather-strip__eyebrow">Päeva ilm</span>
+                                <strong id="weatherStripLocation" class="weather-strip__location">Ilm valmistub</strong>
+                                <span id="weatherStripSummary" class="weather-strip__summary">Laen värske ilmaülevaate ja 5 päeva vaate.</span>
+                            </div>
+                            <div class="weather-strip__stats">
+                                <div class="weather-strip__primary">
+                                    <strong id="weatherStripTemp" class="weather-strip__temp">--°</strong>
+                                    <span id="weatherStripCondition" class="weather-strip__condition">Ootel</span>
+                                </div>
+                                <div class="weather-strip__secondary">
+                                    <span id="weatherStripRange" class="weather-strip__range">--° / --°</span>
+                                    <span id="weatherStripMeta" class="weather-strip__meta">Ava detailne ilmavaade</span>
+                                </div>
+                            </div>
+                            <div id="weatherStripPeek" class="weather-strip__peek" aria-hidden="true"></div>
+                        </button>
+                    </section>
                 </div>
             </div>
         </section>
@@ -348,6 +372,72 @@
             </div>
         </section>
     </main>
+    <div id="weatherModal" class="weather-modal" hidden>
+        <div id="weatherModalBackdrop" class="weather-modal__backdrop" aria-hidden="true"></div>
+        <section class="weather-modal__dialog" role="dialog" aria-modal="true" aria-labelledby="weatherModalTitle">
+            <button id="weatherModalClose" class="weather-modal__close" type="button" aria-label="Sulge ilmateade">
+                <span aria-hidden="true">×</span>
+            </button>
+            <header class="weather-modal__hero">
+                <div id="weatherModalScene" class="weather-modal__scene" aria-hidden="true"></div>
+                <div class="weather-modal__hero-content">
+                    <span class="weather-modal__eyebrow">Ilmateade</span>
+                    <h2 id="weatherModalTitle" class="weather-modal__title">Viie päeva ilm</h2>
+                    <p id="weatherModalLead" class="weather-modal__lead">Puhas ülevaade tänasest, homsest ja lähipäevadest.</p>
+                    <div class="weather-modal__hero-meta">
+                        <div class="weather-modal__hero-main">
+                            <div id="weatherModalCurrentIcon" class="weather-modal__hero-icon" aria-hidden="true"></div>
+                            <div class="weather-modal__hero-copy">
+                                <strong id="weatherModalCurrentTemp" class="weather-modal__hero-temp">--°</strong>
+                                <span id="weatherModalCurrentCondition" class="weather-modal__hero-condition">Laadimine</span>
+                            </div>
+                        </div>
+                        <div class="weather-modal__hero-details">
+                            <span id="weatherModalLocation" class="weather-modal__hero-location">Asukoht</span>
+                            <span id="weatherModalMeta" class="weather-modal__hero-note">Ilmauuendus valmistub.</span>
+                        </div>
+                    </div>
+                </div>
+            </header>
+            <div class="weather-modal__content">
+                <section class="weather-modal__stories" aria-label="Tänane ja homne ilm">
+                    <article id="weatherTodayCard" class="weather-story weather-story--today"></article>
+                    <article id="weatherTomorrowCard" class="weather-story weather-story--tomorrow"></article>
+                </section>
+                <section class="weather-modal__forecast-section" aria-labelledby="weatherForecastTitle">
+                    <div class="weather-modal__section-heading">
+                        <span class="weather-modal__section-eyebrow">Prognoos</span>
+                        <h3 id="weatherForecastTitle">5 päeva ette</h3>
+                    </div>
+                    <div id="weatherForecastList" class="weather-forecast" aria-live="polite"></div>
+                </section>
+                <section class="weather-modal__timelines" aria-label="Päeva rütm">
+                    <article class="weather-timeline-panel">
+                        <div class="weather-modal__section-heading">
+                            <span class="weather-modal__section-eyebrow">Tänase rütm</span>
+                            <h3>Täna tundide kaupa</h3>
+                        </div>
+                        <div id="weatherTodayTimeline" class="weather-timeline"></div>
+                    </article>
+                    <article class="weather-timeline-panel">
+                        <div class="weather-modal__section-heading">
+                            <span class="weather-modal__section-eyebrow">Homme</span>
+                            <h3>Homme tundide kaupa</h3>
+                        </div>
+                        <div id="weatherTomorrowTimeline" class="weather-timeline"></div>
+                    </article>
+                </section>
+                <section class="weather-modal__tips-section" aria-labelledby="weatherTipsTitle">
+                    <div class="weather-modal__section-heading">
+                        <span class="weather-modal__section-eyebrow">Praktiline</span>
+                        <h3 id="weatherTipsTitle">Mida täna arvestada</h3>
+                    </div>
+                    <div id="weatherPlanningTips" class="weather-tips"></div>
+                </section>
+                <p class="weather-modal__footnote">Ilmaandmed: Open-Meteo. Selgitused ja taustavisuaal: OpenAI.</p>
+            </div>
+        </section>
+    </div>
     <script type="module" src="./script.js"></script>
 </body>
 

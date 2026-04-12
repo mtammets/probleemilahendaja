@@ -162,6 +162,32 @@ const ratingButtons = Array.from(document.querySelectorAll(".rating-panel__butto
 const ratingFeedback = document.getElementById("ratingFeedback");
 const ratingPanel = document.querySelector(".rating-panel");
 const intakeStage = document.querySelector(".intake-stage");
+const weatherStrip = document.getElementById("weatherStrip");
+const weatherStripIcon = document.getElementById("weatherStripIcon");
+const weatherStripLocation = document.getElementById("weatherStripLocation");
+const weatherStripSummary = document.getElementById("weatherStripSummary");
+const weatherStripTemp = document.getElementById("weatherStripTemp");
+const weatherStripCondition = document.getElementById("weatherStripCondition");
+const weatherStripRange = document.getElementById("weatherStripRange");
+const weatherStripMeta = document.getElementById("weatherStripMeta");
+const weatherStripPeek = document.getElementById("weatherStripPeek");
+const weatherModal = document.getElementById("weatherModal");
+const weatherModalDialog = weatherModal?.querySelector(".weather-modal__dialog");
+const weatherModalBackdrop = document.getElementById("weatherModalBackdrop");
+const weatherModalClose = document.getElementById("weatherModalClose");
+const weatherModalScene = document.getElementById("weatherModalScene");
+const weatherModalLead = document.getElementById("weatherModalLead");
+const weatherModalCurrentIcon = document.getElementById("weatherModalCurrentIcon");
+const weatherModalCurrentTemp = document.getElementById("weatherModalCurrentTemp");
+const weatherModalCurrentCondition = document.getElementById("weatherModalCurrentCondition");
+const weatherModalLocation = document.getElementById("weatherModalLocation");
+const weatherModalMeta = document.getElementById("weatherModalMeta");
+const weatherTodayCard = document.getElementById("weatherTodayCard");
+const weatherTomorrowCard = document.getElementById("weatherTomorrowCard");
+const weatherForecastList = document.getElementById("weatherForecastList");
+const weatherTodayTimeline = document.getElementById("weatherTodayTimeline");
+const weatherTomorrowTimeline = document.getElementById("weatherTomorrowTimeline");
+const weatherPlanningTips = document.getElementById("weatherPlanningTips");
 
 let solvedCountSyncTimer;
 let solvedCountRealtimeCleanup = null;
@@ -190,6 +216,10 @@ let isGeneratingReport = false;
 let problemQuizAnswers = [];
 let currentProblemQuizStep = 0;
 let problemQuizAdvanceTimer = null;
+let dailyWeather = null;
+let dailyWeatherSyncTimer;
+let activeWeatherLocation = null;
+let weatherSceneLoadToken = 0;
 
 const MIN_SOLVE_DURATION = 3200;
 const LOADING_PROGRESS_CAP = 0.92;
@@ -204,6 +234,14 @@ const DAILY_ARTICLES_REFRESH_INTERVAL = 60 * 60 * 1000;
 const DAILY_PERSONA_STORIES_LIMIT = 8;
 const DAILY_PERSONA_STORIES_REFRESH_INTERVAL = 60 * 60 * 1000;
 const DAILY_HOROSCOPE_REFRESH_INTERVAL = 60 * 60 * 1000;
+const DAILY_WEATHER_REFRESH_INTERVAL = 20 * 60 * 1000;
+const WEATHER_LOCATION_TIMEOUT = 6500;
+const DEFAULT_WEATHER_LOCATION = {
+    label: "Tallinn",
+    latitude: 59.437,
+    longitude: 24.7536,
+    source: "fallback"
+};
 const NEWSLETTER_EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/i;
 const PUBLIC_FEED_PROFANITY_REGEX = /\b(?:pers(?:e|se|es|et|ed|ega|ele|el|esse|est|i)?|t(?:ü|y)r(?:a|ad|aga|ale|al|ast|i)?|munn(?:i|e|id|idega|ile|il|ist)?|vitt(?:u|i|e|ud|idega|ile|is|a)?|niku(?:da|n|d|b|s|tud|ga|le)?|pask(?:a|e|i|aks|aga|ale|as|ast|u)?|sit(?:t|a|ad|ane|ase|aks|aga|ale|as|ast)?|hui(?:a|i|d|ga|le|s)?|fuck(?:ing|ed|er|s)?|shit(?:ty|ted|ting|s)?)\b/giu;
 const numberFormatter = new Intl.NumberFormat("et-EE");
@@ -214,6 +252,18 @@ const articleDateFormatter = new Intl.DateTimeFormat("et-EE", {
     day: "numeric",
     month: "long",
     year: "numeric"
+});
+const weatherWeekdayFormatter = new Intl.DateTimeFormat("et-EE", {
+    weekday: "short"
+});
+const weatherFullDateFormatter = new Intl.DateTimeFormat("et-EE", {
+    weekday: "long",
+    day: "numeric",
+    month: "long"
+});
+const weatherTimeFormatter = new Intl.DateTimeFormat("et-EE", {
+    hour: "2-digit",
+    minute: "2-digit"
 });
 
 const HOROSCOPE_SIGNS = [
@@ -1459,6 +1509,864 @@ function setDailyHoroscope(payload) {
     }
 
     renderDailyHoroscope();
+}
+
+const WEATHER_VISUALS = {
+    clear: {
+        accent: "#ffcc70",
+        glow: "rgba(255, 204, 112, 0.28)",
+        secondary: "#ffe4ad"
+    },
+    "partly-cloudy": {
+        accent: "#f0bd73",
+        glow: "rgba(240, 189, 115, 0.26)",
+        secondary: "#bdd4ff"
+    },
+    cloudy: {
+        accent: "#aebed4",
+        glow: "rgba(174, 190, 212, 0.24)",
+        secondary: "#dce6f3"
+    },
+    fog: {
+        accent: "#b9c2ce",
+        glow: "rgba(185, 194, 206, 0.26)",
+        secondary: "#dfe6ef"
+    },
+    drizzle: {
+        accent: "#76bbd6",
+        glow: "rgba(118, 187, 214, 0.24)",
+        secondary: "#d7eef6"
+    },
+    rain: {
+        accent: "#5ea0d0",
+        glow: "rgba(94, 160, 208, 0.24)",
+        secondary: "#d2e7f5"
+    },
+    snow: {
+        accent: "#dbe7f6",
+        glow: "rgba(219, 231, 246, 0.24)",
+        secondary: "#ffffff"
+    },
+    storm: {
+        accent: "#a58dff",
+        glow: "rgba(165, 141, 255, 0.26)",
+        secondary: "#ffd38a"
+    },
+    mixed: {
+        accent: "#8fc0b5",
+        glow: "rgba(143, 192, 181, 0.24)",
+        secondary: "#def3ec"
+    }
+};
+
+function normalizeWeatherText(value, fallback, maxLength = 180) {
+    const cleaned = truncate(sanitizeProblemText(value || ""), maxLength);
+    return cleaned || fallback;
+}
+
+function normalizeWeatherNumber(value, fallbackValue = 0) {
+    const numericValue = Number(value);
+    return Number.isFinite(numericValue) ? numericValue : fallbackValue;
+}
+
+function getWeatherVisual(conditionKey) {
+    return WEATHER_VISUALS[conditionKey] || WEATHER_VISUALS.mixed;
+}
+
+function formatWeatherTemperature(value) {
+    return `${Math.round(normalizeWeatherNumber(value))}°`;
+}
+
+function formatWeatherProbability(value) {
+    return `${Math.round(Math.max(0, normalizeWeatherNumber(value)))}%`;
+}
+
+function getWeatherDateValue(value) {
+    const dateKey = sanitizeProblemText(value || "");
+
+    if (/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) {
+        return new Date(`${dateKey}T12:00:00`);
+    }
+
+    return new Date(parseDateToTimestamp(value));
+}
+
+function formatWeatherWeekday(value) {
+    return capitalizeFirst(weatherWeekdayFormatter.format(getWeatherDateValue(value)).replace(".", ""));
+}
+
+function formatWeatherFullDate(value) {
+    return capitalizeFirst(weatherFullDateFormatter.format(getWeatherDateValue(value)));
+}
+
+function formatWeatherTime(value) {
+    return weatherTimeFormatter.format(new Date(parseDateToTimestamp(value)));
+}
+
+function getWeatherConditionMeta(conditionKey, conditionLabel, isDay = true) {
+    const fallbackLabel = normalizeWeatherText(conditionLabel, "Muutlik");
+
+    if (conditionKey === "clear") {
+        return {
+            label: fallbackLabel,
+            iconKey: isDay ? "sun" : "moon"
+        };
+    }
+
+    if (conditionKey === "partly-cloudy") {
+        return {
+            label: fallbackLabel,
+            iconKey: isDay ? "cloud-sun" : "cloud-moon"
+        };
+    }
+
+    if (conditionKey === "cloudy") {
+        return {
+            label: fallbackLabel,
+            iconKey: "cloud"
+        };
+    }
+
+    if (conditionKey === "fog") {
+        return {
+            label: fallbackLabel,
+            iconKey: "fog"
+        };
+    }
+
+    if (conditionKey === "drizzle") {
+        return {
+            label: fallbackLabel,
+            iconKey: "drizzle"
+        };
+    }
+
+    if (conditionKey === "rain") {
+        return {
+            label: fallbackLabel,
+            iconKey: "rain"
+        };
+    }
+
+    if (conditionKey === "snow") {
+        return {
+            label: fallbackLabel,
+            iconKey: "snow"
+        };
+    }
+
+    if (conditionKey === "storm") {
+        return {
+            label: fallbackLabel,
+            iconKey: "storm"
+        };
+    }
+
+    return {
+        label: fallbackLabel,
+        iconKey: "mixed"
+    };
+}
+
+function getWeatherIconMarkup(conditionKey, options = {}) {
+    const meta = getWeatherConditionMeta(conditionKey, "", options.isDay !== false);
+    const size = options.size || 32;
+    const stroke = options.strokeWidth || 1.85;
+    const secondaryClass = options.secondaryClass || "weather-icon__secondary";
+    const primaryClass = options.primaryClass || "weather-icon__primary";
+
+    const iconBodyByKey = {
+        sun: `
+            <circle class="${primaryClass}" cx="12" cy="12" r="4"></circle>
+            <path class="${secondaryClass}" d="M12 2.5V5"></path>
+            <path class="${secondaryClass}" d="M12 19V21.5"></path>
+            <path class="${secondaryClass}" d="M2.5 12H5"></path>
+            <path class="${secondaryClass}" d="M19 12H21.5"></path>
+            <path class="${secondaryClass}" d="M5.6 5.6L7.4 7.4"></path>
+            <path class="${secondaryClass}" d="M16.6 16.6L18.4 18.4"></path>
+            <path class="${secondaryClass}" d="M16.6 7.4L18.4 5.6"></path>
+            <path class="${secondaryClass}" d="M5.6 18.4L7.4 16.6"></path>
+        `,
+        moon: `
+            <path class="${primaryClass}" d="M15.9 3.5C13.1 4 11 6.4 11 9.4C11 12.8 13.8 15.6 17.2 15.6C18.2 15.6 19.1 15.4 20 15C19 18.1 16.2 20.3 12.9 20.3C8.8 20.3 5.5 17 5.5 12.9C5.5 9.5 7.7 6.7 10.8 5.8C12.1 5.4 13.6 5.2 15.9 3.5Z"></path>
+        `,
+        "cloud-sun": `
+            <circle class="${secondaryClass}" cx="8" cy="8" r="3.2"></circle>
+            <path class="${secondaryClass}" d="M8 2.2V4"></path>
+            <path class="${secondaryClass}" d="M8 12V13.8"></path>
+            <path class="${secondaryClass}" d="M2.2 8H4"></path>
+            <path class="${secondaryClass}" d="M12 8H13.8"></path>
+            <path class="${primaryClass}" d="M6.5 17.5H17.2C19.3 17.5 21 15.8 21 13.7C21 11.7 19.5 10.1 17.6 9.9C17 7.7 15 6.2 12.7 6.2C9.9 6.2 7.6 8.2 7.2 10.8C5.3 11.2 4 12.8 4 14.7C4 16.2 5.1 17.5 6.5 17.5Z"></path>
+        `,
+        "cloud-moon": `
+            <path class="${secondaryClass}" d="M10.8 4C9 4.4 7.7 6 7.7 7.9C7.7 10.1 9.5 11.9 11.7 11.9C12.4 11.9 13 11.8 13.6 11.5C12.9 13.7 10.9 15.2 8.6 15.2C5.8 15.2 3.6 13 3.6 10.2C3.6 7.9 5.1 5.9 7.3 5.2"></path>
+            <path class="${primaryClass}" d="M7.2 18H17.2C19.3 18 21 16.3 21 14.2C21 12.3 19.6 10.7 17.7 10.4C17.1 8.4 15.2 7 13.1 7C10.3 7 8 8.9 7.6 11.5C5.7 11.9 4.4 13.5 4.4 15.3C4.4 16.9 5.7 18 7.2 18Z"></path>
+        `,
+        cloud: `
+            <path class="${primaryClass}" d="M6.2 18H17.8C20.1 18 22 16.1 22 13.8C22 11.7 20.5 9.9 18.4 9.6C17.8 7 15.5 5.2 12.8 5.2C9.7 5.2 7.1 7.5 6.6 10.5C4.7 10.9 3.4 12.4 3.4 14.3C3.4 16.4 5.1 18 6.2 18Z"></path>
+        `,
+        fog: `
+            <path class="${primaryClass}" d="M6.2 12.8H17.8C20.1 12.8 22 11 22 8.7C22 6.6 20.5 4.8 18.4 4.5C17.8 1.9 15.5 0.1 12.8 0.1C9.7 0.1 7.1 2.4 6.6 5.4C4.7 5.8 3.4 7.3 3.4 9.2C3.4 11.3 5.1 12.8 6.2 12.8Z" transform="translate(0 4.6) scale(0.9)"></path>
+            <path class="${secondaryClass}" d="M4 17H20"></path>
+            <path class="${secondaryClass}" d="M2.5 20H18.5"></path>
+        `,
+        drizzle: `
+            <path class="${primaryClass}" d="M6.2 13H17.8C20.1 13 22 11.2 22 8.9C22 6.8 20.5 5 18.4 4.7C17.8 2.1 15.5 0.3 12.8 0.3C9.7 0.3 7.1 2.6 6.6 5.6C4.7 6 3.4 7.5 3.4 9.4C3.4 11.5 5.1 13 6.2 13Z" transform="translate(0 3.8) scale(0.92)"></path>
+            <path class="${secondaryClass}" d="M8 18.2L7.2 20"></path>
+            <path class="${secondaryClass}" d="M12 18.8L11.2 20.6"></path>
+            <path class="${secondaryClass}" d="M16 18.2L15.2 20"></path>
+        `,
+        rain: `
+            <path class="${primaryClass}" d="M6.2 13H17.8C20.1 13 22 11.2 22 8.9C22 6.8 20.5 5 18.4 4.7C17.8 2.1 15.5 0.3 12.8 0.3C9.7 0.3 7.1 2.6 6.6 5.6C4.7 6 3.4 7.5 3.4 9.4C3.4 11.5 5.1 13 6.2 13Z" transform="translate(0 3.8) scale(0.92)"></path>
+            <path class="${secondaryClass}" d="M7.5 17.5L6.2 20.5"></path>
+            <path class="${secondaryClass}" d="M12 18.4L10.7 21.4"></path>
+            <path class="${secondaryClass}" d="M16.5 17.5L15.2 20.5"></path>
+        `,
+        snow: `
+            <path class="${primaryClass}" d="M6.2 13H17.8C20.1 13 22 11.2 22 8.9C22 6.8 20.5 5 18.4 4.7C17.8 2.1 15.5 0.3 12.8 0.3C9.7 0.3 7.1 2.6 6.6 5.6C4.7 6 3.4 7.5 3.4 9.4C3.4 11.5 5.1 13 6.2 13Z" transform="translate(0 3.8) scale(0.92)"></path>
+            <path class="${secondaryClass}" d="M8.2 18.2H10.8"></path>
+            <path class="${secondaryClass}" d="M9.5 16.9V19.5"></path>
+            <path class="${secondaryClass}" d="M7.9 17.2L11.1 19.4"></path>
+            <path class="${secondaryClass}" d="M11.1 17.2L7.9 19.4"></path>
+            <path class="${secondaryClass}" d="M14.6 18.2H17.2"></path>
+            <path class="${secondaryClass}" d="M15.9 16.9V19.5"></path>
+            <path class="${secondaryClass}" d="M14.3 17.2L17.5 19.4"></path>
+            <path class="${secondaryClass}" d="M17.5 17.2L14.3 19.4"></path>
+        `,
+        storm: `
+            <path class="${primaryClass}" d="M6.2 13H17.8C20.1 13 22 11.2 22 8.9C22 6.8 20.5 5 18.4 4.7C17.8 2.1 15.5 0.3 12.8 0.3C9.7 0.3 7.1 2.6 6.6 5.6C4.7 6 3.4 7.5 3.4 9.4C3.4 11.5 5.1 13 6.2 13Z" transform="translate(0 3.8) scale(0.92)"></path>
+            <path class="${secondaryClass}" d="M12.4 14.8L9.8 19.1H13.1L11.3 23.2L16.2 17.4H13.2L15.1 14.8Z"></path>
+        `,
+        mixed: `
+            <path class="${primaryClass}" d="M6.2 13H17.8C20.1 13 22 11.2 22 8.9C22 6.8 20.5 5 18.4 4.7C17.8 2.1 15.5 0.3 12.8 0.3C9.7 0.3 7.1 2.6 6.6 5.6C4.7 6 3.4 7.5 3.4 9.4C3.4 11.5 5.1 13 6.2 13Z" transform="translate(0 3.8) scale(0.92)"></path>
+            <path class="${secondaryClass}" d="M9.2 18.4L8.1 20.7"></path>
+            <path class="${secondaryClass}" d="M14.7 16.9L17.2 18.4"></path>
+            <path class="${secondaryClass}" d="M16 13.6L16 15.4"></path>
+        `
+    };
+
+    return `
+        <svg class="weather-icon weather-icon--${conditionKey}" viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="${stroke}" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            ${iconBodyByKey[meta.iconKey] || iconBodyByKey.mixed}
+        </svg>
+    `;
+}
+
+function applyWeatherTheme(element, conditionKey) {
+    if (!element) {
+        return;
+    }
+
+    const visual = getWeatherVisual(conditionKey);
+    element.style.setProperty("--weather-accent", visual.accent);
+    element.style.setProperty("--weather-glow", visual.glow);
+    element.style.setProperty("--weather-secondary", visual.secondary);
+}
+
+function normalizeWeatherTimelineEntry(entry) {
+    if (!entry || typeof entry !== "object") {
+        return null;
+    }
+
+    return {
+        time: normalizeWeatherText(entry.time, ""),
+        conditionKey: normalizeWeatherText(entry.conditionKey, "mixed", 32),
+        conditionLabel: normalizeWeatherText(entry.conditionLabel, "Muutlik"),
+        temperature: normalizeWeatherNumber(entry.temperature, 0),
+        apparentTemperature: normalizeWeatherNumber(entry.apparentTemperature, 0),
+        precipitationProbability: normalizeWeatherNumber(entry.precipitationProbability, 0),
+        precipitation: normalizeWeatherNumber(entry.precipitation, 0),
+        windSpeed: normalizeWeatherNumber(entry.windSpeed, 0),
+        isDay: entry.isDay !== false
+    };
+}
+
+function normalizeWeatherForecastDay(entry, index) {
+    if (!entry || typeof entry !== "object") {
+        return null;
+    }
+
+    return {
+        dateKey: normalizeWeatherText(entry.dateKey, String(index + 1), 20),
+        label: normalizeWeatherText(entry.label, index === 0 ? "Täna" : index === 1 ? "Homme" : formatWeatherWeekday(entry.dateKey), 24),
+        conditionKey: normalizeWeatherText(entry.conditionKey, "mixed", 32),
+        conditionLabel: normalizeWeatherText(entry.conditionLabel, "Muutlik"),
+        temperatureMax: normalizeWeatherNumber(entry.temperatureMax, 0),
+        temperatureMin: normalizeWeatherNumber(entry.temperatureMin, 0),
+        apparentTemperatureMax: normalizeWeatherNumber(entry.apparentTemperatureMax, 0),
+        apparentTemperatureMin: normalizeWeatherNumber(entry.apparentTemperatureMin, 0),
+        precipitationProbabilityMax: normalizeWeatherNumber(entry.precipitationProbabilityMax, 0),
+        precipitationSum: normalizeWeatherNumber(entry.precipitationSum, 0),
+        windSpeedMax: normalizeWeatherNumber(entry.windSpeedMax, 0),
+        windGustsMax: normalizeWeatherNumber(entry.windGustsMax, 0),
+        sunrise: normalizeWeatherText(entry.sunrise, ""),
+        sunset: normalizeWeatherText(entry.sunset, ""),
+        noteTitle: normalizeWeatherText(entry.noteTitle, "Päeva toon", 72),
+        noteSummary: normalizeWeatherText(entry.noteSummary, "Päev liigub rahulikult edasi.", 180)
+    };
+}
+
+function normalizeDailyWeatherPayload(payload, location) {
+    if (!payload || typeof payload !== "object") {
+        return null;
+    }
+
+    const forecast = (Array.isArray(payload.forecast) ? payload.forecast : [])
+        .map(normalizeWeatherForecastDay)
+        .filter(Boolean)
+        .slice(0, 5);
+
+    if (forecast.length === 0) {
+        return null;
+    }
+
+    const current = {
+        time: normalizeWeatherText(payload.current?.time, new Date().toISOString()),
+        conditionKey: normalizeWeatherText(payload.current?.conditionKey, forecast[0]?.conditionKey || "mixed", 32),
+        conditionLabel: normalizeWeatherText(payload.current?.conditionLabel, payload.current?.condition || "Muutlik"),
+        temperature: normalizeWeatherNumber(payload.current?.temperature, forecast[0]?.temperatureMax || 0),
+        apparentTemperature: normalizeWeatherNumber(payload.current?.apparentTemperature, payload.current?.temperature || 0),
+        relativeHumidity: normalizeWeatherNumber(payload.current?.relativeHumidity, 0),
+        precipitation: normalizeWeatherNumber(payload.current?.precipitation, 0),
+        windSpeed: normalizeWeatherNumber(payload.current?.windSpeed, 0),
+        windGusts: normalizeWeatherNumber(payload.current?.windGusts, 0),
+        cloudCover: normalizeWeatherNumber(payload.current?.cloudCover, 0),
+        isDay: payload.current?.isDay !== false
+    };
+
+    return {
+        date: normalizeWeatherText(payload.date, forecast[0]?.dateKey || ""),
+        location: {
+            label: normalizeWeatherText(payload.location?.label, location?.label || "Tallinn", 48),
+            latitude: normalizeWeatherNumber(payload.location?.latitude, location?.latitude || DEFAULT_WEATHER_LOCATION.latitude),
+            longitude: normalizeWeatherNumber(payload.location?.longitude, location?.longitude || DEFAULT_WEATHER_LOCATION.longitude),
+            source: location?.source || DEFAULT_WEATHER_LOCATION.source
+        },
+        summaryLine: normalizeWeatherText(payload.summaryLine, "Värske ilmavaade valmistub.", 160),
+        current,
+        today: {
+            ...normalizeWeatherForecastDay(payload.today || forecast[0], 0),
+            title: normalizeWeatherText(payload.today?.title, forecast[0]?.noteTitle || "Täna", 72),
+            summary: normalizeWeatherText(payload.today?.summary, forecast[0]?.noteSummary || "Tänane ilmaülevaade valmistub.", 220),
+            details: normalizeWeatherText(payload.today?.details, "Hoia päeva plaanis veidi paindlikkust.", 220)
+        },
+        tomorrow: {
+            ...normalizeWeatherForecastDay(payload.tomorrow || forecast[1] || forecast[0], 1),
+            title: normalizeWeatherText(payload.tomorrow?.title, forecast[1]?.noteTitle || "Homme", 72),
+            summary: normalizeWeatherText(payload.tomorrow?.summary, forecast[1]?.noteSummary || "Homne ilmaülevaade valmistub.", 220),
+            details: normalizeWeatherText(payload.tomorrow?.details, "Homme jätkub sama üldtoon.", 220)
+        },
+        forecast,
+        timelines: {
+            today: (Array.isArray(payload.timelines?.today) ? payload.timelines.today : [])
+                .map(normalizeWeatherTimelineEntry)
+                .filter(Boolean),
+            tomorrow: (Array.isArray(payload.timelines?.tomorrow) ? payload.timelines.tomorrow : [])
+                .map(normalizeWeatherTimelineEntry)
+                .filter(Boolean)
+        },
+        planningTips: (Array.isArray(payload.planningTips) ? payload.planningTips : [])
+            .map(function (tip) {
+                return normalizeWeatherText(tip, "", 88);
+            })
+            .filter(Boolean)
+            .slice(0, 3),
+        backgroundImageUrl: normalizeWeatherText(payload.backgroundImageUrl, "", 220),
+        publishedAt: new Date(parseDateToTimestamp(payload.publishedAt || payload.published_at)).toISOString(),
+        attribution: payload.attribution && typeof payload.attribution === "object" ? payload.attribution : {}
+    };
+}
+
+function renderWeatherPeekDays(forecastDays) {
+    if (!weatherStripPeek) {
+        return;
+    }
+
+    const fragment = document.createDocumentFragment();
+
+    forecastDays.slice(0, 3).forEach(function (day, index) {
+        const item = document.createElement("span");
+        const label = document.createElement("span");
+        const range = document.createElement("strong");
+
+        item.className = "weather-strip__peek-item";
+        label.className = "weather-strip__peek-label";
+        range.className = "weather-strip__peek-range";
+
+        label.textContent = index === 0 ? "Täna" : index === 1 ? "Homme" : formatWeatherWeekday(day.dateKey);
+        range.textContent = `${formatWeatherTemperature(day.temperatureMax)} · ${formatWeatherTemperature(day.temperatureMin)}`;
+
+        item.append(label, range);
+        fragment.append(item);
+    });
+
+    weatherStripPeek.replaceChildren(fragment);
+}
+
+function renderWeatherStrip() {
+    if (!weatherStrip) {
+        return;
+    }
+
+    if (!dailyWeather) {
+        weatherStrip.disabled = true;
+        weatherStrip.setAttribute("aria-busy", "true");
+        weatherStripIcon.innerHTML = getWeatherIconMarkup("cloudy", { size: 34 });
+        weatherStripLocation.textContent = "Ilm valmistub";
+        weatherStripSummary.textContent = "Laen värske ilmaülevaate ja 5 päeva vaate.";
+        weatherStripTemp.textContent = "--°";
+        weatherStripCondition.textContent = "Laadimine";
+        weatherStripRange.textContent = "--° / --°";
+        weatherStripMeta.textContent = "Ava detailne ilmavaade";
+        weatherStripPeek.replaceChildren();
+        applyWeatherTheme(weatherStrip, "cloudy");
+        weatherStrip.style.removeProperty("--weather-strip-photo");
+        weatherStrip.dataset.sceneState = "idle";
+        weatherStrip.dataset.sceneUrl = "";
+        return;
+    }
+
+    const currentMeta = getWeatherConditionMeta(
+        dailyWeather.current.conditionKey,
+        dailyWeather.current.conditionLabel,
+        dailyWeather.current.isDay
+    );
+
+    weatherStrip.disabled = false;
+    weatherStrip.removeAttribute("aria-busy");
+    weatherStripIcon.innerHTML = getWeatherIconMarkup(dailyWeather.current.conditionKey, {
+        size: 34,
+        isDay: dailyWeather.current.isDay
+    });
+    weatherStripLocation.textContent = dailyWeather.location.label;
+    weatherStripSummary.textContent = dailyWeather.summaryLine;
+    weatherStripTemp.textContent = formatWeatherTemperature(dailyWeather.current.temperature);
+    weatherStripCondition.textContent = currentMeta.label;
+    weatherStripRange.textContent = `${formatWeatherTemperature(dailyWeather.today.temperatureMax)} / ${formatWeatherTemperature(dailyWeather.today.temperatureMin)}`;
+    weatherStripMeta.textContent = dailyWeather.location.source === "device"
+        ? "Ava 5 päeva prognoos"
+        : "Tallinna vaikimisi prognoos";
+    renderWeatherPeekDays(dailyWeather.forecast);
+    applyWeatherTheme(weatherStrip, dailyWeather.current.conditionKey);
+    loadWeatherSceneImage();
+}
+
+function createWeatherMetric(labelText, valueText) {
+    const item = document.createElement("div");
+    const label = document.createElement("span");
+    const value = document.createElement("strong");
+
+    item.className = "weather-story__metric";
+    label.className = "weather-story__metric-label";
+    value.className = "weather-story__metric-value";
+
+    label.textContent = labelText;
+    value.textContent = valueText;
+    item.append(label, value);
+
+    return item;
+}
+
+function renderWeatherStoryCard(target, day, headingText) {
+    if (!target || !day) {
+        return;
+    }
+
+    const fragment = document.createDocumentFragment();
+    const top = document.createElement("div");
+    const label = document.createElement("span");
+    const date = document.createElement("span");
+    const title = document.createElement("h3");
+    const summary = document.createElement("p");
+    const details = document.createElement("p");
+    const metrics = document.createElement("div");
+
+    top.className = "weather-story__top";
+    label.className = "weather-story__eyebrow";
+    date.className = "weather-story__date";
+    title.className = "weather-story__title";
+    summary.className = "weather-story__summary";
+    details.className = "weather-story__details";
+    metrics.className = "weather-story__metrics";
+
+    label.textContent = headingText;
+    date.textContent = formatWeatherFullDate(day.dateKey);
+    title.textContent = day.title;
+    summary.textContent = day.summary;
+    details.textContent = day.details;
+
+    top.append(label, date);
+    metrics.append(
+        createWeatherMetric("Temperatuur", `${formatWeatherTemperature(day.temperatureMin)} kuni ${formatWeatherTemperature(day.temperatureMax)}`),
+        createWeatherMetric("Saju võimalus", formatWeatherProbability(day.precipitationProbabilityMax)),
+        createWeatherMetric("Tuul", `${Math.round(day.windSpeedMax)} km/h`)
+    );
+
+    fragment.append(top, title, summary, details, metrics);
+    target.replaceChildren(fragment);
+    applyWeatherTheme(target, day.conditionKey);
+}
+
+function renderWeatherForecast() {
+    if (!weatherForecastList) {
+        return;
+    }
+
+    const fragment = document.createDocumentFragment();
+
+    dailyWeather.forecast.forEach(function (day, index) {
+        const card = document.createElement("article");
+        const top = document.createElement("div");
+        const dayLabel = document.createElement("div");
+        const icon = document.createElement("div");
+        const title = document.createElement("h4");
+        const summary = document.createElement("p");
+        const metrics = document.createElement("div");
+
+        card.className = "weather-day-card";
+        top.className = "weather-day-card__top";
+        dayLabel.className = "weather-day-card__label";
+        icon.className = "weather-day-card__icon";
+        title.className = "weather-day-card__title";
+        summary.className = "weather-day-card__summary";
+        metrics.className = "weather-day-card__metrics";
+
+        dayLabel.innerHTML = `<strong>${day.label}</strong><span>${formatWeatherWeekday(day.dateKey)}</span>`;
+        icon.innerHTML = getWeatherIconMarkup(day.conditionKey, { size: 28 });
+        title.textContent = day.noteTitle;
+        summary.textContent = day.noteSummary;
+        metrics.append(
+            createWeatherMetric("Max", formatWeatherTemperature(day.temperatureMax)),
+            createWeatherMetric("Min", formatWeatherTemperature(day.temperatureMin)),
+            createWeatherMetric("Sadu", formatWeatherProbability(day.precipitationProbabilityMax))
+        );
+
+        top.append(dayLabel, icon);
+        card.append(top, title, summary, metrics);
+        applyWeatherTheme(card, day.conditionKey);
+        fragment.append(card);
+    });
+
+    weatherForecastList.replaceChildren(fragment);
+}
+
+function renderWeatherTimeline(target, entries) {
+    if (!target) {
+        return;
+    }
+
+    const fragment = document.createDocumentFragment();
+
+    if (!entries || entries.length === 0) {
+        const empty = document.createElement("div");
+        empty.className = "weather-timeline__empty";
+        empty.textContent = "Täpsem tunnivaade valmistub.";
+        target.replaceChildren(empty);
+        return;
+    }
+
+    entries.forEach(function (entry) {
+        const item = document.createElement("div");
+        const time = document.createElement("span");
+        const icon = document.createElement("div");
+        const temp = document.createElement("strong");
+        const meta = document.createElement("span");
+
+        item.className = "weather-timeline__item";
+        time.className = "weather-timeline__time";
+        icon.className = "weather-timeline__icon";
+        temp.className = "weather-timeline__temp";
+        meta.className = "weather-timeline__meta";
+
+        time.textContent = formatWeatherTime(entry.time);
+        icon.innerHTML = getWeatherIconMarkup(entry.conditionKey, {
+            size: 24,
+            isDay: entry.isDay
+        });
+        temp.textContent = formatWeatherTemperature(entry.temperature);
+        meta.textContent = `${formatWeatherProbability(entry.precipitationProbability)} · ${Math.round(entry.windSpeed)} km/h`;
+
+        item.append(time, icon, temp, meta);
+        applyWeatherTheme(item, entry.conditionKey);
+        fragment.append(item);
+    });
+
+    target.replaceChildren(fragment);
+}
+
+function renderWeatherPlanningTips() {
+    if (!weatherPlanningTips) {
+        return;
+    }
+
+    const fragment = document.createDocumentFragment();
+
+    (dailyWeather.planningTips.length > 0 ? dailyWeather.planningTips : ["Hoia päeva plaan paindlik."]).forEach(function (tipText) {
+        const item = document.createElement("div");
+        item.className = "weather-tip";
+        item.textContent = tipText;
+        fragment.append(item);
+    });
+
+    weatherPlanningTips.replaceChildren(fragment);
+}
+
+function loadWeatherSceneImage() {
+    if (!weatherModalScene && !weatherStrip) {
+        return;
+    }
+
+    const nextUrl = dailyWeather?.backgroundImageUrl || "";
+
+    if (!nextUrl) {
+        if (weatherModalScene) {
+            weatherModalScene.style.backgroundImage = "";
+            weatherModalScene.dataset.state = "idle";
+            weatherModalScene.dataset.url = "";
+        }
+
+        if (weatherStrip) {
+            weatherStrip.style.removeProperty("--weather-strip-photo");
+            weatherStrip.dataset.sceneState = "idle";
+            weatherStrip.dataset.sceneUrl = "";
+        }
+        return;
+    }
+
+    if (
+        weatherModalScene?.dataset.url === nextUrl
+        && weatherModalScene?.dataset.state === "ready"
+        && weatherStrip?.dataset.sceneUrl === nextUrl
+        && weatherStrip?.dataset.sceneState === "ready"
+    ) {
+        return;
+    }
+
+    const currentToken = ++weatherSceneLoadToken;
+    const image = new Image();
+
+    if (weatherModalScene) {
+        weatherModalScene.dataset.state = "loading";
+        weatherModalScene.dataset.url = nextUrl;
+    }
+
+    if (weatherStrip) {
+        weatherStrip.dataset.sceneState = "loading";
+        weatherStrip.dataset.sceneUrl = nextUrl;
+    }
+
+    image.onload = function () {
+        if (currentToken !== weatherSceneLoadToken) {
+            return;
+        }
+
+        if (weatherModalScene) {
+            weatherModalScene.style.backgroundImage = `url("${nextUrl}")`;
+            weatherModalScene.dataset.state = "ready";
+        }
+
+        if (weatherStrip) {
+            weatherStrip.style.setProperty("--weather-strip-photo", `url("${nextUrl}")`);
+            weatherStrip.dataset.sceneState = "ready";
+        }
+    };
+
+    image.onerror = function () {
+        if (currentToken !== weatherSceneLoadToken) {
+            return;
+        }
+
+        if (weatherModalScene) {
+            weatherModalScene.style.backgroundImage = "";
+            weatherModalScene.dataset.state = "error";
+        }
+
+        if (weatherStrip) {
+            weatherStrip.style.removeProperty("--weather-strip-photo");
+            weatherStrip.dataset.sceneState = "error";
+        }
+    };
+
+    image.src = nextUrl;
+}
+
+function renderWeatherModal() {
+    if (!dailyWeather || !weatherModal) {
+        return;
+    }
+
+    const currentMeta = getWeatherConditionMeta(
+        dailyWeather.current.conditionKey,
+        dailyWeather.current.conditionLabel,
+        dailyWeather.current.isDay
+    );
+
+    weatherModalLead.textContent = dailyWeather.summaryLine;
+    weatherModalCurrentIcon.innerHTML = getWeatherIconMarkup(dailyWeather.current.conditionKey, {
+        size: 42,
+        isDay: dailyWeather.current.isDay
+    });
+    weatherModalCurrentTemp.textContent = formatWeatherTemperature(dailyWeather.current.temperature);
+    weatherModalCurrentCondition.textContent = currentMeta.label;
+    weatherModalLocation.textContent = dailyWeather.location.label;
+    weatherModalMeta.textContent = `${formatWeatherFullDate(dailyWeather.date)} · uuendatud ${formatWeatherTime(dailyWeather.publishedAt)}`;
+    renderWeatherStoryCard(weatherTodayCard, dailyWeather.today, "Täna");
+    renderWeatherStoryCard(weatherTomorrowCard, dailyWeather.tomorrow, "Homme");
+    renderWeatherForecast();
+    renderWeatherTimeline(weatherTodayTimeline, dailyWeather.timelines.today);
+    renderWeatherTimeline(weatherTomorrowTimeline, dailyWeather.timelines.tomorrow);
+    renderWeatherPlanningTips();
+    applyWeatherTheme(weatherModalDialog, dailyWeather.current.conditionKey);
+    loadWeatherSceneImage();
+}
+
+function openWeatherModal() {
+    if (!weatherModal || !dailyWeather) {
+        return;
+    }
+
+    renderWeatherModal();
+    weatherModal.hidden = false;
+    document.body.classList.add("weather-modal-open");
+
+    window.requestAnimationFrame(function () {
+        weatherModal.classList.add("is-open");
+    });
+}
+
+function closeWeatherModal() {
+    if (!weatherModal || weatherModal.hidden) {
+        return;
+    }
+
+    weatherModal.classList.remove("is-open");
+    document.body.classList.remove("weather-modal-open");
+
+    window.setTimeout(function () {
+        if (!weatherModal.classList.contains("is-open")) {
+            weatherModal.hidden = true;
+        }
+    }, 180);
+}
+
+function renderWeatherUnavailable(location = DEFAULT_WEATHER_LOCATION) {
+    dailyWeather = null;
+    activeWeatherLocation = location;
+    renderWeatherStrip();
+}
+
+function setDailyWeather(payload, location) {
+    const normalizedWeather = normalizeDailyWeatherPayload(payload, location);
+
+    if (!normalizedWeather) {
+        renderWeatherUnavailable(location);
+        return;
+    }
+
+    dailyWeather = normalizedWeather;
+    activeWeatherLocation = {
+        ...location,
+        label: normalizedWeather.location.label
+    };
+    renderWeatherStrip();
+
+    if (!weatherModal?.hidden) {
+        renderWeatherModal();
+    }
+}
+
+function resolveBrowserWeatherLocation() {
+    return new Promise(function (resolve) {
+        if (!("geolocation" in navigator)) {
+            resolve(DEFAULT_WEATHER_LOCATION);
+            return;
+        }
+
+        navigator.geolocation.getCurrentPosition(function (position) {
+            resolve({
+                latitude: position.coords.latitude,
+                longitude: position.coords.longitude,
+                label: "Sinu asukoht",
+                source: "device"
+            });
+        }, function () {
+            resolve(DEFAULT_WEATHER_LOCATION);
+        }, {
+            enableHighAccuracy: true,
+            timeout: WEATHER_LOCATION_TIMEOUT,
+            maximumAge: 15 * 60 * 1000
+        });
+    });
+}
+
+async function fetchDailyWeatherFromServer(location) {
+    try {
+        const requestUrl = new URL("/api/weather", window.location.origin);
+
+        requestUrl.searchParams.set("lat", String(location.latitude));
+        requestUrl.searchParams.set("lon", String(location.longitude));
+        requestUrl.searchParams.set("label", location.label);
+
+        const response = await fetch(requestUrl, {
+            headers: {
+                Accept: "application/json"
+            }
+        });
+
+        if (!response.ok) {
+            throw new Error("Daily weather request failed.");
+        }
+
+        return await response.json();
+    } catch (error) {
+        console.error("Failed to fetch daily weather from local server.", error);
+        return null;
+    }
+}
+
+async function refreshDailyWeather(options = {}) {
+    const location = options.refreshLocation || !activeWeatherLocation
+        ? await resolveBrowserWeatherLocation()
+        : activeWeatherLocation;
+    const payload = await fetchDailyWeatherFromServer(location);
+
+    if (payload) {
+        setDailyWeather(payload, location);
+    } else if (!dailyWeather) {
+        renderWeatherUnavailable(location);
+    }
+}
+
+function initializeDailyWeather() {
+    if (!weatherStrip) {
+        return;
+    }
+
+    renderWeatherStrip();
+
+    weatherStrip.addEventListener("click", function () {
+        if (dailyWeather) {
+            openWeatherModal();
+        }
+    });
+
+    weatherModalClose?.addEventListener("click", closeWeatherModal);
+    weatherModalBackdrop?.addEventListener("click", closeWeatherModal);
+
+    document.addEventListener("keydown", function (event) {
+        if (event.key === "Escape") {
+            closeWeatherModal();
+        }
+    });
+
+    if (dailyWeatherSyncTimer) {
+        window.clearInterval(dailyWeatherSyncTimer);
+    }
+
+    void refreshDailyWeather({ refreshLocation: true });
+    dailyWeatherSyncTimer = window.setInterval(function () {
+        void refreshDailyWeather();
+    }, DAILY_WEATHER_REFRESH_INTERVAL);
 }
 
 function clearProblemQuizAdvanceTimer() {
@@ -3484,6 +4392,7 @@ ratingButtons.forEach(function (button) {
 
 setLoadingProgress(0);
 resetRating();
+initializeDailyWeather();
 initializeRecentProblems();
 initializeDailyArticles();
 initializeDailyPersonaStories();

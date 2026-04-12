@@ -1,7 +1,7 @@
 import "dotenv/config";
 import express from "express";
 import OpenAI from "openai";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { access, mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -15,6 +15,8 @@ const publicFeedModel = process.env.OPENAI_PUBLIC_FEED_MODEL?.trim() || openAiMo
 const articleModel = process.env.OPENAI_ARTICLE_MODEL?.trim() || "gpt-4.1";
 const personaModel = process.env.OPENAI_PERSONA_MODEL?.trim() || "gpt-4.1";
 const horoscopeModel = process.env.OPENAI_HOROSCOPE_MODEL?.trim() || openAiModel;
+const weatherModel = process.env.OPENAI_WEATHER_MODEL?.trim() || openAiModel;
+const imageModel = process.env.OPENAI_IMAGE_MODEL?.trim() || "gpt-image-1";
 const appTimeZone = process.env.APP_TIMEZONE?.trim() || "Europe/Tallinn";
 const openAiApiKey = process.env.OPENAI_API_KEY?.trim() || "";
 const client = openAiApiKey ? new OpenAI({ apiKey: openAiApiKey }) : null;
@@ -22,7 +24,9 @@ const recentProblemReports = [];
 const dailyArticleCachePath = path.join(__dirname, ".cache", "daily-articles.json");
 const dailyPersonaCachePath = path.join(__dirname, ".cache", "daily-personas.json");
 const dailyHoroscopeCachePath = path.join(__dirname, ".cache", "daily-horoscope.json");
+const dailyWeatherCachePath = path.join(__dirname, ".cache", "daily-weather.json");
 const newsletterSignupsCachePath = path.join(__dirname, ".cache", "newsletter-signups.json");
+const generatedWeatherSceneDir = path.join(__dirname, ".cache", "weather-scenes");
 const RECENT_PROBLEMS_LIMIT = 6;
 const DAILY_ARTICLE_ARCHIVE_LIMIT = 10;
 const DAILY_ARTICLE_PUBLIC_LIMIT = 8;
@@ -31,6 +35,24 @@ const DAILY_PERSONA_ARCHIVE_LIMIT = 10;
 const DAILY_PERSONA_PUBLIC_LIMIT = 8;
 const DAILY_PERSONA_STYLE_VERSION = 8;
 const DAILY_HOROSCOPE_STYLE_VERSION = 4;
+const DAILY_WEATHER_STYLE_VERSION = 2;
+const DAILY_WEATHER_CACHE_LIMIT = 24;
+const WEATHER_FORECAST_DAYS = 5;
+const WEATHER_TIMELINE_HOUR_TARGETS = [6, 9, 12, 15, 18, 21];
+const WEATHER_API_BASE_URL = "https://api.open-meteo.com/v1/forecast";
+const WEATHER_REVERSE_GEOCODE_URL = "https://nominatim.openstreetmap.org/reverse";
+const WEATHER_DEFAULT_LOCATION = {
+    label: "Tallinn",
+    latitude: 59.437,
+    longitude: 24.7536
+};
+const WEATHER_LOCATION_PLACEHOLDERS = new Set([
+    "sinu asukoht",
+    "seadme asukoht",
+    "your location",
+    "current location",
+    "my location"
+]);
 const NEWSLETTER_EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/i;
 const PUBLIC_FEED_TEXT_LIMIT = 180;
 const PUBLIC_FEED_FALLBACK_TEXT = "Üks terava sõnastusega probleem sai lahendatud.";
@@ -45,9 +67,15 @@ let dailyPersonaGenerationPromise = null;
 let dailyHoroscope = null;
 let dailyHoroscopeLoaded = false;
 let dailyHoroscopeGenerationPromise = null;
+let dailyWeatherEntries = [];
+let dailyWeatherLoaded = false;
+let dailyWeatherWritePromise = Promise.resolve();
 let newsletterSignups = [];
 let newsletterSignupsLoaded = false;
 let newsletterSignupsWritePromise = Promise.resolve();
+const dailyWeatherGenerationPromises = new Map();
+const weatherSceneGenerationPromises = new Map();
+const weatherLocationLabelCache = new Map();
 
 const DAILY_ARTICLE_THEMES = [
     {
@@ -762,6 +790,54 @@ const DAILY_HOROSCOPE_JSON_SCHEMA = {
     }
 };
 
+const DAILY_WEATHER_JSON_SCHEMA = {
+    type: "object",
+    additionalProperties: false,
+    required: [
+        "summaryLine",
+        "todayTitle",
+        "todaySummary",
+        "todayDetails",
+        "tomorrowTitle",
+        "tomorrowSummary",
+        "tomorrowDetails",
+        "planningTips",
+        "dayNotes",
+        "scenePrompt"
+    ],
+    properties: {
+        summaryLine: { type: "string" },
+        todayTitle: { type: "string" },
+        todaySummary: { type: "string" },
+        todayDetails: { type: "string" },
+        tomorrowTitle: { type: "string" },
+        tomorrowSummary: { type: "string" },
+        tomorrowDetails: { type: "string" },
+        planningTips: {
+            type: "array",
+            minItems: 3,
+            maxItems: 3,
+            items: { type: "string" }
+        },
+        dayNotes: {
+            type: "array",
+            minItems: WEATHER_FORECAST_DAYS,
+            maxItems: WEATHER_FORECAST_DAYS,
+            items: {
+                type: "object",
+                additionalProperties: false,
+                required: ["dateKey", "title", "summary"],
+                properties: {
+                    dateKey: { type: "string" },
+                    title: { type: "string" },
+                    summary: { type: "string" }
+                }
+            }
+        },
+        scenePrompt: { type: "string" }
+    }
+};
+
 app.use(express.json({ limit: "1mb" }));
 
 function sanitizeProblemText(text) {
@@ -983,6 +1059,16 @@ function normalizePublicFeedProblemText(value) {
     return maskProfanity(safeText);
 }
 
+function capitalizeFirst(text) {
+    const cleaned = sanitizeProblemText(text || "");
+
+    if (!cleaned) {
+        return "";
+    }
+
+    return cleaned.charAt(0).toLocaleUpperCase("et-EE") + cleaned.slice(1);
+}
+
 function getDatePartMap(date) {
     return new Intl.DateTimeFormat("en-CA", {
         timeZone: appTimeZone,
@@ -1146,6 +1232,1174 @@ function parseTimestamp(value) {
 
 function getArchiveSortTimestamp(record) {
     return parseTimestamp(record?.dateKey) || parseTimestamp(record?.publishedAt);
+}
+
+function normalizeWeatherNumber(value, fallbackValue = 0) {
+    const numericValue = Number(value);
+    return Number.isFinite(numericValue) ? numericValue : fallbackValue;
+}
+
+function roundWeatherCoordinate(value, fallbackValue) {
+    const numericValue = Number(value);
+
+    if (!Number.isFinite(numericValue)) {
+        return fallbackValue;
+    }
+
+    return Math.round(numericValue * 10000) / 10000;
+}
+
+function getWeatherLocationKey(latitude, longitude) {
+    return `${latitude.toFixed(2)}:${longitude.toFixed(2)}`;
+}
+
+function getWeatherCodeMeta(code, isDay = true) {
+    const safeCode = Number(code);
+
+    if (safeCode === 0) {
+        return {
+            key: "clear",
+            label: isDay ? "Selge" : "Selge öö",
+            stripLabel: isDay ? "päikeseline" : "selge",
+            title: isDay ? "Selge aken" : "Selge õhtu"
+        };
+    }
+
+    if (safeCode === 1 || safeCode === 2) {
+        return {
+            key: "partly-cloudy",
+            label: "Vahelduv pilvisus",
+            stripLabel: "vahelduva pilvisusega",
+            title: "Pehme valgus"
+        };
+    }
+
+    if (safeCode === 3) {
+        return {
+            key: "cloudy",
+            label: "Pilves",
+            stripLabel: "pilvine",
+            title: "Pilvine toon"
+        };
+    }
+
+    if (safeCode === 45 || safeCode === 48) {
+        return {
+            key: "fog",
+            label: "Udune",
+            stripLabel: "udune",
+            title: "Uduga päev"
+        };
+    }
+
+    if ([51, 53, 55, 56, 57].includes(safeCode)) {
+        return {
+            key: "drizzle",
+            label: "Uduvihm",
+            stripLabel: "uduvihmane",
+            title: "Niiske rütm"
+        };
+    }
+
+    if ([61, 63, 65, 66, 67, 80, 81, 82].includes(safeCode)) {
+        return {
+            key: "rain",
+            label: "Vihmane",
+            stripLabel: "vihmane",
+            title: "Vihmane päev"
+        };
+    }
+
+    if ([71, 73, 75, 77, 85, 86].includes(safeCode)) {
+        return {
+            key: "snow",
+            label: "Lumine",
+            stripLabel: "lumine",
+            title: "Lumine vaade"
+        };
+    }
+
+    if ([95, 96, 99].includes(safeCode)) {
+        return {
+            key: "storm",
+            label: "Äikeseline",
+            stripLabel: "äikesevõimalusega",
+            title: "Pingeline taevas"
+        };
+    }
+
+    return {
+        key: "mixed",
+        label: "Muutlik",
+        stripLabel: "muutlik",
+        title: "Muutlik ilm"
+    };
+}
+
+function formatTemperature(value) {
+    return `${Math.round(normalizeWeatherNumber(value))}°`;
+}
+
+function formatPrecipitationSum(value) {
+    const numericValue = Math.max(0, normalizeWeatherNumber(value));
+
+    if (numericValue >= 10) {
+        return `${Math.round(numericValue)} mm`;
+    }
+
+    if (numericValue >= 1) {
+        return `${numericValue.toFixed(1)} mm`;
+    }
+
+    return `${numericValue.toFixed(1)} mm`;
+}
+
+function formatWeatherDayLabel(index) {
+    if (index === 0) {
+        return "Täna";
+    }
+
+    if (index === 1) {
+        return "Homme";
+    }
+
+    return `Päev ${index + 1}`;
+}
+
+function pickWeatherWindLabel(value) {
+    const numericValue = normalizeWeatherNumber(value);
+
+    if (numericValue >= 55) {
+        return "tuuline";
+    }
+
+    if (numericValue >= 35) {
+        return "tuntava tuulega";
+    }
+
+    if (numericValue >= 20) {
+        return "õrna tuulega";
+    }
+
+    return "rahulik";
+}
+
+function getWeatherSeasonDescriptor(dateKey) {
+    const month = Number(String(dateKey || "").slice(5, 7));
+
+    if ([12, 1, 2].includes(month)) {
+        return "winter light in Northern Europe";
+    }
+
+    if ([3, 4, 5].includes(month)) {
+        return "early spring in the Baltic region";
+    }
+
+    if ([6, 7, 8].includes(month)) {
+        return "high summer in the Baltic region";
+    }
+
+    return "autumn in Northern Europe";
+}
+
+function pickWeatherSceneEnvironment(snapshot) {
+    const conditionKey = getWeatherCodeMeta(snapshot.current.weatherCode, snapshot.current.isDay).key;
+    const environmentOptionsByCondition = {
+        clear: [
+            "a quiet Baltic seaside promenade with open water and elegant morning light",
+            "a calm Northern European side street with clean facades and long low sunlight",
+            "a pine forest path with crisp spring air and light filtering through the trees",
+            "a harbor quay with still water, distant boats and fresh early light"
+        ],
+        "partly-cloudy": [
+            "a beach or waterfront path where cloud shadows move over the water",
+            "a refined city street with changing light between sun and cloud",
+            "a forest edge or park path with broken light and moving clouds",
+            "a coastal boardwalk with fresh wind and textured sky"
+        ],
+        cloudy: [
+            "a quiet harbor, beach or lakeside under soft layered clouds",
+            "a clean Northern European street with overcast light on the buildings",
+            "a forest road or trail under cool cloud cover and still air",
+            "a marsh or wetland boardwalk under a broad grey sky"
+        ],
+        fog: [
+            "a shoreline or lakeside path disappearing into gentle mist",
+            "a pine forest trail wrapped in soft fog and diffused light",
+            "an old town or quiet residential street with atmospheric morning haze",
+            "a calm harbor with disappearing distance and low visibility"
+        ],
+        drizzle: [
+            "a city street with fine drizzle, reflective pavement and understated movement",
+            "a coastal promenade with misty rain drifting across the water",
+            "a forest path with wet ground, soft rain and dark green texture",
+            "a harbor edge with damp surfaces and delicate rainy atmosphere"
+        ],
+        rain: [
+            "a Baltic street scene after rain with glossy pavement and natural reflections",
+            "a windy beach or promenade with rain in the air and textured water",
+            "a harbor or marina with wet timber, dark sky and moving weather",
+            "a forest trail after a shower with deep greens and wet texture"
+        ],
+        snow: [
+            "a snow-covered coastal path with pale Baltic light",
+            "a quiet city street with fresh snow and soft winter atmosphere",
+            "a pine forest trail with clean snow and calm cold air",
+            "a harbor or shoreline with frozen edges and bright winter stillness"
+        ],
+        storm: [
+            "a dramatic coastline or harbor with heavy sky and wind on the water",
+            "an open beach with storm clouds and weather moving across the horizon",
+            "a city street before or after a squall with dark cloud architecture",
+            "a forest edge under threatening sky and charged air"
+        ],
+        mixed: [
+            "a Northern European street with changeable spring weather and moving cloud",
+            "a waterfront promenade with mixed light and fresh air",
+            "a forest edge with layered sky and restless atmosphere",
+            "a calm harbor with weather shifting over the water"
+        ]
+    };
+    const options = environmentOptionsByCondition[conditionKey] || environmentOptionsByCondition.mixed;
+    const seed = `${snapshot.dateKey}:${snapshot.location.label}:${conditionKey}`;
+    let hash = 0;
+
+    for (const character of seed) {
+        hash = ((hash * 31) + character.charCodeAt(0)) >>> 0;
+    }
+
+    return options[hash % options.length];
+}
+
+function hashText(value) {
+    let hash = 0;
+
+    for (const character of String(value || "")) {
+        hash = ((hash * 31) + character.charCodeAt(0)) >>> 0;
+    }
+
+    return hash.toString(36);
+}
+
+function buildWeatherSceneKey(dateKey, scenePrompt) {
+    return `${dateKey}-${hashText(scenePrompt)}`;
+}
+
+function getWeatherSceneFilePath(sceneKey) {
+    return path.join(generatedWeatherSceneDir, `${sceneKey}.jpg`);
+}
+
+function buildWeatherSceneFallbackSvg(entry) {
+    const prompt = String(entry?.scenePrompt || "").toLocaleLowerCase("en-US");
+    let palette = {
+        from: "#18314b",
+        via: "#2a5074",
+        to: "#4b6f8f",
+        glow: "#ffd285",
+        glowOpacity: "0.28",
+        mist: "#d9ecff"
+    };
+
+    if (prompt.includes("rain") || prompt.includes("drizzle")) {
+        palette = {
+            from: "#10253a",
+            via: "#30597e",
+            to: "#547fa0",
+            glow: "#7ec7ff",
+            glowOpacity: "0.18",
+            mist: "#d8eefe"
+        };
+    } else if (prompt.includes("snow")) {
+        palette = {
+            from: "#b9d4ee",
+            via: "#dfeaf8",
+            to: "#f8fbff",
+            glow: "#ffffff",
+            glowOpacity: "0.34",
+            mist: "#eef6ff"
+        };
+    } else if (prompt.includes("storm")) {
+        palette = {
+            from: "#151829",
+            via: "#313b69",
+            to: "#5a6aa4",
+            glow: "#f3c06b",
+            glowOpacity: "0.16",
+            mist: "#dbe4ff"
+        };
+    } else if (prompt.includes("clear") || prompt.includes("sun")) {
+        palette = {
+            from: "#1b3451",
+            via: "#4f81ac",
+            to: "#d5ecff",
+            glow: "#ffd57a",
+            glowOpacity: "0.34",
+            mist: "#fef6de"
+        };
+    }
+
+    return `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1536" height="1024" viewBox="0 0 1536 1024" fill="none">
+  <defs>
+    <linearGradient id="sky" x1="768" y1="0" x2="768" y2="1024" gradientUnits="userSpaceOnUse">
+      <stop stop-color="${palette.from}"/>
+      <stop offset="0.52" stop-color="${palette.via}"/>
+      <stop offset="1" stop-color="${palette.to}"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(388 204) rotate(26) scale(472 360)">
+      <stop stop-color="${palette.glow}" stop-opacity="${palette.glowOpacity}"/>
+      <stop offset="1" stop-color="${palette.glow}" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="mist" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(864 736) rotate(90) scale(324 820)">
+      <stop stop-color="${palette.mist}" stop-opacity="0.28"/>
+      <stop offset="1" stop-color="${palette.mist}" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="1536" height="1024" fill="url(#sky)"/>
+  <ellipse cx="388" cy="204" rx="472" ry="360" fill="url(#glow)"/>
+  <ellipse cx="864" cy="736" rx="820" ry="324" fill="url(#mist)"/>
+  <path d="M0 736C146 680 308 654 486 658C700 663 820 742 1000 750C1182 758 1361 704 1536 648V1024H0V736Z" fill="rgba(11,20,31,0.26)"/>
+  <path d="M0 802C136 766 322 748 558 760C788 772 988 842 1198 848C1326 852 1438 832 1536 806V1024H0V802Z" fill="rgba(255,255,255,0.09)"/>
+  <path d="M0 864C172 826 394 826 666 868C934 910 1200 914 1536 836V1024H0V864Z" fill="rgba(7,14,22,0.24)"/>
+</svg>`;
+}
+
+async function doesFileExist(filePath) {
+    try {
+        await access(filePath);
+        return true;
+    } catch (_error) {
+        return false;
+    }
+}
+
+function getWeatherArrayValue(collection, key, index, fallbackValue = 0) {
+    const values = Array.isArray(collection?.[key]) ? collection[key] : [];
+    return values[index] ?? fallbackValue;
+}
+
+function buildWeatherDailyEntry(payload, index) {
+    const dateKey = normalizeField(getWeatherArrayValue(payload.daily, "time", index, getLocalDateKey()), getLocalDateKey(), 20);
+    const weatherCode = normalizeWeatherNumber(getWeatherArrayValue(payload.daily, "weather_code", index, 0));
+    const weatherMeta = getWeatherCodeMeta(weatherCode, true);
+
+    return {
+        dateKey,
+        weatherCode,
+        conditionKey: weatherMeta.key,
+        conditionLabel: weatherMeta.label,
+        temperatureMax: normalizeWeatherNumber(getWeatherArrayValue(payload.daily, "temperature_2m_max", index, 0)),
+        temperatureMin: normalizeWeatherNumber(getWeatherArrayValue(payload.daily, "temperature_2m_min", index, 0)),
+        apparentTemperatureMax: normalizeWeatherNumber(getWeatherArrayValue(payload.daily, "apparent_temperature_max", index, 0)),
+        apparentTemperatureMin: normalizeWeatherNumber(getWeatherArrayValue(payload.daily, "apparent_temperature_min", index, 0)),
+        precipitationProbabilityMax: normalizeWeatherNumber(getWeatherArrayValue(payload.daily, "precipitation_probability_max", index, 0)),
+        precipitationSum: normalizeWeatherNumber(getWeatherArrayValue(payload.daily, "precipitation_sum", index, 0)),
+        windSpeedMax: normalizeWeatherNumber(getWeatherArrayValue(payload.daily, "wind_speed_10m_max", index, 0)),
+        windGustsMax: normalizeWeatherNumber(getWeatherArrayValue(payload.daily, "wind_gusts_10m_max", index, 0)),
+        sunshineDuration: normalizeWeatherNumber(getWeatherArrayValue(payload.daily, "sunshine_duration", index, 0)),
+        daylightDuration: normalizeWeatherNumber(getWeatherArrayValue(payload.daily, "daylight_duration", index, 0)),
+        sunrise: normalizeField(getWeatherArrayValue(payload.daily, "sunrise", index, `${dateKey}T06:00`), `${dateKey}T06:00`, 32),
+        sunset: normalizeField(getWeatherArrayValue(payload.daily, "sunset", index, `${dateKey}T18:00`), `${dateKey}T18:00`, 32)
+    };
+}
+
+function buildWeatherHourlyEntries(payload, dateKey) {
+    const hourlyTimes = Array.isArray(payload.hourly?.time) ? payload.hourly.time : [];
+
+    return hourlyTimes
+        .map(function (timeValue, index) {
+            const time = normalizeField(timeValue, "", 32);
+
+            if (!time.startsWith(dateKey)) {
+                return null;
+            }
+
+            const weatherCode = normalizeWeatherNumber(getWeatherArrayValue(payload.hourly, "weather_code", index, 0));
+            const isDay = Boolean(getWeatherArrayValue(payload.hourly, "is_day", index, 1));
+            const weatherMeta = getWeatherCodeMeta(weatherCode, isDay);
+
+            return {
+                time,
+                hour: Number(time.slice(11, 13)),
+                weatherCode,
+                conditionKey: weatherMeta.key,
+                conditionLabel: weatherMeta.label,
+                temperature: normalizeWeatherNumber(getWeatherArrayValue(payload.hourly, "temperature_2m", index, 0)),
+                apparentTemperature: normalizeWeatherNumber(getWeatherArrayValue(payload.hourly, "apparent_temperature", index, 0)),
+                precipitationProbability: normalizeWeatherNumber(getWeatherArrayValue(payload.hourly, "precipitation_probability", index, 0)),
+                precipitation: normalizeWeatherNumber(getWeatherArrayValue(payload.hourly, "precipitation", index, 0)),
+                windSpeed: normalizeWeatherNumber(getWeatherArrayValue(payload.hourly, "wind_speed_10m", index, 0)),
+                cloudCover: normalizeWeatherNumber(getWeatherArrayValue(payload.hourly, "cloud_cover", index, 0)),
+                isDay
+            };
+        })
+        .filter(Boolean);
+}
+
+function buildWeatherTimeline(payload, dateKey) {
+    const hourlyEntries = buildWeatherHourlyEntries(payload, dateKey);
+    const usedTimes = new Set();
+
+    return WEATHER_TIMELINE_HOUR_TARGETS.map(function (targetHour) {
+        const exactMatch = hourlyEntries.find(function (entry) {
+            return entry.hour === targetHour && !usedTimes.has(entry.time);
+        });
+        const nearestMatch = hourlyEntries
+            .filter(function (entry) {
+                return !usedTimes.has(entry.time);
+            })
+            .slice()
+            .sort(function (firstEntry, secondEntry) {
+                return Math.abs(firstEntry.hour - targetHour) - Math.abs(secondEntry.hour - targetHour);
+            })[0] || null;
+        const selectedEntry = exactMatch || nearestMatch;
+
+        if (!selectedEntry) {
+            return null;
+        }
+
+        usedTimes.add(selectedEntry.time);
+        return selectedEntry;
+    }).filter(Boolean);
+}
+
+function normalizeWeatherForecastSnapshot(payload, requestedLocation) {
+    const latitude = roundWeatherCoordinate(payload?.latitude, WEATHER_DEFAULT_LOCATION.latitude);
+    const longitude = roundWeatherCoordinate(payload?.longitude, WEATHER_DEFAULT_LOCATION.longitude);
+    const currentTime = normalizeField(payload?.current?.time, `${getLocalDateKey()}T12:00`, 32);
+    const currentDateKey = currentTime.slice(0, 10) || getLocalDateKey();
+    const currentWeatherCode = normalizeWeatherNumber(payload?.current?.weather_code, 0);
+    const currentIsDay = Boolean(normalizeWeatherNumber(payload?.current?.is_day, 1));
+    const currentWeatherMeta = getWeatherCodeMeta(currentWeatherCode, currentIsDay);
+    const dailyEntries = Array.from({ length: WEATHER_FORECAST_DAYS }, function (_value, index) {
+        return buildWeatherDailyEntry(payload, index);
+    });
+
+    return {
+        dateKey: currentDateKey,
+        location: {
+            label: normalizeField(requestedLocation?.label, WEATHER_DEFAULT_LOCATION.label, 48),
+            latitude,
+            longitude,
+            timezone: normalizeField(payload?.timezone, appTimeZone, 64)
+        },
+        current: {
+            time: currentTime,
+            weatherCode: currentWeatherCode,
+            isDay: currentIsDay,
+            conditionKey: currentWeatherMeta.key,
+            conditionLabel: currentWeatherMeta.label,
+            temperature: normalizeWeatherNumber(payload?.current?.temperature_2m, 0),
+            apparentTemperature: normalizeWeatherNumber(payload?.current?.apparent_temperature, 0),
+            relativeHumidity: normalizeWeatherNumber(payload?.current?.relative_humidity_2m, 0),
+            precipitation: normalizeWeatherNumber(payload?.current?.precipitation, 0),
+            windSpeed: normalizeWeatherNumber(payload?.current?.wind_speed_10m, 0),
+            windGusts: normalizeWeatherNumber(payload?.current?.wind_gusts_10m, 0),
+            cloudCover: normalizeWeatherNumber(payload?.current?.cloud_cover, 0)
+        },
+        daily: dailyEntries,
+        timelines: {
+            today: buildWeatherTimeline(payload, dailyEntries[0]?.dateKey || currentDateKey),
+            tomorrow: buildWeatherTimeline(payload, dailyEntries[1]?.dateKey || dailyEntries[0]?.dateKey || currentDateKey)
+        }
+    };
+}
+
+function buildWeatherRequestUrl(latitude, longitude) {
+    const url = new URL(WEATHER_API_BASE_URL);
+
+    url.searchParams.set("latitude", String(latitude));
+    url.searchParams.set("longitude", String(longitude));
+    url.searchParams.set("timezone", "auto");
+    url.searchParams.set("forecast_days", String(WEATHER_FORECAST_DAYS));
+    url.searchParams.set("current", [
+        "temperature_2m",
+        "relative_humidity_2m",
+        "apparent_temperature",
+        "is_day",
+        "precipitation",
+        "weather_code",
+        "cloud_cover",
+        "wind_speed_10m",
+        "wind_gusts_10m"
+    ].join(","));
+    url.searchParams.set("daily", [
+        "weather_code",
+        "temperature_2m_max",
+        "temperature_2m_min",
+        "apparent_temperature_max",
+        "apparent_temperature_min",
+        "precipitation_probability_max",
+        "precipitation_sum",
+        "sunrise",
+        "sunset",
+        "sunshine_duration",
+        "daylight_duration",
+        "wind_speed_10m_max",
+        "wind_gusts_10m_max"
+    ].join(","));
+    url.searchParams.set("hourly", [
+        "temperature_2m",
+        "apparent_temperature",
+        "precipitation_probability",
+        "precipitation",
+        "weather_code",
+        "wind_speed_10m",
+        "cloud_cover",
+        "is_day"
+    ].join(","));
+
+    return url.toString();
+}
+
+async function fetchWeatherForecastSnapshot(location) {
+    const requestUrl = buildWeatherRequestUrl(location.latitude, location.longitude);
+    const weatherResponse = await fetch(requestUrl, {
+        headers: {
+            Accept: "application/json"
+        }
+    });
+
+    if (!weatherResponse.ok) {
+        throw new Error(`Weather forecast request failed with status ${weatherResponse.status}`);
+    }
+
+    const payload = await weatherResponse.json();
+    return normalizeWeatherForecastSnapshot(payload, location);
+}
+
+function buildWeatherFallbackDayNote(day, index) {
+    const weatherMeta = getWeatherCodeMeta(day.weatherCode, true);
+    const dateLabel = formatWeatherDayLabel(index);
+    const precipitationChance = Math.round(day.precipitationProbabilityMax);
+    const windLine = pickWeatherWindLabel(day.windSpeedMax);
+    const sunshineHours = Math.round(day.sunshineDuration / 3600);
+
+    if (weatherMeta.key === "rain" || weatherMeta.key === "drizzle") {
+        return {
+            dateKey: day.dateKey,
+            title: index === 0 ? "Hoia vihmakindel kiht käepärast" : `${dateLabel} on niiskem`,
+            summary: `${dateLabel} tuleb ${formatTemperature(day.temperatureMin)} kuni ${formatTemperature(day.temperatureMax)} ja vihm võib päeva jooksul mitu korda üle käia.`
+        };
+    }
+
+    if (weatherMeta.key === "snow") {
+        return {
+            dateKey: day.dateKey,
+            title: index === 0 ? "Lumi hoiab päeva teravana" : `${dateLabel} jääb talviseks`,
+            summary: `${dateLabel} püsib jahedam ning libeduse või lörtsi võimalus väärib natuke rohkem varuaega.`
+        };
+    }
+
+    if (weatherMeta.key === "storm") {
+        return {
+            dateKey: day.dateKey,
+            title: index === 0 ? "Päev tahab varuplaani" : `${dateLabel} on ärevam`,
+            summary: `${dateLabel} võib tuua hoogsama saju või äikese, seega tasub väljas liikumisel jätta plaani paindlikkust.`
+        };
+    }
+
+    if (weatherMeta.key === "fog") {
+        return {
+            dateKey: day.dateKey,
+            title: index === 0 ? "Hommik algab pehmelt" : `${dateLabel} jääb uduselt rahulik`,
+            summary: `${dateLabel} on nähtavus kohati kehvem, aga tempo püsib rahulikum ja õhk pigem vaikne.`
+        };
+    }
+
+    if (weatherMeta.key === "clear" || weatherMeta.key === "partly-cloudy") {
+        return {
+            dateKey: day.dateKey,
+            title: index === 0 ? "Parim aken on väljas" : `${dateLabel} jääb helgem`,
+            summary: `${dateLabel} liigub ${formatTemperature(day.temperatureMin)} kuni ${formatTemperature(day.temperatureMax)} ning kuivema ilmaga osa päevast on lihtsam kätte saada.`
+        };
+    }
+
+    return {
+        dateKey: day.dateKey,
+        title: weatherMeta.title,
+        summary: `${dateLabel} tuleb ${windLine} ja ${precipitationChance > 35 ? "veidi niiskema" : "rahulikuma"} tooniga, päikest jagub umbes ${Math.max(1, sunshineHours)} tunniks.`
+    };
+}
+
+function buildWeatherFallbackPlanningTips(snapshot) {
+    const tips = [];
+    const today = snapshot.daily[0] || snapshot.daily[1];
+
+    if (!today) {
+        return [
+            "Kontrolli enne väljumist värskeimat prognoosi.",
+            "Riietu kihiti, et päev püsiks mugav.",
+            "Hoia väike varuplaan käepärast."
+        ];
+    }
+
+    if (today.precipitationProbabilityMax >= 45 || today.precipitationSum >= 1) {
+        tips.push("Võta kaasa vihmakindel kiht.");
+    }
+
+    if (today.windGustsMax >= 45 || snapshot.current.windGusts >= 45) {
+        tips.push("Tuul on tuntav, pane kapuuts valmis.");
+    }
+
+    if ((today.temperatureMax - today.temperatureMin) >= 7) {
+        tips.push("Riietu kihiti, hommik ja päev erinevad.");
+    }
+
+    if (today.sunshineDuration >= 5 * 3600 && today.precipitationProbabilityMax < 25) {
+        tips.push("Pikem väljasolek tasub sättida päeva keskossa.");
+    }
+
+    if (snapshot.current.relativeHumidity >= 88 || today.conditionKey === "fog") {
+        tips.push("Hommikul arvesta niiskema ja jahedama õhuga.");
+    }
+
+    if (today.conditionKey === "snow") {
+        tips.push("Jäta liikumiseks veidi rohkem aega.");
+    }
+
+    while (tips.length < 3) {
+        tips.push([
+            "Hoia päeva plaanis natuke paindlikkust.",
+            "Väljumisel vaata üle jalanõud ja pealiskiht.",
+            "Lühike ilmapaus muudab õues olemise lihtsamaks."
+        ][tips.length]);
+    }
+
+    return tips.slice(0, 3);
+}
+
+function buildWeatherFallbackScenePrompt(snapshot) {
+    const currentWeatherMeta = getWeatherCodeMeta(snapshot.current.weatherCode, snapshot.current.isDay);
+    const environment = pickWeatherSceneEnvironment(snapshot);
+    const timeDescriptor = snapshot.current.isDay
+        ? "captured during the actual daytime light of today"
+        : "captured during blue hour or evening light matching the current day";
+
+    return [
+        "Create a world-class realistic photograph for a weather app background.",
+        `Setting: ${getWeatherSeasonDescriptor(snapshot.dateKey)}.`,
+        `Location mood: ${environment}.`,
+        `Weather feeling: around ${Math.round(snapshot.current.temperature)} degrees Celsius, ${currentWeatherMeta.key.replaceAll("-", " ")} conditions, ${timeDescriptor}.`,
+        "Photography direction: premium editorial travel photography, natural documentary realism, full-bleed landscape frame, atmospheric depth, beautiful real light, crisp detail, tasteful color, no illustration look.",
+        "Composition: one coherent real environment only, photographed as if an outstanding photographer caught the perfect weather moment of the day. Keep enough clean visual space for overlay UI.",
+        "Constraints: no text, no logos, no watermark, no user interface, no collage, no surreal effects, no fake HDR, no large close-up people, no posed portrait."
+    ].join(" ");
+}
+
+function buildWeatherFallbackNarrative(snapshot) {
+    const currentWeatherMeta = getWeatherCodeMeta(snapshot.current.weatherCode, snapshot.current.isDay);
+    const today = snapshot.daily[0] || snapshot.daily[1];
+    const tomorrow = snapshot.daily[1] || today;
+    const todayNote = today ? buildWeatherFallbackDayNote(today, 0) : { title: "Ilm laeb", summary: "Prognoos vajab korraks veel värskendust." };
+    const tomorrowNote = tomorrow ? buildWeatherFallbackDayNote(tomorrow, 1) : todayNote;
+
+    return {
+        summaryLine: `${capitalizeFirst(currentWeatherMeta.stripLabel)} ${formatTemperature(snapshot.current.temperature)}. Täna ${formatTemperature(today?.temperatureMax || snapshot.current.temperature)} / ${formatTemperature(today?.temperatureMin || snapshot.current.temperature)}.`,
+        todayTitle: todayNote.title,
+        todaySummary: today
+            ? `Praegu on ${currentWeatherMeta.stripLabel} ilm ja päev liigub ${formatTemperature(today.temperatureMin)} kuni ${formatTemperature(today.temperatureMax)} vahemikus.`
+            : "Tänane ilmapilt on olemas, aga vajab veel ühe hetke värskendust.",
+        todayDetails: today
+            ? `Sademete võimalus küünib umbes ${Math.round(today.precipitationProbabilityMax)} protsendini ja tuul püsib ${pickWeatherWindLabel(today.windSpeedMax)} tooniga.`
+            : "Hoia hetkeplaan pigem paindlik.",
+        tomorrowTitle: tomorrowNote.title,
+        tomorrowSummary: tomorrow
+            ? `Homme jääb toon ${getWeatherCodeMeta(tomorrow.weatherCode, true).stripLabel} ning temperatuur liigub ${formatTemperature(tomorrow.temperatureMin)} kuni ${formatTemperature(tomorrow.temperatureMax)} vahel.`
+            : "Homme kordab suuresti tänast üldpilti.",
+        tomorrowDetails: tomorrow
+            ? `Kui otsid rahulikumat akent väljas käimiseks, siis tasub hoida silm peal sademetel ja tuulel, mis võivad päeva jooksul veidi kõikuda.`
+            : "Homme piisab kihilisest riietusest ja väikesest varuplaanist.",
+        planningTips: buildWeatherFallbackPlanningTips(snapshot),
+        dayNotes: snapshot.daily.slice(0, WEATHER_FORECAST_DAYS).map(function (day, index) {
+            return buildWeatherFallbackDayNote(day, index);
+        }),
+        scenePrompt: buildWeatherFallbackScenePrompt(snapshot)
+    };
+}
+
+function buildWeatherSignature(snapshot) {
+    return [
+        snapshot.dateKey,
+        snapshot.current.weatherCode,
+        snapshot.current.isDay ? "day" : "night",
+        Math.round(snapshot.current.temperature),
+        ...snapshot.daily.map(function (day) {
+            return [
+                day.weatherCode,
+                Math.round(day.temperatureMax),
+                Math.round(day.temperatureMin),
+                Math.round(day.precipitationProbabilityMax / 10)
+            ].join("-");
+        })
+    ].join(":");
+}
+
+function normalizeWeatherDayNotes(dayNotes, fallbackDayNotes) {
+    const normalizedNotes = Array.isArray(dayNotes) ? dayNotes : [];
+
+    return fallbackDayNotes.map(function (fallbackNote, index) {
+        const matchingNote = normalizedNotes.find(function (note) {
+            return note?.dateKey === fallbackNote.dateKey;
+        }) || normalizedNotes[index] || {};
+
+        return {
+            dateKey: normalizeField(matchingNote.dateKey, fallbackNote.dateKey, 20),
+            title: normalizeField(matchingNote.title, fallbackNote.title, 64),
+            summary: normalizeField(matchingNote.summary, fallbackNote.summary, 170)
+        };
+    });
+}
+
+function normalizeDailyWeatherPayload(snapshot, payload, locationKey, signature, publishedAt = new Date().toISOString()) {
+    const fallbackNarrative = buildWeatherFallbackNarrative(snapshot);
+    const scenePrompt = normalizeField(payload?.scenePrompt, fallbackNarrative.scenePrompt, 420);
+    const sceneKey = buildWeatherSceneKey(snapshot.dateKey, scenePrompt);
+
+    return {
+        id: `${snapshot.dateKey}:${locationKey}`,
+        locationKey,
+        signature,
+        dateKey: snapshot.dateKey,
+        styleVersion: DAILY_WEATHER_STYLE_VERSION,
+        publishedAt,
+        summaryLine: normalizeField(payload?.summaryLine, fallbackNarrative.summaryLine, 140),
+        todayTitle: normalizeField(payload?.todayTitle, fallbackNarrative.todayTitle, 64),
+        todaySummary: normalizeField(payload?.todaySummary, fallbackNarrative.todaySummary, 230),
+        todayDetails: normalizeField(payload?.todayDetails, fallbackNarrative.todayDetails, 230),
+        tomorrowTitle: normalizeField(payload?.tomorrowTitle, fallbackNarrative.tomorrowTitle, 64),
+        tomorrowSummary: normalizeField(payload?.tomorrowSummary, fallbackNarrative.tomorrowSummary, 230),
+        tomorrowDetails: normalizeField(payload?.tomorrowDetails, fallbackNarrative.tomorrowDetails, 230),
+        planningTips: normalizeTextList(payload?.planningTips, fallbackNarrative.planningTips, 3, 88),
+        dayNotes: normalizeWeatherDayNotes(payload?.dayNotes, fallbackNarrative.dayNotes),
+        scenePrompt,
+        sceneKey
+    };
+}
+
+function normalizeStoredDailyWeatherEntry(record) {
+    if (!record || typeof record !== "object") {
+        return null;
+    }
+
+    if ((record.styleVersion ?? 0) !== DAILY_WEATHER_STYLE_VERSION) {
+        return null;
+    }
+
+    const scenePrompt = normalizeField(record.scenePrompt, "", 420);
+    const dateKey = normalizeField(record.dateKey, getLocalDateKey(), 20);
+    const dayNotes = (Array.isArray(record.dayNotes) ? record.dayNotes : [])
+        .map(function (note) {
+            return {
+                dateKey: normalizeField(note?.dateKey, "", 20),
+                title: normalizeField(note?.title, "", 64),
+                summary: normalizeField(note?.summary, "", 170)
+            };
+        })
+        .filter(function (note) {
+            return note.dateKey && note.title && note.summary;
+        })
+        .slice(0, WEATHER_FORECAST_DAYS);
+
+    if (!scenePrompt || dayNotes.length !== WEATHER_FORECAST_DAYS) {
+        return null;
+    }
+
+    return {
+        id: normalizeField(record.id, `${dateKey}:${record.locationKey || "weather"}`, 96),
+        locationKey: normalizeField(record.locationKey, "", 32),
+        signature: normalizeField(record.signature, "", 220),
+        dateKey,
+        styleVersion: DAILY_WEATHER_STYLE_VERSION,
+        publishedAt: new Date(parseTimestamp(record.publishedAt || record.published_at) || Date.now()).toISOString(),
+        summaryLine: normalizeField(record.summaryLine, "", 140),
+        todayTitle: normalizeField(record.todayTitle, "", 64),
+        todaySummary: normalizeField(record.todaySummary, "", 230),
+        todayDetails: normalizeField(record.todayDetails, "", 230),
+        tomorrowTitle: normalizeField(record.tomorrowTitle, "", 64),
+        tomorrowSummary: normalizeField(record.tomorrowSummary, "", 230),
+        tomorrowDetails: normalizeField(record.tomorrowDetails, "", 230),
+        planningTips: normalizeTextList(record.planningTips, [
+            "Hoia päeva plaanis natuke paindlikkust.",
+            "Riietu kihiti, et püsida mugav.",
+            "Lühike ilmapaus teeb väljas olemise lihtsamaks."
+        ], 3, 88),
+        dayNotes,
+        scenePrompt,
+        sceneKey: normalizeField(record.sceneKey, buildWeatherSceneKey(dateKey, scenePrompt), 120)
+    };
+}
+
+async function loadDailyWeatherEntries() {
+    if (dailyWeatherLoaded) {
+        return dailyWeatherEntries;
+    }
+
+    try {
+        const raw = await readFile(dailyWeatherCachePath, "utf8");
+        const payload = JSON.parse(raw);
+
+        dailyWeatherEntries = Array.isArray(payload?.entries)
+            ? payload.entries.map(normalizeStoredDailyWeatherEntry).filter(Boolean)
+            : [];
+    } catch (error) {
+        if (error?.code !== "ENOENT") {
+            console.error("Failed to load daily weather entries.", error);
+        }
+
+        dailyWeatherEntries = [];
+    }
+
+    dailyWeatherEntries = dailyWeatherEntries
+        .slice()
+        .sort(function (firstEntry, secondEntry) {
+            return parseTimestamp(secondEntry.publishedAt) - parseTimestamp(firstEntry.publishedAt);
+        })
+        .slice(0, DAILY_WEATHER_CACHE_LIMIT);
+    dailyWeatherLoaded = true;
+
+    return dailyWeatherEntries;
+}
+
+async function saveDailyWeatherEntries() {
+    await mkdir(path.dirname(dailyWeatherCachePath), { recursive: true });
+    await writeFile(
+        dailyWeatherCachePath,
+        JSON.stringify({ entries: dailyWeatherEntries.slice(0, DAILY_WEATHER_CACHE_LIMIT) }, null, 2),
+        "utf8"
+    );
+}
+
+async function requestDailyWeatherFromModel(model, snapshot, locationKey, signature) {
+    const aiResponse = await client.responses.create({
+        model,
+        max_output_tokens: 1300,
+        reasoning: {
+            effort: "low"
+        },
+        instructions: [
+            "Sa kirjutad eestikeelse ilmavaate elegantsele, lihtsale ja kaasaegsele rakendusele.",
+            "Toon peab olema puhas, konkreetne, usaldusväärne ja meeldiv, nagu hea Eesti ilmarubriigi toimetatud tekst.",
+            "Kirjuta tavakasutajale arusaadavalt. Väldi üledramatiseerimist, reklaamkeelt, klišeesid ja liigset poeetikat.",
+            "summaryLine läheb kitsale ilmaribale. See peab olema üks lühike lause, maksimaalselt umbes 14 sõna.",
+            "todayTitle ja tomorrowTitle peavad olema lühikesed pealkirjad, mitte täislõigud.",
+            "todaySummary ja tomorrowSummary peavad olema kompaktsed, umbes 1 kuni 2 lauset.",
+            "todayDetails ja tomorrowDetails peavad andma veidi praktilisemat tunnetust päeva rütmist, aga jääma lühikeseks.",
+            "planningTips peab sisaldama täpselt 3 lühikest praktilist rida, igaüks kuni umbes 8 sõna.",
+            "dayNotes peab sisaldama täpselt 5 kirjet samas järjekorras nagu prognoosis antud dateKey väärtused.",
+            "Iga dayNotes kirje title peab olema lühike, summary üks kompaktne lause.",
+            "Ära maini AI-d, mudelit, JSON-i, prompti ega töövoogu.",
+            "scenePrompt peab olema ingliskeelne pildigeneratsiooni prompt päris maailma fotograafilise stseeni jaoks, mitte abstraktse tausta jaoks.",
+            "scenePrompt peab valima ühe konkreetse reaalse keskkonna, mis sobib tänase ilmaga: näiteks tänav, rand, sadam, park, metsarada, järveäär või muu usutav päris koht.",
+            "scenePrompt peab kirjeldama tulemust nii, nagu suurepärane fotograaf oleks saanud täna ilmast perfektse tabamuse: natural light, editorial travel photography, photorealistic, elegant, atmospheric, real environment.",
+            "scenePrompt peab ütlema, et pildil ei tohi olla teksti, logosid, UI elemente, vesimärke, kollaaži, illustratiivset tunnet ega suuri lähikaadreid inimestest.",
+            "Tagasta ainult puhas JSON."
+        ].join(" "),
+        input: [
+            `Kuupäev: ${snapshot.dateKey}`,
+            `Asukoha silt kasutajaliideses: ${snapshot.location.label}`,
+            "Praegune ilm:",
+            JSON.stringify({
+                time: snapshot.current.time,
+                condition: snapshot.current.conditionLabel,
+                temperature: snapshot.current.temperature,
+                apparentTemperature: snapshot.current.apparentTemperature,
+                humidity: snapshot.current.relativeHumidity,
+                precipitation: snapshot.current.precipitation,
+                windSpeed: snapshot.current.windSpeed,
+                windGusts: snapshot.current.windGusts,
+                cloudCover: snapshot.current.cloudCover,
+                isDay: snapshot.current.isDay
+            }, null, 2),
+            "Viie päeva prognoos:",
+            JSON.stringify(snapshot.daily.map(function (day) {
+                return {
+                    dateKey: day.dateKey,
+                    condition: day.conditionLabel,
+                    temperatureMax: day.temperatureMax,
+                    temperatureMin: day.temperatureMin,
+                    precipitationProbabilityMax: day.precipitationProbabilityMax,
+                    precipitationSum: day.precipitationSum,
+                    windSpeedMax: day.windSpeedMax,
+                    windGustsMax: day.windGustsMax,
+                    sunshineDurationHours: Number((day.sunshineDuration / 3600).toFixed(1))
+                };
+            }), null, 2),
+            "Tänase tunnipõhise rütmi väljavõte:",
+            JSON.stringify(snapshot.timelines.today.map(function (entry) {
+                return {
+                    time: entry.time,
+                    condition: entry.conditionLabel,
+                    temperature: entry.temperature,
+                    precipitationProbability: entry.precipitationProbability,
+                    windSpeed: entry.windSpeed
+                };
+            }), null, 2),
+            "Homme tunnipõhise rütmi väljavõte:",
+            JSON.stringify(snapshot.timelines.tomorrow.map(function (entry) {
+                return {
+                    time: entry.time,
+                    condition: entry.conditionLabel,
+                    temperature: entry.temperature,
+                    precipitationProbability: entry.precipitationProbability,
+                    windSpeed: entry.windSpeed
+                };
+            }), null, 2),
+            `Päeva signatuur: ${signature}`
+        ].join("\n"),
+        text: {
+            verbosity: "low",
+            format: {
+                type: "json_schema",
+                name: "daily_weather_view",
+                strict: true,
+                schema: DAILY_WEATHER_JSON_SCHEMA
+            }
+        }
+    });
+
+    if (aiResponse.status && aiResponse.status !== "completed") {
+        const reason = aiResponse.incomplete_details?.reason || aiResponse.status;
+        throw new Error(`Daily weather response incomplete: ${reason}`);
+    }
+
+    const payload = extractJsonObject(aiResponse.output_text);
+    return normalizeDailyWeatherPayload(snapshot, payload, locationKey, signature);
+}
+
+async function generateDailyWeatherEntry(snapshot, locationKey, signature) {
+    const fallbackEntry = normalizeDailyWeatherPayload(snapshot, null, locationKey, signature);
+
+    if (!client) {
+        return fallbackEntry;
+    }
+
+    const candidateModels = [...new Set([weatherModel, openAiModel, "gpt-4.1"])];
+    let lastError = null;
+
+    for (const model of candidateModels) {
+        try {
+            return await requestDailyWeatherFromModel(model, snapshot, locationKey, signature);
+        } catch (error) {
+            lastError = error;
+            console.error(`Failed to generate daily weather copy with model ${model}.`, error);
+        }
+    }
+
+    console.error("Failed to generate daily weather copy.", lastError);
+    return fallbackEntry;
+}
+
+async function ensureDailyWeatherEntry(snapshot) {
+    await loadDailyWeatherEntries();
+
+    const locationKey = getWeatherLocationKey(snapshot.location.latitude, snapshot.location.longitude);
+    const signature = buildWeatherSignature(snapshot);
+    const existingEntry = dailyWeatherEntries.find(function (entry) {
+        return entry.locationKey === locationKey && entry.signature === signature && entry.dateKey === snapshot.dateKey;
+    });
+
+    if (existingEntry) {
+        return existingEntry;
+    }
+
+    const generationKey = `${locationKey}:${signature}`;
+
+    if (!dailyWeatherGenerationPromises.has(generationKey)) {
+        dailyWeatherGenerationPromises.set(generationKey, (async function () {
+            const entry = await generateDailyWeatherEntry(snapshot, locationKey, signature);
+
+            dailyWeatherEntries = [
+                entry,
+                ...dailyWeatherEntries.filter(function (existing) {
+                    return !(existing.locationKey === locationKey && existing.dateKey === snapshot.dateKey);
+                })
+            ].slice(0, DAILY_WEATHER_CACHE_LIMIT);
+
+            dailyWeatherWritePromise = dailyWeatherWritePromise.then(saveDailyWeatherEntries);
+            await dailyWeatherWritePromise;
+            return entry;
+        }()).finally(function () {
+            dailyWeatherGenerationPromises.delete(generationKey);
+        }));
+    }
+
+    return dailyWeatherGenerationPromises.get(generationKey);
+}
+
+async function ensureWeatherSceneForEntry(entry) {
+    if (!entry?.sceneKey || !entry?.scenePrompt) {
+        return null;
+    }
+
+    const sceneFilePath = getWeatherSceneFilePath(entry.sceneKey);
+
+    if (await doesFileExist(sceneFilePath)) {
+        return sceneFilePath;
+    }
+
+    if (!client) {
+        return null;
+    }
+
+    if (!weatherSceneGenerationPromises.has(entry.sceneKey)) {
+        weatherSceneGenerationPromises.set(entry.sceneKey, (async function () {
+            await mkdir(generatedWeatherSceneDir, { recursive: true });
+
+            const imageResponse = await client.images.generate({
+                model: imageModel,
+                prompt: entry.scenePrompt,
+                size: "1536x1024",
+                quality: "high",
+                output_format: "jpeg",
+                output_compression: 82
+            });
+
+            const imageData = imageResponse?.data?.[0]?.b64_json;
+
+            if (!imageData) {
+                throw new Error("Weather scene image response did not contain image data.");
+            }
+
+            await writeFile(sceneFilePath, Buffer.from(imageData, "base64"));
+            return sceneFilePath;
+        }()).finally(function () {
+            weatherSceneGenerationPromises.delete(entry.sceneKey);
+        }));
+    }
+
+    return weatherSceneGenerationPromises.get(entry.sceneKey);
+}
+
+function buildWeatherResponsePayload(snapshot, entry) {
+    const dayNotesByDate = new Map((Array.isArray(entry?.dayNotes) ? entry.dayNotes : []).map(function (note) {
+        return [note.dateKey, note];
+    }));
+    const forecastDays = snapshot.daily.slice(0, WEATHER_FORECAST_DAYS).map(function (day, index) {
+        const note = dayNotesByDate.get(day.dateKey) || buildWeatherFallbackDayNote(day, index);
+
+        return {
+            ...day,
+            label: formatWeatherDayLabel(index),
+            noteTitle: note.title,
+            noteSummary: note.summary
+        };
+    });
+    const todayForecast = forecastDays[0] || null;
+    const tomorrowForecast = forecastDays[1] || forecastDays[0] || null;
+
+    return {
+        date: snapshot.dateKey,
+        location: snapshot.location,
+        summaryLine: entry?.summaryLine || buildWeatherFallbackNarrative(snapshot).summaryLine,
+        current: snapshot.current,
+        today: {
+            ...(todayForecast || {}),
+            title: entry?.todayTitle || "",
+            summary: entry?.todaySummary || "",
+            details: entry?.todayDetails || ""
+        },
+        tomorrow: {
+            ...(tomorrowForecast || {}),
+            title: entry?.tomorrowTitle || "",
+            summary: entry?.tomorrowSummary || "",
+            details: entry?.tomorrowDetails || ""
+        },
+        forecast: forecastDays,
+        timelines: snapshot.timelines,
+        planningTips: Array.isArray(entry?.planningTips) ? entry.planningTips : buildWeatherFallbackPlanningTips(snapshot),
+        backgroundImageUrl: entry?.sceneKey ? `/api/weather-scene/${entry.sceneKey}.jpg` : "",
+        publishedAt: entry?.publishedAt || new Date().toISOString(),
+        attribution: {
+            forecast: "Open-Meteo",
+            editorial: client ? "OpenAI" : "Sisseehitatud varutekst"
+        }
+    };
+}
+
+function isPlaceholderWeatherLocationLabel(label) {
+    const normalizedLabel = normalizeField(label, "", 64).toLocaleLowerCase("et-EE");
+    return !normalizedLabel || WEATHER_LOCATION_PLACEHOLDERS.has(normalizedLabel);
+}
+
+function getWeatherLocationLabelCacheKey(latitude, longitude) {
+    return `${roundWeatherCoordinate(latitude, WEATHER_DEFAULT_LOCATION.latitude).toFixed(3)}:${roundWeatherCoordinate(longitude, WEATHER_DEFAULT_LOCATION.longitude).toFixed(3)}`;
+}
+
+function pickWeatherLocationLabelFromReverseGeocode(payload, fallbackLabel) {
+    const address = payload?.address && typeof payload.address === "object" ? payload.address : {};
+    const candidate = [
+        address.city,
+        address.town,
+        address.village,
+        address.municipality,
+        address.city_district,
+        address.suburb,
+        payload?.name,
+        address.county
+    ].find(function (value) {
+        return normalizeField(value, "", 64);
+    });
+
+    return normalizeField(candidate, fallbackLabel, 48);
+}
+
+async function resolveWeatherLocationLabel(requestedLocation) {
+    const fallbackLabel = normalizeField(requestedLocation?.label, WEATHER_DEFAULT_LOCATION.label, 48);
+
+    if (!isPlaceholderWeatherLocationLabel(fallbackLabel)) {
+        return fallbackLabel;
+    }
+
+    const latitude = roundWeatherCoordinate(requestedLocation?.latitude, WEATHER_DEFAULT_LOCATION.latitude);
+    const longitude = roundWeatherCoordinate(requestedLocation?.longitude, WEATHER_DEFAULT_LOCATION.longitude);
+    const cacheKey = getWeatherLocationLabelCacheKey(latitude, longitude);
+
+    if (weatherLocationLabelCache.has(cacheKey)) {
+        return weatherLocationLabelCache.get(cacheKey);
+    }
+
+    try {
+        const requestUrl = new URL(WEATHER_REVERSE_GEOCODE_URL);
+
+        requestUrl.searchParams.set("format", "jsonv2");
+        requestUrl.searchParams.set("lat", String(latitude));
+        requestUrl.searchParams.set("lon", String(longitude));
+        requestUrl.searchParams.set("accept-language", "et");
+        requestUrl.searchParams.set("zoom", "10");
+
+        const response = await fetch(requestUrl, {
+            headers: {
+                Accept: "application/json",
+                "User-Agent": "probleemilahendaja-weather/1.0"
+            }
+        });
+
+        if (!response.ok) {
+            throw new Error(`Reverse geocode request failed with ${response.status}.`);
+        }
+
+        const payload = await response.json();
+        const resolvedLabel = pickWeatherLocationLabelFromReverseGeocode(payload, fallbackLabel);
+
+        weatherLocationLabelCache.set(cacheKey, resolvedLabel);
+        return resolvedLabel;
+    } catch (error) {
+        console.error("Failed to resolve weather location label.", error);
+        return fallbackLabel;
+    }
+}
+
+function parseWeatherLocationQuery(query) {
+    const latitude = roundWeatherCoordinate(query?.lat, WEATHER_DEFAULT_LOCATION.latitude);
+    const longitude = roundWeatherCoordinate(query?.lon, WEATHER_DEFAULT_LOCATION.longitude);
+    const label = normalizeField(query?.label, WEATHER_DEFAULT_LOCATION.label, 48);
+
+    return {
+        latitude,
+        longitude,
+        label
+    };
 }
 
 function buildFallbackDailyArticle(dateKey) {
@@ -2289,6 +3543,91 @@ app.get("/api/daily-horoscope", async function (_request, response) {
         console.error("Failed to prepare daily horoscope.", error);
         response.status(500).json({
             error: "Päeva horoskoobi laadimine ebaõnnestus."
+        });
+    }
+});
+
+app.get("/api/weather", async function (request, response) {
+    const requestedLocation = parseWeatherLocationQuery(request.query);
+
+    try {
+        const location = {
+            ...requestedLocation,
+            label: await resolveWeatherLocationLabel(requestedLocation)
+        };
+        const forecastSnapshot = await fetchWeatherForecastSnapshot(location);
+        const weatherEntry = await ensureDailyWeatherEntry(forecastSnapshot);
+
+        ensureWeatherSceneForEntry(weatherEntry).catch(function (error) {
+            console.error("Failed to pre-generate weather scene.", error);
+        });
+
+        response.json(buildWeatherResponsePayload(forecastSnapshot, weatherEntry));
+    } catch (error) {
+        console.error("Failed to prepare daily weather.", error);
+        response.status(500).json({
+            error: "Ilma laadimine ebaõnnestus."
+        });
+    }
+});
+
+app.get("/api/weather-scene/:sceneFile", async function (request, response) {
+    const sceneFile = sanitizeProblemText(request.params.sceneFile).replace(/[^a-z0-9_.-]/giu, "");
+    const sceneKey = sceneFile.replace(/\.(?:jpe?g|png|webp)$/iu, "");
+
+    if (!sceneKey) {
+        response.status(400).json({
+            error: "Ilmapildi võti puudub."
+        });
+        return;
+    }
+
+    try {
+        await loadDailyWeatherEntries();
+
+        const matchingEntry = dailyWeatherEntries.find(function (entry) {
+            return entry.sceneKey === sceneKey;
+        });
+
+        if (!matchingEntry) {
+            response.status(404).json({
+                error: "Ilmapilti ei leitud."
+            });
+            return;
+        }
+
+        const filePath = await ensureWeatherSceneForEntry(matchingEntry);
+
+        if (!filePath) {
+            response.setHeader("Cache-Control", "public, max-age=3600");
+            response.type("image/svg+xml").send(buildWeatherSceneFallbackSvg(matchingEntry));
+            return;
+        }
+
+        if (!(await doesFileExist(filePath))) {
+            response.setHeader("Cache-Control", "public, max-age=3600");
+            response.type("image/svg+xml").send(buildWeatherSceneFallbackSvg(matchingEntry));
+            return;
+        }
+
+        const fileBuffer = await readFile(filePath);
+
+        response.setHeader("Cache-Control", "public, max-age=86400");
+        response.type("image/jpeg").send(fileBuffer);
+    } catch (error) {
+        console.error("Failed to serve weather scene.", error);
+        const cachedEntry = dailyWeatherEntries.find(function (entry) {
+            return entry.sceneKey === sceneKey;
+        });
+
+        if (cachedEntry) {
+            response.setHeader("Cache-Control", "public, max-age=3600");
+            response.type("image/svg+xml").send(buildWeatherSceneFallbackSvg(cachedEntry));
+            return;
+        }
+
+        response.status(500).json({
+            error: "Ilmapildi laadimine ebaõnnestus."
         });
     }
 });
