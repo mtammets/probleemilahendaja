@@ -127,6 +127,8 @@ const resetButton = document.getElementById("resetButton");
 const reportBackButton = document.getElementById("reportBackButton");
 const reportResetButton = document.getElementById("reportResetButton");
 const solvedCount = document.getElementById("solvedCount");
+const coverIssueDate = document.getElementById("coverIssueDate");
+const coverIssueNumber = document.getElementById("coverIssueNumber");
 const newsletterSection = document.getElementById("newsletter");
 const newsletterForm = document.getElementById("newsletterForm");
 const newsletterEmail = document.getElementById("newsletterEmail");
@@ -284,6 +286,28 @@ const weatherTimeFormatter = new Intl.DateTimeFormat("et-EE", {
     hour: "2-digit",
     minute: "2-digit"
 });
+
+function getISOWeekNumber(date) {
+    const normalizedDate = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+    const weekday = normalizedDate.getUTCDay() || 7;
+
+    normalizedDate.setUTCDate(normalizedDate.getUTCDate() + 4 - weekday);
+
+    const yearStart = new Date(Date.UTC(normalizedDate.getUTCFullYear(), 0, 1));
+    return Math.ceil((((normalizedDate - yearStart) / 86400000) + 1) / 7);
+}
+
+function initializeCoverIssueMeta() {
+    const today = new Date();
+
+    if (coverIssueDate) {
+        coverIssueDate.textContent = articleDateFormatter.format(today);
+    }
+
+    if (coverIssueNumber) {
+        coverIssueNumber.textContent = "Nr " + numberFormatter.format(getISOWeekNumber(today));
+    }
+}
 
 const HOROSCOPE_SIGNS = [
     { id: "aries", label: "Jäär", symbol: "\u2648", accent: "#ff8c73", accentSoft: "rgba(255, 140, 115, 0.22)" },
@@ -3852,7 +3876,7 @@ function renderDailyPersonaStories() {
     const imageAssignments = getPersonaStoryImageAssignments(dailyPersonaStories);
     const listFragment = document.createDocumentFragment();
 
-    renderFeaturedPersonaStory(selectedStory, imageAssignments.get(selectedStory?.id || ""));
+    renderFeaturedPersonaStory(selectedStory, imageAssignments.get(selectedStory?.id || "") || null);
 
     if (dailyPersonaStories.length === 0) {
         const emptyItem = document.createElement("div");
@@ -4522,6 +4546,7 @@ ratingButtons.forEach(function (button) {
 
 setLoadingProgress(0);
 resetRating();
+initializeCoverIssueMeta();
 initializeDailyWeather();
 initializeRecentProblems();
 initializeDailyArticles();

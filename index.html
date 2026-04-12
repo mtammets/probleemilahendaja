@@ -19,17 +19,28 @@
             <div class="panel__frame">
                 <div class="intake-shell">
                     <header class="intake-hero">
+                        <div class="intake-folio" aria-label="Ajakirja kuupäev ja number">
+                            <span id="coverIssueDate" class="intake-folio__date"></span>
+                            <span id="coverIssueNumber" class="intake-folio__issue"></span>
+                        </div>
                         <div class="brand-lockup">
                             <div class="brand-lockup__copy">
+                                <span class="brand-kicker">Eesti digiajakiri</span>
                                 <h1 class="brand-wordmark brand-wordmark--hero" aria-label="Probleemilahendaja">
-                                    <span class="brand-wordmark__name">Probleemilahendaja</span>
+                                    <span class="brand-wordmark__name">
+                                        <span class="brand-wordmark__line">Probleemi</span>
+                                        <span class="brand-wordmark__line brand-wordmark__line--accent">lahendaja</span>
+                                    </span>
                                 </h1>
-                                <p class="tagline">Kui probleem vajab lahendamist</p>
+                                <div class="intake-coverline">
+                                    <p class="intake-coverline__name">Helena Saar</p>
+                                </div>
                             </div>
                         </div>
                         <div class="counter-line" aria-label="Lahendatud probleemide ülevaade">
                             <span class="counter-line__label">Kokku lahendatud</span>
                             <strong id="solvedCount" class="counter-line__value">0</strong>
+                            <span class="counter-line__suffix">Probleemi</span>
                         </div>
                     </header>
                     <div class="intake-stage">
