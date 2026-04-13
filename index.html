@@ -20,36 +20,62 @@
         <section class="container panel">
             <div class="panel__frame">
                 <div class="intake-shell">
-                    <header class="intake-hero" id="coverStoryHero">
-                        <div class="intake-folio" aria-label="Ajakirja kuupäev ja number">
-                            <span id="coverIssueDate" class="intake-folio__date"></span>
-                            <span id="coverIssueNumber" class="intake-folio__issue"></span>
-                        </div>
-                        <div class="brand-lockup">
-                            <div class="brand-lockup__copy">
-                                <span class="brand-kicker">Eesti digiajakiri</span>
-                                <h1 class="brand-wordmark brand-wordmark--hero" aria-label="Probleemilahendaja">
-                                    <span class="brand-wordmark__name">
-                                        <span class="brand-wordmark__line">Probleemi</span>
-                                        <span class="brand-wordmark__line brand-wordmark__line--accent">lahendaja</span>
-                                    </span>
-                                </h1>
-                                <div class="intake-coverline">
-                                    <p id="coverStoryName" class="intake-coverline__name" hidden></p>
+                    <section class="intake-hero" id="coverStoryHero">
+                        <div class="intake-hero__cover" id="coverStoryHeroToggle" role="button" tabindex="-1" aria-expanded="false" aria-controls="coverStoryFeature" aria-disabled="true" aria-label="Ava kaanelugu">
+                            <div class="intake-folio" aria-label="Ajakirja kuupäev ja number">
+                                <span id="coverIssueDate" class="intake-folio__date"></span>
+                                <span id="coverIssueNumber" class="intake-folio__issue"></span>
+                            </div>
+                            <div class="brand-lockup">
+                                <div class="brand-lockup__copy">
+                                    <span class="brand-kicker">Eesti digiajakiri</span>
+                                    <h1 class="brand-wordmark brand-wordmark--hero" aria-label="Probleemilahendaja">
+                                        <span class="brand-wordmark__name">
+                                            <span class="brand-wordmark__line">Probleemi</span>
+                                            <span class="brand-wordmark__line brand-wordmark__line--accent">lahendaja</span>
+                                        </span>
+                                    </h1>
+                                    <div class="intake-coverline">
+                                        <p id="coverStoryName" class="intake-coverline__name" hidden></p>
+                                    </div>
                                 </div>
                             </div>
+                            <div class="counter-line" aria-label="Lahendatud probleemide ülevaade">
+                                <span class="counter-line__label">Kokku lahendatud</span>
+                                <strong id="solvedCount" class="counter-line__value">0</strong>
+                                <span class="counter-line__suffix">Probleemi</span>
+                            </div>
+                            <span id="coverStoryToggleHint" class="intake-hero__hint" hidden aria-hidden="true"></span>
                         </div>
-                        <div class="counter-line" aria-label="Lahendatud probleemide ülevaade">
-                            <span class="counter-line__label">Kokku lahendatud</span>
-                            <strong id="solvedCount" class="counter-line__value">0</strong>
-                            <span class="counter-line__suffix">Probleemi</span>
-                        </div>
-                    </header>
-                    <div class="intake-stage">
+                        <section id="coverStoryFeature" class="cover-feature" hidden aria-hidden="true" aria-labelledby="coverStoryFeatureTitle">
+                            <div class="cover-feature__inner">
+                                <article class="cover-feature__paper">
+                                    <div class="cover-feature__meta">
+                                        <span class="cover-feature__eyebrow">Kaane lugu</span>
+                                        <span id="coverStoryFeatureDate" class="cover-feature__date"></span>
+                                    </div>
+                                    <h2 id="coverStoryFeatureTitle" class="cover-feature__title"></h2>
+                                    <p id="coverStoryFeatureSummary" class="cover-feature__summary"></p>
+                                    <div class="cover-feature__story">
+                                        <p id="coverStoryFeatureLead" class="cover-feature__lead" hidden></p>
+                                        <blockquote id="coverStoryFeatureQuote" class="cover-feature__quote" hidden></blockquote>
+                                        <div id="coverStoryFeatureBody" class="cover-feature__body" hidden></div>
+                                    </div>
+                                    <div class="cover-feature__footer">
+                                        <span id="coverStoryFeatureSubject" class="cover-feature__subject"></span>
+                                        <span class="cover-feature__footer-separator" aria-hidden="true"></span>
+                                        <span class="cover-feature__footer-note">Päeva juhtlugu</span>
+                                    </div>
+                                </article>
+                            </div>
+                        </section>
+                    </section>
+                    <div class="intake-stage" data-solver-skin="gold">
                         <div class="intake-stage__frame">
-                            <textarea id="problemInput" placeholder="Kirjuta oma probleem siia..."></textarea>
+                            <textarea id="problemInput" rows="2" placeholder="Kirjuta oma probleem siia..."></textarea>
                             <p id="problemFeedback" class="intake-feedback" aria-live="polite" hidden></p>
                             <button id="solveButton">Lahenda probleem!</button>
+                            <div id="solverSkinDots" class="intake-stage__skin-dots" aria-hidden="true"></div>
                         </div>
                     </div>
                     <section class="weather-slot" aria-labelledby="weatherStripTitle">
@@ -70,7 +96,7 @@
                                 </div>
                                 <div class="weather-strip__secondary">
                                     <span id="weatherStripRange" class="weather-strip__range">--° / --°</span>
-                                    <span id="weatherStripMeta" class="weather-strip__meta">Ava detailne ilmavaade</span>
+                                    <span id="weatherStripMeta" class="weather-strip__meta"></span>
                                 </div>
                             </div>
                             <div id="weatherStripPeek" class="weather-strip__peek" aria-hidden="true"></div>
@@ -82,7 +108,7 @@
         <section id="loading" class="loading panel panel--status" style="display:none;" aria-live="polite">
             <div class="panel__frame panel__frame--status">
                 <div class="spinner"></div>
-                <p>Probleemi lahendamine...</p>
+                <p class="loading__title">Probleemi lahendamine...</p>
                 <div class="loading-progress" aria-hidden="true">
                     <div id="loadingProgressBar" class="loading-progress__bar"></div>
                 </div>
@@ -91,7 +117,17 @@
         </section>
         <section id="solution" class="solution panel panel--status" style="display:none;" aria-live="polite">
             <div class="panel__frame panel__frame--status">
-                <p>Probleem lahendatud!</p>
+                <div class="solution__ornament" aria-hidden="true">
+                    <span class="solution__badge">
+                        <span class="solution__badge-ring"></span>
+                        <span class="solution__badge-icon"></span>
+                    </span>
+                </div>
+                <div class="solution__copy">
+                    <span class="solution__eyebrow">Tehtud!</span>
+                    <h2 class="solution__title">Probleem lahendatud!</h2>
+                    <p id="solutionLead" class="solution__lead">Valmis mõne sekundiga.</p>
+                </div>
                 <div class="solution-actions">
                     <button id="reportButton">Vaata raportit</button>
                     <button id="resetButton" class="button--secondary">Lahenda veel probleeme</button>
@@ -102,9 +138,6 @@
             <div class="panel__frame report__frame">
                 <header class="report__hero">
                     <div class="report__hero-copy">
-                        <span class="brand-wordmark brand-wordmark--report" aria-hidden="true">
-                            <span class="brand-wordmark__name">Probleemilahendaja</span>
-                        </span>
                         <span class="report__eyebrow">Probleemi lahenduse raport</span>
                         <h2 id="reportTitle">Raport on valmis</h2>
                         <p id="reportLead" class="report__lead">
@@ -144,7 +177,7 @@
                             </span>
                             <div class="report-signal__body">
                                 <span class="report-signal__label">Teema</span>
-                                <strong id="reportTypeValue" class="report-signal__value">Üldine olukord</strong>
+                                <strong id="reportTypeValue" class="report-signal__value">Segateemad</strong>
                                 <p id="reportTypeMeta" class="report-signal__meta">
                                     See teema on nüüd rahunenud ning lõpptulemus mõjub kindlalt.
                                 </p>
@@ -248,13 +281,16 @@
         <section id="newsletter" class="newsletter panel" aria-labelledby="newsletterTitle">
             <div class="panel__frame newsletter__frame">
                 <div class="newsletter__copy">
-                    <span class="newsletter__eyebrow">Uudiskiri</span>
-                    <h2 id="newsletterTitle">Liitu uudiskirjaga ja võida probleemide vaba aasta!</h2>
-                    <p class="newsletter__note">Jäta oma e-post.</p>
+                    <span class="newsletter__eyebrow">Õhtune uudiskiri</span>
+                    <h2 id="newsletterTitle" class="newsletter__title">
+                        <span class="newsletter__title-line">Üks kiri nädalas.</span>
+                        <span class="newsletter__title-line newsletter__title-line--serif">Üks aasta kergemat elu.</span>
+                    </h2>
+                    <p class="newsletter__note">Liitu listiga ja osale loosis, kus üks lugeja võidab aasta probleemideta.</p>
                 </div>
                 <div class="newsletter__aside">
                     <div class="newsletter__prize" aria-hidden="true">
-                        <span class="newsletter__prize-label">Peaauhind</span>
+                        <span class="newsletter__prize-label">Loosis</span>
                         <strong class="newsletter__prize-value">1 aasta</strong>
                         <span class="newsletter__prize-meta">probleemideta</span>
                     </div>
@@ -276,48 +312,6 @@
                 </div>
             </div>
         </section>
-        <section id="recentProblems" class="recent-feed panel" aria-labelledby="recentProblemsTitle">
-            <div class="panel__frame recent-feed__frame">
-                <div class="recent-feed__header">
-                    <div class="recent-feed__copy">
-                        <span class="recent-feed__eyebrow">Probleemide arhiiv</span>
-                        <h2 id="recentProblemsTitle">Viimati lahendatud probleemid</h2>
-                        <p class="recent-feed__lead">
-                            Värske voog teemadest, mis said just korda ja enam ei kriibi.
-                        </p>
-                    </div>
-                </div>
-                <div id="recentProblemsList" class="recent-feed__grid" aria-live="polite"></div>
-                <div class="recent-feed__controls">
-                    <button id="recentProblemsMoreButton" class="button--ghost recent-feed__more" type="button" aria-controls="recentProblemsList" hidden>Vaata veel</button>
-                </div>
-            </div>
-        </section>
-        <section class="urgits-banner panel" aria-label="urgits.ee">
-            <a class="panel__frame urgits-banner__frame" href="https://urgits.ee" aria-label="Ava urgits.ee">
-                <div class="urgits-banner__content">
-                    <h2 class="urgits-banner__title">
-                        <span>ÄRA URGITSE</span>
-                        <span>SUVALISE</span>
-                        <span>KEPIGA</span>
-                    </h2>
-                    <span class="urgits-banner__cta">urgits.ee</span>
-                </div>
-            </a>
-        </section>
-        <section id="dailyArticles" class="science-feed panel" aria-label="Lorien Velmore artiklid">
-            <div class="panel__frame science-feed__frame">
-                <div class="science-feed__layout">
-                    <article id="scienceArticleFeatured" class="science-article" aria-live="polite"></article>
-                    <div class="science-feed__rail">
-                        <div id="scienceArticleList" class="science-feed__list" role="listbox" aria-label="Artiklid"></div>
-                        <div class="science-feed__controls">
-                            <button id="scienceArticleMoreButton" class="button--ghost science-feed__more" type="button" aria-controls="scienceArticleList" hidden>Veel lugusid</button>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </section>
         <section id="dailyPersonas" class="persona-feed panel" aria-label="Probleemilahendaja persoonilood">
             <div class="panel__frame persona-feed__frame">
                 <div class="persona-feed__layout">
@@ -328,6 +322,54 @@
                             <button id="personaStoryMoreButton" class="button--ghost persona-feed__more" type="button" aria-controls="personaStoryList" hidden>Veel lugusid</button>
                         </div>
                     </aside>
+                </div>
+            </div>
+        </section>
+        <section class="urgits-banner panel" aria-label="urgits.ee">
+            <a class="panel__frame urgits-banner__frame" href="https://urgits.ee" aria-label="Ava urgits.ee">
+                <div class="urgits-banner__media" aria-hidden="true">
+                    <span class="urgits-banner__image-layer urgits-banner__image-layer--primary is-active"></span>
+                    <span class="urgits-banner__image-layer urgits-banner__image-layer--secondary"></span>
+                </div>
+                <div class="urgits-banner__content">
+                    <span class="urgits-banner__eyebrow">urgits.ee</span>
+                    <h2 class="urgits-banner__title">
+                        <span class="urgits-banner__title-line">Ära urgitse suvalise kepiga</span>
+                    </h2>
+                    <p class="urgits-banner__lead">Lõkke, grilli ja ahju kõrvale.</p>
+                    <span class="urgits-banner__cta">Ava Urgits</span>
+                </div>
+            </a>
+        </section>
+        <section id="dailyHoroscope" class="horoscope-feed panel" aria-label="Päeva horoskoop">
+            <div class="panel__frame horoscope-feed__frame">
+                <div class="horoscope-feed__header">
+                    <div class="horoscope-feed__header-copy">
+                        <h2 class="horoscope-feed__title">
+                            <span class="horoscope-feed__title-kicker">Päeva</span>
+                            <span class="horoscope-feed__title-main">horoskoop</span>
+                        </h2>
+                    </div>
+                </div>
+                <div class="horoscope-feed__layout">
+                    <article id="horoscopeFeatured" class="horoscope-card" aria-live="polite"></article>
+                    <div class="horoscope-feed__rail">
+                        <div id="horoscopeSignGrid" class="horoscope-feed__signs" role="listbox" aria-label="Tähemärgid"></div>
+                    </div>
+                </div>
+            </div>
+        </section>
+        <section id="problemStats" class="problem-stats panel" aria-label="Murebaromeeter">
+            <div class="panel__frame problem-stats__frame">
+                <div class="problem-stats__header">
+                    <h2 class="problem-stats__title">
+                        <span class="problem-stats__title-kicker">Viimase 30 päeva surve</span>
+                        <span class="problem-stats__title-main">Murebaromeeter</span>
+                    </h2>
+                </div>
+                <p id="problemStatsLead" class="sr-only" aria-live="polite">Murebaromeeter.</p>
+                <div class="problem-stats__layout">
+                    <div id="problemStatsChart" class="problem-stats__chart" aria-live="polite"></div>
                 </div>
             </div>
         </section>
@@ -350,19 +392,6 @@
                 </div>
             </a>
         </section>
-        <section id="dailyHoroscope" class="horoscope-feed panel" aria-label="Päeva horoskoop">
-            <div class="panel__frame horoscope-feed__frame">
-                <div class="horoscope-feed__header">
-                    <h2>Päeva horoskoop</h2>
-                </div>
-                <div class="horoscope-feed__layout">
-                    <article id="horoscopeFeatured" class="horoscope-card" aria-live="polite"></article>
-                    <div class="horoscope-feed__rail">
-                        <div id="horoscopeSignGrid" class="horoscope-feed__signs" role="listbox" aria-label="Tähemärgid"></div>
-                    </div>
-                </div>
-            </div>
-        </section>
         <section id="problemQuiz" class="problem-quiz panel" aria-labelledby="problemQuizTitle">
             <div class="panel__frame problem-quiz__frame">
                 <div class="problem-quiz__header">
@@ -372,6 +401,10 @@
                             <span class="problem-quiz__title-kicker">TESTI,</span>
                             <span class="problem-quiz__title-main">kui palju sul <span class="problem-quiz__title-emphasis">tegelikult</span> probleeme on!</span>
                         </h2>
+                        <div class="problem-quiz__intro">
+                            <p class="problem-quiz__intro-lead">8 küsimust. Umbes 45 sekundit. Lõpus saad ühe selge fookuse.</p>
+                            <button id="problemQuizStartButton" class="problem-quiz__start" type="button">Alusta testi</button>
+                        </div>
                     </div>
                     <div class="problem-quiz__cover-art" aria-hidden="true"></div>
                 </div>
@@ -390,6 +423,19 @@
                         <div id="problemQuizSnapshot" class="problem-quiz__snapshot" aria-live="polite"></div>
                     </aside>
                     <article id="problemQuizCard" class="problem-quiz__card" aria-live="polite"></article>
+                </div>
+            </div>
+        </section>
+        <section id="dailyArticles" class="science-feed panel" aria-label="Lorien Velmore artiklid">
+            <div class="panel__frame science-feed__frame">
+                <div class="science-feed__layout">
+                    <article id="scienceArticleFeatured" class="science-article" aria-live="polite"></article>
+                    <div class="science-feed__rail">
+                        <div id="scienceArticleList" class="science-feed__list" role="listbox" aria-label="Artiklid"></div>
+                        <div class="science-feed__controls">
+                            <button id="scienceArticleMoreButton" class="button--ghost science-feed__more" type="button" aria-controls="scienceArticleList" hidden>Veel lugusid</button>
+                        </div>
+                    </div>
                 </div>
             </div>
         </section>

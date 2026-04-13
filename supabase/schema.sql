@@ -57,6 +57,105 @@ update public.reports
 set public_problem_text = left(regexp_replace(problem_text, '\s+', ' ', 'g'), 180)
 where public_problem_text is null;
 
+create or replace function public.normalize_problem_category(
+    p_problem_type text,
+    p_problem_text text default ''
+)
+returns text
+language sql
+immutable
+set search_path = public
+as $$
+    with source as (
+        select lower(trim(concat_ws(' ', coalesce(p_problem_type, ''), coalesce(p_problem_text, '')))) as value
+    )
+    select
+        case
+            when value = '' then 'Segateemad'
+            when value like any (array[
+                '%töö%',
+                '%projekt%',
+                '%tähtaeg%',
+                '%klient%',
+                '%boss%',
+                '%juht%',
+                '%koosolek%',
+                '%kolleeg%',
+                '%karjäär%',
+                '%vastutus%',
+                '%tempo%'
+            ]) then 'Töö ja vastutus'
+            when value like any (array[
+                '%raha%',
+                '%palk%',
+                '%eelarve%',
+                '%võlg%',
+                '%laen%',
+                '%arve%',
+                '%kulud%',
+                '%sissetulek%',
+                '%makse%',
+                '%asjaajamine%'
+            ]) then 'Raha ja kohustused'
+            when value like any (array[
+                '%suhe%',
+                '%partner%',
+                '%sõber%',
+                '%pere%',
+                '%ema%',
+                '%isa%',
+                '%abikaasa%',
+                '%tüli%',
+                '%konflikt%',
+                '%suhtlus%',
+                '%inimesed%'
+            ]) then 'Suhted ja suhtlus'
+            when value like any (array[
+                '%kodu%',
+                '%kodune%',
+                '%korter%',
+                '%maja%',
+                '%remont%',
+                '%naaber%',
+                '%majapidamine%',
+                '%olme%',
+                '%igapäev%',
+                '%segadus%'
+            ]) then 'Kodu ja igapäev'
+            when value like any (array[
+                '%stress%',
+                '%ärev%',
+                '%väsim%',
+                '%tervis%',
+                '%uni%',
+                '%läbipõlem%',
+                '%kurnat%',
+                '%pinge%',
+                '%depress%',
+                '%energia%'
+            ]) then 'Tervis ja koormus'
+            when value like any (array[
+                '%otsus%',
+                '%valik%',
+                '%valima%',
+                '%kolida%',
+                '%lahkuda%',
+                '%jääda%',
+                '%suund%',
+                '%variant%'
+            ]) then 'Otsus ja suunavalik'
+            else 'Segateemad'
+        end
+    from source;
+$$;
+
+update public.reports
+set problem_type = public.normalize_problem_category(problem_type, problem_text)
+where problem_type is distinct from public.normalize_problem_category(problem_type, problem_text);
+
+create index if not exists reports_problem_type_created_idx
+on public.reports (problem_type, created_at desc);
+
 create table if not exists public.report_ratings (
     id uuid primary key default gen_random_uuid(),
     report_id uuid not null references public.reports(id) on delete cascade,
@@ -288,7 +387,7 @@ begin
         p_session_id,
         trim(p_problem_text),
         left(trim(coalesce(p_public_problem_text, p_problem_text)), 180),
-        trim(coalesce(p_problem_type, 'Üldine olukord')),
+        public.normalize_problem_category(p_problem_type, p_problem_text),
         trim(coalesce(p_status, 'Lahendatud')),
         trim(coalesce(p_clarity_level, 'Hea')),
         trim(coalesce(p_summary, '')),
@@ -343,6 +442,186 @@ as $$
     limit least(greatest(coalesce(p_limit, 6), 1), 12);
 $$;
 
+create or replace function public.get_problem_category_stats(p_days integer default 30)
+returns table (
+    problem_type text,
+    problem_count bigint,
+    share_percent numeric,
+    total_reports bigint
+)
+language sql
+security definer
+set search_path = public
+as $$
+    with filtered_reports as (
+        select public.normalize_problem_category(reports.problem_type, reports.problem_text) as problem_type
+        from public.reports as reports
+        where reports.created_at >= timezone('utc', now()) - make_interval(days => least(greatest(coalesce(p_days, 30), 1), 365))
+    ),
+    category_counts as (
+        select
+            filtered_reports.problem_type,
+            count(*)::bigint as problem_count
+        from filtered_reports
+        group by filtered_reports.problem_type
+    ),
+    totals as (
+        select coalesce(sum(category_counts.problem_count), 0)::bigint as total_reports
+        from category_counts
+    )
+    select
+        category_counts.problem_type,
+        category_counts.problem_count,
+        case
+            when totals.total_reports = 0 then 0::numeric
+            else round((category_counts.problem_count::numeric * 100.0) / totals.total_reports, 1)
+        end as share_percent,
+        totals.total_reports
+    from category_counts
+    cross join totals
+    order by category_counts.problem_count desc, category_counts.problem_type asc;
+$$;
+
+create or replace function public.get_problem_category_trends(p_days integer default 30)
+returns table (
+    problem_type text,
+    current_count bigint,
+    previous_count bigint,
+    current_share_percent numeric,
+    previous_share_percent numeric,
+    delta_share_points numeric,
+    delta_count bigint
+)
+language sql
+security definer
+set search_path = public
+as $$
+    with bounds as (
+        select least(greatest(coalesce(p_days, 30), 1), 365) as days
+    ),
+    current_period as (
+        select public.normalize_problem_category(reports.problem_type, reports.problem_text) as problem_type
+        from public.reports as reports
+        cross join bounds
+        where reports.created_at >= timezone('utc', now()) - make_interval(days => bounds.days)
+    ),
+    previous_period as (
+        select public.normalize_problem_category(reports.problem_type, reports.problem_text) as problem_type
+        from public.reports as reports
+        cross join bounds
+        where reports.created_at < timezone('utc', now()) - make_interval(days => bounds.days)
+            and reports.created_at >= timezone('utc', now()) - make_interval(days => bounds.days * 2)
+    ),
+    current_counts as (
+        select current_period.problem_type, count(*)::bigint as current_count
+        from current_period
+        group by current_period.problem_type
+    ),
+    previous_counts as (
+        select previous_period.problem_type, count(*)::bigint as previous_count
+        from previous_period
+        group by previous_period.problem_type
+    ),
+    categories as (
+        select current_counts.problem_type from current_counts
+        union
+        select previous_counts.problem_type from previous_counts
+    ),
+    totals as (
+        select
+            coalesce((select sum(current_counts.current_count) from current_counts), 0)::bigint as current_total,
+            coalesce((select sum(previous_counts.previous_count) from previous_counts), 0)::bigint as previous_total
+    )
+    select
+        categories.problem_type,
+        coalesce(current_counts.current_count, 0)::bigint as current_count,
+        coalesce(previous_counts.previous_count, 0)::bigint as previous_count,
+        case
+            when totals.current_total = 0 then 0::numeric
+            else round((coalesce(current_counts.current_count, 0)::numeric * 100.0) / totals.current_total, 1)
+        end as current_share_percent,
+        case
+            when totals.previous_total = 0 then 0::numeric
+            else round((coalesce(previous_counts.previous_count, 0)::numeric * 100.0) / totals.previous_total, 1)
+        end as previous_share_percent,
+        round(
+            case
+                when totals.current_total = 0 and totals.previous_total = 0 then 0::numeric
+                else
+                    (case
+                        when totals.current_total = 0 then 0::numeric
+                        else (coalesce(current_counts.current_count, 0)::numeric * 100.0) / totals.current_total
+                    end)
+                    -
+                    (case
+                        when totals.previous_total = 0 then 0::numeric
+                        else (coalesce(previous_counts.previous_count, 0)::numeric * 100.0) / totals.previous_total
+                    end)
+            end,
+            1
+        ) as delta_share_points,
+        (coalesce(current_counts.current_count, 0) - coalesce(previous_counts.previous_count, 0))::bigint as delta_count
+    from categories
+    left join current_counts on current_counts.problem_type = categories.problem_type
+    left join previous_counts on previous_counts.problem_type = categories.problem_type
+    cross join totals
+    order by delta_share_points desc, current_count desc, categories.problem_type asc;
+$$;
+
+create or replace function public.get_problem_time_segments(p_days integer default 30)
+returns table (
+    segment_index integer,
+    segment_label text,
+    start_hour integer,
+    end_hour integer,
+    problem_count bigint,
+    share_percent numeric
+)
+language sql
+security definer
+set search_path = public
+as $$
+    with bounds as (
+        select least(greatest(coalesce(p_days, 30), 1), 365) as days
+    ),
+    segments as (
+        select
+            segment_index,
+            segment_index * 2 as start_hour,
+            (segment_index * 2 + 2) % 24 as end_hour
+        from generate_series(0, 11) as series(segment_index)
+    ),
+    filtered_reports as (
+        select floor(extract(hour from timezone('Europe/Tallinn', reports.created_at)) / 2.0)::integer as segment_index
+        from public.reports as reports
+        cross join bounds
+        where reports.created_at >= timezone('utc', now()) - make_interval(days => bounds.days)
+    ),
+    counts as (
+        select filtered_reports.segment_index, count(*)::bigint as problem_count
+        from filtered_reports
+        group by filtered_reports.segment_index
+    ),
+    totals as (
+        select coalesce(sum(counts.problem_count), 0)::bigint as total_reports
+        from counts
+    )
+    select
+        segments.segment_index,
+        lpad(segments.start_hour::text, 2, '0') || '–' || lpad(segments.end_hour::text, 2, '0') as segment_label,
+        segments.start_hour,
+        segments.end_hour,
+        coalesce(counts.problem_count, 0)::bigint as problem_count,
+        case
+            when totals.total_reports = 0 then 0::numeric
+            else round((coalesce(counts.problem_count, 0)::numeric * 100.0) / totals.total_reports, 1)
+        end as share_percent
+    from segments
+    left join counts on counts.segment_index = segments.segment_index
+    cross join totals
+    order by segments.segment_index asc;
+$$;
+
 create or replace function public.submit_report_rating(
     p_report_id uuid,
     p_session_id uuid,
@@ -386,6 +665,9 @@ $$;
 grant usage on schema public to anon, authenticated;
 grant execute on function public.get_public_metrics() to anon, authenticated;
 grant execute on function public.create_problem_report(uuid, text, text, text, text, text, text, text, text) to anon, authenticated;
+grant execute on function public.get_problem_category_stats(integer) to anon, authenticated;
+grant execute on function public.get_problem_category_trends(integer) to anon, authenticated;
+grant execute on function public.get_problem_time_segments(integer) to anon, authenticated;
 grant execute on function public.get_recent_problem_reports(integer) to anon, authenticated;
 grant execute on function public.submit_report_rating(uuid, uuid, smallint) to anon, authenticated;
 

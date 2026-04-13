@@ -1,4 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
+import { GENERAL_PROBLEM_CATEGORY } from "./problem-categories.mjs";
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL?.trim();
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY?.trim();
@@ -79,7 +80,97 @@ export async function fetchSolvedReportsTotal() {
     return normalizeInteger(row?.solved_reports_total);
 }
 
-export function subscribeToReportInserts(onInsert) {
+export async function fetchProblemCategoryStats(days = 30) {
+    if (!supabase) {
+        return [];
+    }
+
+    const { data, error } = await supabase.rpc("get_problem_category_stats", {
+        p_days: days
+    });
+
+    if (error) {
+        throw error;
+    }
+
+    return Array.isArray(data)
+        ? data.map(function (row) {
+            return {
+                problemType: row.problem_type ?? GENERAL_PROBLEM_CATEGORY.label,
+                problemCount: normalizeInteger(row.problem_count),
+                sharePercent: typeof row.share_percent === "number"
+                    ? row.share_percent
+                    : Number(row.share_percent || 0),
+                totalReports: normalizeInteger(row.total_reports)
+            };
+        })
+        : [];
+}
+
+export async function fetchProblemCategoryTrends(days = 30) {
+    if (!supabase) {
+        return [];
+    }
+
+    const { data, error } = await supabase.rpc("get_problem_category_trends", {
+        p_days: days
+    });
+
+    if (error) {
+        throw error;
+    }
+
+    return Array.isArray(data)
+        ? data.map(function (row) {
+            return {
+                problemType: row.problem_type ?? GENERAL_PROBLEM_CATEGORY.label,
+                currentCount: normalizeInteger(row.current_count),
+                previousCount: normalizeInteger(row.previous_count),
+                currentSharePercent: typeof row.current_share_percent === "number"
+                    ? row.current_share_percent
+                    : Number(row.current_share_percent || 0),
+                previousSharePercent: typeof row.previous_share_percent === "number"
+                    ? row.previous_share_percent
+                    : Number(row.previous_share_percent || 0),
+                deltaSharePoints: typeof row.delta_share_points === "number"
+                    ? row.delta_share_points
+                    : Number(row.delta_share_points || 0),
+                deltaCount: normalizeInteger(row.delta_count)
+            };
+        })
+        : [];
+}
+
+export async function fetchProblemTimeSegments(days = 30) {
+    if (!supabase) {
+        return [];
+    }
+
+    const { data, error } = await supabase.rpc("get_problem_time_segments", {
+        p_days: days
+    });
+
+    if (error) {
+        throw error;
+    }
+
+    return Array.isArray(data)
+        ? data.map(function (row) {
+            return {
+                segmentIndex: normalizeInteger(row.segment_index),
+                segmentLabel: row.segment_label ?? "",
+                startHour: normalizeInteger(row.start_hour),
+                endHour: normalizeInteger(row.end_hour),
+                problemCount: normalizeInteger(row.problem_count),
+                sharePercent: typeof row.share_percent === "number"
+                    ? row.share_percent
+                    : Number(row.share_percent || 0)
+            };
+        })
+        : [];
+}
+
+export function subscribeToReportInserts(onInsert, channelName = "reports-insert-counter") {
     if (!supabase || typeof onInsert !== "function") {
         return function () {
             // No-op cleanup when Supabase or callback is unavailable.
@@ -87,7 +178,7 @@ export function subscribeToReportInserts(onInsert) {
     }
 
     const channel = supabase
-        .channel("reports-insert-counter")
+        .channel(channelName)
         .on(
             "postgres_changes",
             {
@@ -124,7 +215,7 @@ export async function fetchRecentProblemReports(limit = 6) {
             return {
                 reportId: row.report_id ?? null,
                 problemText: row.problem_text ?? "",
-                problemType: row.problem_type ?? "Üldine olukord",
+                problemType: row.problem_type ?? GENERAL_PROBLEM_CATEGORY.label,
                 status: row.status ?? "Lahendatud",
                 createdAt: row.created_at ?? null
             };

@@ -7,6 +7,11 @@ import { access, mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { registerInterviewWorkflow } from "./interview-workflow.mjs";
+import {
+    GENERAL_PROBLEM_CATEGORY,
+    PROBLEM_CATEGORY_LABELS,
+    resolveProblemCategory
+} from "./problem-categories.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -43,6 +48,7 @@ const supabaseAdmin = supabaseUrl && supabaseServiceRoleKey
     })
     : null;
 const recentProblemReports = [];
+const recentProblemDetailCache = new Map();
 const dailyCoverStoryCachePath = path.join(__dirname, ".cache", "daily-cover-stories.json");
 const dailyArticleCachePath = path.join(__dirname, ".cache", "daily-articles.json");
 const dailyHoroscopeCachePath = path.join(__dirname, ".cache", "daily-horoscope.json");
@@ -81,7 +87,12 @@ const WEATHER_LOCATION_PLACEHOLDERS = new Set([
 ]);
 const NEWSLETTER_EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/i;
 const PUBLIC_FEED_TEXT_LIMIT = 180;
+const PUBLIC_PROBLEM_DETAIL_TEXT_LIMIT = 3200;
+const PUBLIC_PROBLEM_RESOLUTION_TEXT_LIMIT = 520;
+const RECENT_PROBLEM_RESOLUTION_STYLE_VERSION = 2;
 const PUBLIC_FEED_FALLBACK_TEXT = "Üks terava sõnastusega probleem sai lahendatud.";
+const PUBLIC_PROBLEM_DETAIL_FALLBACK_TEXT = "Kasutaja kirjeldas teravat olukorda, mille täispikk sõnastus vajas avaliku vaate jaoks toimetamist.";
+const PUBLIC_PROBLEM_RESOLUTION_FALLBACK_TEXT = "See teema ei suru enam peale ja asemele on tulnud palju kergem tunne.";
 const PUBLIC_FEED_PROFANITY_REGEX = /\b(?:pers(?:e|se|es|et|ed|ega|ele|el|esse|est|i)?|t(?:ü|y)r(?:a|ad|aga|ale|al|ast|i)?|munn(?:i|e|id|idega|ile|il|ist)?|vitt(?:u|i|e|ud|idega|ile|is|a)?|niku(?:da|n|d|b|s|tud|ga|le)?|pask(?:a|e|i|aks|aga|ale|as|ast|u)?|sit(?:t|a|ad|ane|ase|aks|aga|ale|as|ast)?|hui(?:a|i|d|ga|le|s)?|fuck(?:ing|ed|er|s)?|shit(?:ty|ted|ting|s)?)\b/giu;
 const DAILY_ARTICLE_SOFT_LANGUAGE_REGEX = /\b(?:teekond|hingetõmme|maagia|inspireer|sisemine|süda|hing|transform|muudab kõik|unelmate|täiuslik)\b/iu;
 const EDITORIAL_STATUS_PUBLISHED = "published";
@@ -768,7 +779,10 @@ const REPORT_JSON_SCHEMA = {
         lead: { type: "string" },
         statusValue: { type: "string" },
         statusMeta: { type: "string" },
-        typeValue: { type: "string" },
+        typeValue: {
+            type: "string",
+            enum: PROBLEM_CATEGORY_LABELS
+        },
         typeMeta: { type: "string" },
         clarityValue: { type: "string" },
         clarityMeta: { type: "string" },
@@ -789,6 +803,15 @@ const PUBLIC_FEED_JSON_SCHEMA = {
             type: "string",
             enum: ["original", "sanitized", "hidden"]
         }
+    }
+};
+
+const RECENT_PROBLEM_RESOLUTION_JSON_SCHEMA = {
+    type: "object",
+    additionalProperties: false,
+    required: ["resolutionText"],
+    properties: {
+        resolutionText: { type: "string" }
     }
 };
 
@@ -1146,6 +1169,38 @@ function normalizePublicFeedProblemText(value) {
     }
 
     return maskProfanity(safeText);
+}
+
+function normalizePublicProblemDetailText(value) {
+    const cleaned = String(value || "")
+        .replace(/\r\n?/g, "\n")
+        .split("\n")
+        .map(function (line) {
+            return line.replace(/[^\S\n]+/g, " ").trim();
+        })
+        .join("\n")
+        .replace(/\n{3,}/g, "\n\n")
+        .trim();
+
+    return truncate(cleaned, PUBLIC_PROBLEM_DETAIL_TEXT_LIMIT);
+}
+
+function normalizeRecentProblemResolutionText(value) {
+    const cleaned = String(value || "")
+        .replace(/\r\n?/g, "\n")
+        .split("\n")
+        .map(function (line) {
+            return line.replace(/[^\S\n]+/g, " ").trim();
+        })
+        .join("\n")
+        .replace(/\n{3,}/g, "\n\n")
+        .trim();
+
+    return truncate(cleaned, PUBLIC_PROBLEM_RESOLUTION_TEXT_LIMIT);
+}
+
+function containsProfanity(text) {
+    return new RegExp(PUBLIC_FEED_PROFANITY_REGEX.source, PUBLIC_FEED_PROFANITY_REGEX.flags).test(String(text || ""));
 }
 
 function capitalizeFirst(text) {
@@ -1561,6 +1616,10 @@ function buildCoverStoryRecordFromEditorialRow(row) {
         subjectName: normalizeField(payload.subjectName, "", 64),
         title: normalizeField(row.title || payload.title, "", 96),
         summary: normalizeField(row.summary || payload.summary, "", 220),
+        transcriptSummary: normalizeField(payload.transcriptSummary || payload.transcript_summary, "", 320),
+        lead: normalizeField(payload.lead, "", 220),
+        paragraphs: normalizeTextList(payload.paragraphs, [], 4, 360),
+        pullQuote: normalizeField(payload.pullQuote || payload.pull_quote, "", 220),
         photoBrief: normalizeField(payload.photoBrief, "", 420),
         imageUrl: row.cover_media_url || payload.imageUrl || "",
         imageAlt: payload.imageAlt || "",
@@ -1574,6 +1633,220 @@ function buildCoverStoryRecordFromEditorialRow(row) {
 function isInterviewCoverStoryRow(row) {
     return normalizeField(getEditorialPayload(row)?.variant, "", 32) === "cover_story"
         && /^interview:/i.test(normalizeField(row?.generation_signature, "", 200));
+}
+
+function extractInterviewIdFromGenerationSignature(signature) {
+    const match = normalizeField(signature, "", 200).match(/^interview:([0-9a-f-]{36})$/i);
+    return match ? match[1] : "";
+}
+
+function hasDailyCoverStoryDetailContent(story) {
+    return Boolean(
+        normalizeField(story?.lead, "", 220)
+        || normalizeField(story?.pullQuote, "", 220)
+        || (Array.isArray(story?.paragraphs) && story.paragraphs.some(Boolean))
+    );
+}
+
+function isInterviewPromptEchoMessage(text) {
+    const cleaned = sanitizeProblemText(text || "");
+
+    if (!cleaned) {
+        return true;
+    }
+
+    return /Probleemilahendaja ajakirjanik|Teen sinuga rahuliku intervjuu|Alustuseks kirjelda/i.test(cleaned);
+}
+
+function isMetaInterviewReply(text) {
+    const cleaned = sanitizeProblemText(text || "");
+
+    if (!cleaned) {
+        return true;
+    }
+
+    return /\b(?:intervjuu?|ajakirjanik|probleemilahendaja)\b/iu.test(cleaned)
+        && cleaned.split(/\s+/).filter(Boolean).length <= 5;
+}
+
+function normalizeCoverStoryQuote(value) {
+    return normalizeField(
+        String(value || "").replace(/^[\s"'“”„«»]+|[\s"'“”„«»]+$/g, ""),
+        "",
+        220
+    );
+}
+
+function extractMeaningfulInterviewQuotes(messages) {
+    const uniqueQuotes = [];
+
+    for (const message of Array.isArray(messages) ? messages : []) {
+        if (message?.role !== "user") {
+            continue;
+        }
+
+        const cleaned = normalizeCoverStoryQuote(message.content);
+
+        if (!cleaned || isInterviewPromptEchoMessage(cleaned) || isMetaInterviewReply(cleaned)) {
+            continue;
+        }
+
+        if (!uniqueQuotes.includes(cleaned)) {
+            uniqueQuotes.push(cleaned);
+        }
+    }
+
+    return uniqueQuotes.slice(0, 2);
+}
+
+function buildCoverStoryFeatureLead(story, transcriptSummary, subjectName) {
+    const preferredLead = normalizeField(story?.lead, "", 220);
+
+    if (preferredLead) {
+        return preferredLead;
+    }
+
+    const summary = normalizeField(story?.summary, "", 220);
+
+    if (summary) {
+        return summary;
+    }
+
+    if (transcriptSummary) {
+        return transcriptSummary;
+    }
+
+    return subjectName
+        ? `${subjectName} avab kaaneloos ühe sisemise hetke, kus vana rütm ei tundu enam kandvat.`
+        : "";
+}
+
+function buildCoverStoryFeatureParagraphs(story, transcriptSummary, quotes, subjectName) {
+    const storedParagraphs = normalizeTextList(story?.paragraphs, [], 4, 360);
+
+    if (storedParagraphs.length > 0) {
+        return storedParagraphs;
+    }
+
+    const summary = normalizeField(story?.summary, "", 220);
+    const featureParagraphs = [];
+
+    function pushParagraph(text) {
+        const normalizedParagraph = normalizeField(text, "", 360);
+
+        if (!normalizedParagraph || normalizedParagraph === summary || featureParagraphs.includes(normalizedParagraph)) {
+            return;
+        }
+
+        featureParagraphs.push(normalizedParagraph);
+    }
+
+    if (transcriptSummary && transcriptSummary !== summary) {
+        pushParagraph(transcriptSummary);
+    }
+
+    if (quotes[0]) {
+        pushParagraph(
+            `${subjectName || "Intervjueeritav"} ütleb intervjuus lihtsalt: "${quotes[0]}". Just see nappus jätabki loole kaalu, sest lause ei püüa end pikalt õigustada ega pehmendada.`
+        );
+        pushParagraph(
+            "Kaane lugu ei ehita siit välja suurt draamat, vaid jääb selle sisemise piiri juurde, kus vana rütm enam ei kanna ja seda on juba võimatu enda eest peita."
+        );
+        pushParagraph(
+            "Sellise lühiduse sees on ka oma täpsus. Kui öeldud on vähe, jääb rohkem ruumi toonile, pausidele ja sellele, mida inimene ei taha enam ümber sõnastada."
+        );
+        return featureParagraphs.slice(0, 4);
+    }
+
+    pushParagraph(
+        `${subjectName || "Intervjueeritav"} kaaneloos jääb fookus sellele tundele, mis tuleb enne valmis seletust: vajadusele võtta samm tagasi ja tunnistada, et senine viis enam ei sobi.`
+    );
+    pushParagraph(
+        "See on teadlikult napp juhtlugu. Rõhk ei ole välisel pöördel, vaid sisemisel hetkel, kus väsimus või vastupanu muutub piisavalt selgeks, et seda enam mitte varjata."
+    );
+
+    return featureParagraphs.slice(0, 4);
+}
+
+async function fetchInterviewCoverStorySource(interviewId) {
+    if (!isSupabaseAdminConfigured() || !interviewId) {
+        return {
+            interview: null,
+            messages: []
+        };
+    }
+
+    const [{ data: interview, error: interviewError }, { data: messages, error: messageError }] = await Promise.all([
+        supabaseAdmin
+            .from("interviews")
+            .select("id, invite_name, subject_name, transcript_summary, story_payload")
+            .eq("id", interviewId)
+            .maybeSingle(),
+        supabaseAdmin
+            .from("interview_messages")
+            .select("role, content, created_at")
+            .eq("interview_id", interviewId)
+            .order("created_at", { ascending: true })
+    ]);
+
+    if (interviewError) {
+        throw interviewError;
+    }
+
+    if (messageError) {
+        throw messageError;
+    }
+
+    return {
+        interview: interview && typeof interview === "object" ? interview : null,
+        messages: Array.isArray(messages) ? messages : []
+    };
+}
+
+async function enrichDailyCoverStoryFromInterview(story) {
+    const interviewId = extractInterviewIdFromGenerationSignature(story?.generationSignature);
+
+    if (!interviewId) {
+        return story;
+    }
+
+    const source = await fetchInterviewCoverStorySource(interviewId);
+    const sourcePayload = source.interview?.story_payload && typeof source.interview.story_payload === "object"
+        ? source.interview.story_payload
+        : {};
+    const subjectName = normalizeField(
+        story?.subjectName || sourcePayload.subjectName || source.interview?.subject_name || source.interview?.invite_name,
+        "",
+        64
+    );
+    const transcriptSummary = normalizeField(
+        story?.transcriptSummary || sourcePayload.transcriptSummary || sourcePayload.transcript_summary || source.interview?.transcript_summary,
+        "",
+        320
+    );
+    const quotes = extractMeaningfulInterviewQuotes(source.messages);
+    const enrichedStory = normalizeDailyCoverStoryPayload(story?.dateKey || getLocalDateKey(), {
+        subjectName,
+        title: story?.title || sourcePayload.title,
+        summary: story?.summary || sourcePayload.summary || transcriptSummary,
+        transcriptSummary,
+        lead: story?.lead || sourcePayload.lead || buildCoverStoryFeatureLead(story, transcriptSummary, subjectName),
+        paragraphs: (Array.isArray(story?.paragraphs) && story.paragraphs.some(Boolean))
+            ? story.paragraphs
+            : sourcePayload.paragraphs || buildCoverStoryFeatureParagraphs(story, transcriptSummary, quotes, subjectName),
+        pullQuote: story?.pullQuote || sourcePayload.pullQuote || sourcePayload.pull_quote || quotes[0] || "",
+        photoBrief: story?.photoBrief || sourcePayload.photoBrief,
+        imageUrl: story?.imageUrl || sourcePayload.imageUrl || sourcePayload.image_url,
+        imageAlt: story?.imageAlt || sourcePayload.imageAlt || sourcePayload.image_alt
+    }, story?.publishedAt);
+
+    return {
+        ...story,
+        ...enrichedStory,
+        slug: story?.slug || "",
+        generationSignature: story?.generationSignature || "",
+        variant: story?.variant || ""
+    };
 }
 
 function buildPersonaRecordFromEditorialRow(row) {
@@ -3076,6 +3349,10 @@ function buildFallbackDailyCoverStory(dateKey) {
         subjectName: "",
         title: "",
         summary: "",
+        transcriptSummary: "",
+        lead: "",
+        paragraphs: [],
+        pullQuote: "",
         photoBrief: "",
         imageUrl: "",
         imageAlt: ""
@@ -3093,6 +3370,10 @@ function normalizeDailyCoverStoryPayload(dateKey, payload, publishedAt = new Dat
         subjectName: normalizeField(payload.subjectName, fallbackStory.subjectName, 64),
         title: normalizeField(payload.title, fallbackStory.title, 96),
         summary: normalizeField(payload.summary, fallbackStory.summary, 220),
+        transcriptSummary: normalizeField(payload.transcriptSummary || payload.transcript_summary, fallbackStory.transcriptSummary, 320),
+        lead: normalizeField(payload.lead, fallbackStory.lead, 220),
+        paragraphs: normalizeTextList(payload.paragraphs, fallbackStory.paragraphs, 4, 360),
+        pullQuote: normalizeField(payload.pullQuote || payload.pull_quote, fallbackStory.pullQuote, 220),
         photoBrief: normalizeField(payload.photoBrief, fallbackStory.photoBrief, 420),
         imageUrl: normalizeField(payload.imageUrl || payload.image_url, fallbackStory.imageUrl, 500),
         imageAlt: normalizeField(payload.imageAlt || payload.image_alt, fallbackStory.imageAlt, 180)
@@ -3110,14 +3391,25 @@ function normalizeStoredDailyCoverStory(record) {
 
     const publishedAt = new Date(parseTimestamp(record.publishedAt || record.published_at) || Date.now()).toISOString();
 
-    return normalizeDailyCoverStoryPayload(normalizeField(record.dateKey || record.date_key || record.id, getLocalDateKey(), 20), {
+    const normalizedStory = normalizeDailyCoverStoryPayload(normalizeField(record.dateKey || record.date_key || record.id, getLocalDateKey(), 20), {
         subjectName: record.subjectName || record.subject_name,
         title: record.title,
         summary: record.summary,
+        transcriptSummary: record.transcriptSummary || record.transcript_summary,
+        lead: record.lead,
+        paragraphs: record.paragraphs,
+        pullQuote: record.pullQuote || record.pull_quote,
         photoBrief: record.photoBrief || record.photo_brief,
         imageUrl: record.imageUrl || record.image_url,
         imageAlt: record.imageAlt || record.image_alt
     }, publishedAt);
+
+    return {
+        ...normalizedStory,
+        slug: normalizeField(record.slug, "", 120),
+        generationSignature: normalizeField(record.generationSignature || record.generation_signature, "", 200),
+        variant: normalizeField(record.variant, "", 32)
+    };
 }
 
 async function loadDailyCoverStories() {
@@ -3185,7 +3477,24 @@ function removeDailyCoverStoryFromMemory(dateKey) {
 
 async function getDailyCoverStoryForToday() {
     await loadDailyCoverStories();
-    return dailyCoverStories[0] || null;
+    const currentStory = dailyCoverStories[0] || null;
+
+    if (!currentStory || hasDailyCoverStoryDetailContent(currentStory)) {
+        return currentStory;
+    }
+
+    try {
+        const enrichedStory = await enrichDailyCoverStoryFromInterview(currentStory);
+
+        if (enrichedStory) {
+            upsertDailyCoverStoryInMemory(enrichedStory);
+            return enrichedStory;
+        }
+    } catch (error) {
+        console.error("Failed to enrich daily cover story feature.", error);
+    }
+
+    return currentStory;
 }
 
 function isDailyArticleTooSoft(article) {
@@ -4346,8 +4655,222 @@ async function createPublicFeedProblemText(problemText) {
     }
 }
 
+async function createPublicProblemDetailText(problemText) {
+    const normalizedOriginalText = normalizePublicProblemDetailText(problemText);
+    const fallbackPayload = normalizedOriginalText
+        ? containsProfanity(normalizedOriginalText)
+            ? {
+                publicText: normalizePublicProblemDetailText(maskProfanity(normalizedOriginalText))
+                    || PUBLIC_PROBLEM_DETAIL_FALLBACK_TEXT,
+                visibility: "sanitized"
+            }
+            : {
+                publicText: normalizedOriginalText,
+                visibility: "original"
+            }
+        : {
+            publicText: PUBLIC_PROBLEM_DETAIL_FALLBACK_TEXT,
+            visibility: "hidden"
+        };
+
+    if (!client || !normalizedOriginalText) {
+        return fallbackPayload;
+    }
+
+    try {
+        const moderationResponse = await client.moderations.create({
+            model: "omni-moderation-latest",
+            input: normalizedOriginalText
+        });
+
+        const moderationResult = moderationResponse.results?.[0] ?? null;
+        const moderationSummary = buildModerationSummary(moderationResult);
+        const aiResponse = await client.responses.create({
+            model: publicFeedModel,
+            max_output_tokens: 1200,
+            reasoning: {
+                effort: "low"
+            },
+            instructions: [
+                "Sa otsustad, milline täispikk probleemikirjeldus sobib avalikku detailvaatesse.",
+                "Kui tekst on juba viisakas ja avalikuks näitamiseks sobiv, jäta selle sisu, järjestus, toon ja detailsus sisuliselt muutmata.",
+                "Kui tekstis on roppused, solvangud, ähvardused, alandamine, seksuaalne labasus või muu avalikku vaatesse sobimatu sõnastus, kirjuta ümber ainult need kohad.",
+                "Hoia alles kõik olulised faktid, olukorra kirjeldus, esimese isiku vaade ja konkreetne probleem.",
+                "Ära lisa uusi fakte, hinnanguid, lahendusi ega kokkuvõtteid.",
+                "Ära lühenda teksti rohkem kui hädavajalik. Eesmärk ei ole kokkuvõte, vaid avalikult sobiv täispikk kirjeldus.",
+                "Kui sisu on nii räige, et seda ei saa mõistlikult avalikult näidata isegi pärast ümber sõnastamist, kasuta visibility='hidden' ja anna neutraalne lühike üldistus.",
+                "Tagasta ainult puhas JSON."
+            ].join(" "),
+            input: [
+                "Originaalne probleemikirjeldus:",
+                normalizedOriginalText,
+                "",
+                "Moderatsiooni kokkuvõte:",
+                moderationSummary
+            ].join("\n"),
+            text: {
+                verbosity: "medium",
+                format: {
+                    type: "json_schema",
+                    name: "public_problem_detail",
+                    strict: true,
+                    schema: PUBLIC_FEED_JSON_SCHEMA
+                }
+            }
+        });
+
+        const payload = extractJsonObject(aiResponse.output_text);
+        const publicText = normalizePublicProblemDetailText(payload.publicText);
+        const safePublicText = containsProfanity(publicText)
+            ? normalizePublicProblemDetailText(maskProfanity(publicText))
+            : publicText;
+
+        if (!safePublicText) {
+            return fallbackPayload;
+        }
+
+        if (payload.visibility === "hidden") {
+            return {
+                publicText: safePublicText,
+                visibility: "hidden"
+            };
+        }
+
+        return {
+            publicText: safePublicText,
+            visibility: payload.visibility === "original" && safePublicText === publicText ? "original" : "sanitized"
+        };
+    } catch (error) {
+        console.error("Failed to create public problem detail text.", error);
+        return fallbackPayload;
+    }
+}
+
+function buildFallbackRecentProblemResolutionText(record) {
+    const summary = normalizeRecentProblemResolutionText(record?.summary || "");
+    const resolution = normalizeRecentProblemResolutionText(record?.resolution || "");
+    const analysis = normalizeRecentProblemResolutionText(record?.analysis || "");
+
+    return summary
+        || resolution
+        || analysis
+        || PUBLIC_PROBLEM_RESOLUTION_FALLBACK_TEXT;
+}
+
+async function createRecentProblemResolutionText(record, publicDetail) {
+    const fallbackText = buildFallbackRecentProblemResolutionText(record);
+    const publicProblemText = normalizePublicFeedProblemText(record?.public_problem_text || record?.problem_text || "");
+    const publicDetailText = normalizePublicProblemDetailText(publicDetail?.publicText || record?.public_problem_text || record?.problem_text || "");
+    const reportSummary = normalizeRecentProblemResolutionText(record?.summary || "");
+    const reportAnalysis = normalizeRecentProblemResolutionText(record?.analysis || "");
+    const reportResolution = normalizeRecentProblemResolutionText(record?.resolution || "");
+
+    if (!client) {
+        return fallbackText;
+    }
+
+    try {
+        const aiResponse = await client.responses.create({
+            model: publicFeedModel,
+            max_output_tokens: 420,
+            reasoning: {
+                effort: "low"
+            },
+            instructions: [
+                "Sa kirjutad avalikku lahendusteksti rubriiki 'Viimati lahendatud probleemid'.",
+                "See tekst läheb UI-s otse sildi 'Lahendus:' järele.",
+                "Eesmärk on anda tõestus, et konkreetne mure on nüüd maas ja ei vajuta enam peale.",
+                "Kirjuta ainult lõppseisust: mis enam ei sega, mis on nüüd korras ja milline tunne asemele tuli.",
+                "Kasuta konkreetselt selle probleemi enda detaile, et tõestus mõjuks päriselt veenvalt.",
+                "Kui probleemis mainiti näiteks segadust, valu, hirmu, pingeid, katkestusi, häbi või muud kindlat asja, näita just selle asja kadumist või rahunemist.",
+                "Lugejale peab jääma tunne, et ta näeb selle sama konkreetse mure lõppu, mitte üldist motivatsiooniteksti.",
+                "Ära kirjelda samme, protsessi, tööriistu, soovitusi ega seda, kuidas lahendus leiti.",
+                "Ära kasuta igal juhul samu stamp-alguseid nagu 'Probleem sai lahendatud', 'Enam ei ole', 'Nüüd on kõik hästi'.",
+                "Kasuta loomulikku eestikeelset sõnastust ja varieeri avangut.",
+                "Kirjuta pigem 2 kuni 4 lauset või kaks lühikest lõiku, umbes 45 kuni 90 sõna.",
+                "Toon peab olema helge, kindel, mõnus lugeda ja jätma päriselt kergendatud mulje.",
+                "Ära loba, ära korda probleemi ümber sõna-sõnalt, ära kasuta hüüumärke ega korporatiivseid klišeesid.",
+                "Tagasta ainult puhas JSON."
+            ].join(" "),
+            input: [
+                "Avalik probleemilühend:",
+                publicProblemText,
+                "",
+                "Avalik täispikk kirjeldus:",
+                publicDetailText,
+                "",
+                "Raporti kokkuvõte:",
+                reportSummary || "-",
+                "",
+                "Raporti analüüs:",
+                reportAnalysis || "-",
+                "",
+                "Raporti lõppseis:",
+                reportResolution || "-"
+            ].join("\n"),
+            text: {
+                verbosity: "low",
+                format: {
+                    type: "json_schema",
+                    name: "recent_problem_resolution",
+                    strict: true,
+                    schema: RECENT_PROBLEM_RESOLUTION_JSON_SCHEMA
+                }
+            }
+        });
+
+        const payload = extractJsonObject(aiResponse.output_text);
+        return normalizeRecentProblemResolutionText(payload.resolutionText) || fallbackText;
+    } catch (error) {
+        console.error("Failed to create recent problem resolution text.", error);
+        return fallbackText;
+    }
+}
+
+async function buildRecentProblemDetail(record) {
+    const reportId = sanitizeProblemText(record?.id || "");
+    const problemText = String(record?.problem_text || "");
+    const cacheKey = `${reportId}:${hashText([
+        `resolution-style:${RECENT_PROBLEM_RESOLUTION_STYLE_VERSION}`,
+        problemText,
+        String(record?.summary || ""),
+        String(record?.analysis || ""),
+        String(record?.resolution || "")
+    ].join("|"))}`;
+
+    if (recentProblemDetailCache.has(cacheKey)) {
+        return recentProblemDetailCache.get(cacheKey);
+    }
+
+    const publicDetail = await createPublicProblemDetailText(problemText);
+    const resolutionText = await createRecentProblemResolutionText(record, publicDetail);
+    const payload = {
+        reportId,
+        publicProblemText: normalizePublicFeedProblemText(record?.public_problem_text || problemText),
+        detailText: publicDetail.publicText || PUBLIC_PROBLEM_DETAIL_FALLBACK_TEXT,
+        resolutionText,
+        problemType: truncate(sanitizeProblemText(record?.problem_type || GENERAL_PROBLEM_CATEGORY.label), 40),
+        status: truncate(sanitizeProblemText(record?.status || "Lahendatud"), 24),
+        createdAt: new Date(record?.created_at || Date.now()).toISOString(),
+        visibility: publicDetail.visibility || "original"
+    };
+
+    recentProblemDetailCache.set(cacheKey, payload);
+
+    if (recentProblemDetailCache.size > 60) {
+        const oldestKey = recentProblemDetailCache.keys().next().value;
+
+        if (oldestKey) {
+            recentProblemDetailCache.delete(oldestKey);
+        }
+    }
+
+    return payload;
+}
+
 function normalizeReport(problemText, payload) {
     const safeProblem = truncate(problemText, 220);
+    const category = resolveProblemCategory(payload.typeValue, problemText);
 
     return {
         title: normalizeField(payload.title, "Olukord on lahendatud", 56),
@@ -4362,10 +4885,10 @@ function normalizeReport(problemText, payload) {
             "Teema on lõpetatud ja varasem pinge ei juhi enam olukorda.",
             64
         ),
-        typeValue: normalizeField(payload.typeValue, "Üldine olukord", 34),
+        typeValue: normalizeField(category.label, GENERAL_PROBLEM_CATEGORY.label, 34),
         typeMeta: normalizeField(
             payload.typeMeta,
-            "See teema on nüüd rahunenud ja lõpptulemus mõjub kindlalt.",
+            category.meta,
             72
         ),
         clarityValue: normalizeField(payload.clarityValue, "Rahulik", 24),
@@ -4377,17 +4900,17 @@ function normalizeReport(problemText, payload) {
         originalProblem: normalizeField(payload.originalProblem, safeProblem, 140),
         analysis: normalizeField(
             payload.analysis,
-            "Lahenes see osa olukorrast, mis tekitas pinge, segaduse või pideva ebamugavuse.",
+            category.resolved,
             132
         ),
         resolution: normalizeField(
             payload.resolution,
-            "Praegune seis on rahulik ja lõpetatud ning varasem probleem ei määra enam tervikut.",
+            category.state,
             76
         ),
         summary: normalizeField(
             payload.summary,
-            "See teema on nüüd lõpetatud ning asemele on tulnud selgem ja kergem tunne.",
+            category.summary,
             124
         )
     };
@@ -4396,7 +4919,7 @@ function normalizeReport(problemText, payload) {
 function pushRecentProblemReport(publicProblemText, report) {
     recentProblemReports.unshift({
         problemText: normalizePublicFeedProblemText(publicProblemText),
-        problemType: truncate(sanitizeProblemText(report?.typeValue || "Üldine olukord"), 40),
+        problemType: truncate(sanitizeProblemText(report?.typeValue || GENERAL_PROBLEM_CATEGORY.label), 40),
         status: truncate(sanitizeProblemText(report?.statusValue || "Lahendatud"), 24),
         createdAt: new Date().toISOString()
     });
@@ -4417,6 +4940,52 @@ app.get("/api/recent-problems", function (_request, response) {
     response.json({
         problems: recentProblemReports
     });
+});
+
+app.get("/api/recent-problems/:reportId", async function (request, response) {
+    const reportId = sanitizeProblemText(request.params.reportId).toLocaleLowerCase("en-US");
+
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(reportId)) {
+        response.status(400).json({
+            error: "Probleemi identifikaator on vigane."
+        });
+        return;
+    }
+
+    if (!isSupabaseAdminConfigured()) {
+        response.status(503).json({
+            error: "Probleemi detailvaade ei ole praegu saadaval."
+        });
+        return;
+    }
+
+    try {
+        const { data, error } = await supabaseAdmin
+            .from("reports")
+            .select("id, problem_text, public_problem_text, problem_type, status, summary, analysis, resolution, created_at")
+            .eq("id", reportId)
+            .maybeSingle();
+
+        if (error) {
+            throw error;
+        }
+
+        if (!data) {
+            response.status(404).json({
+                error: "Seda probleemi ei leitud."
+            });
+            return;
+        }
+
+        response.json({
+            problem: await buildRecentProblemDetail(data)
+        });
+    } catch (error) {
+        console.error("Failed to load recent problem detail.", error);
+        response.status(500).json({
+            error: "Probleemi detaili laadimine ebaõnnestus."
+        });
+    }
 });
 
 app.get("/api/daily-cover-story", async function (_request, response) {
@@ -4625,7 +5194,7 @@ app.post("/api/report", async function (request, response) {
                     "- title peab olema lühike, lööv ja 2 kuni 5 sõna pikk",
                     "- lead peab olema üks lühike lause, umbes kuni 12 sõna",
                     "- statusValue peab olema täpselt 'Lahendatud'",
-                    "- typeValue peab olema lühike, selge ja mitte liiga tehniline",
+                    `- typeValue peab olema täpselt üks neist kategooriatest: ${PROBLEM_CATEGORY_LABELS.join(", ")}`,
                     "- statusMeta, typeMeta ja clarityMeta peavad olema lühikesed kõrvalread, mitte pikad selgitused",
                     "- clarityValue peab olema väga lühike, eelistatult 1 kuni 2 sõna",
                     "- resolution peab kirjeldama ainult praegust lõppseisu, olema väga kompaktne ja umbes 6 kuni 10 sõna piires",

@@ -1,5 +1,8 @@
 import {
     createProblemReport,
+    fetchProblemCategoryStats,
+    fetchProblemCategoryTrends,
+    fetchProblemTimeSegments,
     fetchRecentProblemReports,
     fetchSolvedReportsTotal,
     getOrCreateSessionId,
@@ -7,6 +10,14 @@ import {
     subscribeToReportInserts,
     submitProblemRating
 } from "./supabase.js";
+import {
+    GENERAL_PROBLEM_CATEGORY,
+    PROBLEM_CATEGORY_DEFINITIONS,
+    detectProblemCategory,
+    getProblemCategoryDefinition
+} from "./problem-categories.mjs";
+import urgitsFirePrimary from "./assets/Urgits-branch-1.png";
+import urgitsFireSecondary from "./assets/Urgits-branch-2.png";
 
 const lorienMockupModules = import.meta.glob("./assets/Lorien mockups/*.{png,jpg,jpeg,webp,avif}", {
     eager: true,
@@ -48,23 +59,37 @@ const reportBackButton = document.getElementById("reportBackButton");
 const reportResetButton = document.getElementById("reportResetButton");
 const solvedCount = document.getElementById("solvedCount");
 const coverStoryHero = document.getElementById("coverStoryHero");
+const coverStoryHeroToggle = document.getElementById("coverStoryHeroToggle");
 const coverIssueDate = document.getElementById("coverIssueDate");
 const coverIssueNumber = document.getElementById("coverIssueNumber");
 const coverStoryName = document.getElementById("coverStoryName");
 const coverStoryTitle = document.getElementById("coverStoryTitle");
+const coverStoryToggleHint = document.getElementById("coverStoryToggleHint");
+const coverStoryFeature = document.getElementById("coverStoryFeature");
+const coverStoryFeatureDate = document.getElementById("coverStoryFeatureDate");
+const coverStoryFeatureTitle = document.getElementById("coverStoryFeatureTitle");
+const coverStoryFeatureSummary = document.getElementById("coverStoryFeatureSummary");
+const coverStoryFeatureLead = document.getElementById("coverStoryFeatureLead");
+const coverStoryFeatureQuote = document.getElementById("coverStoryFeatureQuote");
+const coverStoryFeatureBody = document.getElementById("coverStoryFeatureBody");
+const coverStoryFeatureSubject = document.getElementById("coverStoryFeatureSubject");
 const newsletterSection = document.getElementById("newsletter");
 const newsletterForm = document.getElementById("newsletterForm");
 const newsletterEmail = document.getElementById("newsletterEmail");
 const newsletterSubmitButton = document.getElementById("newsletterSubmitButton");
 const newsletterFeedback = document.getElementById("newsletterFeedback");
+const recentProblemsSection = document.getElementById("recentProblems");
 const recentProblemsList = document.getElementById("recentProblemsList");
 const recentProblemsMoreButton = document.getElementById("recentProblemsMoreButton");
+const problemStatsLead = document.getElementById("problemStatsLead");
+const problemStatsChart = document.getElementById("problemStatsChart");
 const scienceArticleFeatured = document.getElementById("scienceArticleFeatured");
 const scienceArticleList = document.getElementById("scienceArticleList");
 const scienceArticleMoreButton = document.getElementById("scienceArticleMoreButton");
 const personaStoryFeatured = document.getElementById("personaStoryFeatured");
 const personaStoryList = document.getElementById("personaStoryList");
 const personaStoryMoreButton = document.getElementById("personaStoryMoreButton");
+const dailyHoroscopeSection = document.getElementById("dailyHoroscope");
 const horoscopeFeatured = document.getElementById("horoscopeFeatured");
 const horoscopeSignGrid = document.getElementById("horoscopeSignGrid");
 const problemQuizSection = document.getElementById("problemQuiz");
@@ -74,6 +99,7 @@ const problemQuizStepLabel = document.getElementById("problemQuizStepLabel");
 const problemQuizProgressBar = document.getElementById("problemQuizProgressBar");
 const problemQuizStepDots = document.getElementById("problemQuizStepDots");
 const problemQuizRestartButton = document.getElementById("problemQuizRestartButton");
+const problemQuizStartButton = document.getElementById("problemQuizStartButton");
 const reportTitle = document.getElementById("reportTitle");
 const reportLead = document.getElementById("reportLead");
 const reportStatusValue = document.getElementById("reportStatusValue");
@@ -89,7 +115,12 @@ const reportSummary = document.getElementById("reportSummary");
 const ratingButtons = Array.from(document.querySelectorAll(".rating-panel__button"));
 const ratingFeedback = document.getElementById("ratingFeedback");
 const ratingPanel = document.querySelector(".rating-panel");
+const solutionLead = document.getElementById("solutionLead");
 const intakeStage = document.querySelector(".intake-stage");
+const intakeStageFrame = intakeStage?.querySelector(".intake-stage__frame");
+const solverSkinDots = document.getElementById("solverSkinDots");
+const urgitsBannerFrame = document.querySelector(".urgits-banner__frame");
+const urgitsBannerImageLayers = Array.from(document.querySelectorAll(".urgits-banner__image-layer"));
 const weatherStrip = document.getElementById("weatherStrip");
 const weatherStripIcon = document.getElementById("weatherStripIcon");
 const weatherStripLocation = document.getElementById("weatherStripLocation");
@@ -125,18 +156,36 @@ let currentProblemText = "";
 let currentPublicProblemText = "";
 let currentReportId = null;
 let pendingReportSave = null;
+let currentSolveStartedAt = 0;
+let recentProblemsUnlocked = false;
 let recentProblems = [];
 let recentProblemsSyncTimer;
 let visibleRecentProblemsCount = 0;
+let problemCategoryStats = [];
+let problemCategoryTrends = [];
+let problemTimeSegments = [];
+let problemCategoryStatsSyncTimer;
+let problemCategoryStatsRealtimeCleanup = null;
+let problemStatsStoryCleanup = null;
+let selectedRecentProblemReportId = "";
+let selectedRecentProblemPreview = null;
+let selectedRecentProblemDetail = null;
+let isRecentProblemOriginalVisible = false;
+let recentProblemDetailError = "";
+let isRecentProblemDetailLoading = false;
+let likedRecentProblemIds = new Set();
 let dailyCoverStory = null;
 let dailyCoverStorySyncTimer;
+let isDailyCoverStoryOpen = false;
 let dailyArticles = [];
 let dailyArticlesSyncTimer;
 let selectedDailyArticleId = "";
+let expandedDailyArticleId = "";
 let visibleDailyArticleCount = 0;
 let dailyPersonaStories = [];
 let dailyPersonaStoriesSyncTimer;
 let selectedDailyPersonaStoryId = "";
+let expandedDailyPersonaStoryId = "";
 let visiblePersonaStoryCount = 0;
 let dailyHoroscopeSigns = [];
 let dailyHoroscopeSyncTimer;
@@ -149,11 +198,20 @@ let isGeneratingReport = false;
 let problemQuizAnswers = [];
 let currentProblemQuizStep = 0;
 let problemQuizAdvanceTimer = null;
+let isProblemQuizStarted = false;
+let currentSolverSkinId = "gold";
+let solverSkinMotionTimer = 0;
+let solverSkinTouchStartX = 0;
+let solverSkinTouchStartY = 0;
+let solverSkinTouchActive = false;
 let dailyWeather = null;
 let dailyWeatherSyncTimer;
 let activeWeatherLocation = null;
 let weatherSceneLoadToken = 0;
 let coverStoryImageLoadToken = 0;
+let urgitsBannerImageTimer = 0;
+let urgitsBannerActiveLayerIndex = 0;
+let urgitsBannerActiveImageIndex = 0;
 
 const MIN_SOLVE_DURATION = 3200;
 const LOADING_PROGRESS_CAP = 0.92;
@@ -164,13 +222,21 @@ const RECENT_PROBLEMS_MOBILE_INITIAL_COUNT = 1;
 const RECENT_PROBLEMS_DESKTOP_INITIAL_COUNT = 3;
 const RECENT_PROBLEMS_LOAD_STEP = 3;
 const RECENT_PROBLEMS_STORAGE_KEY = "probleemilahendaja_recent_problems";
+const RECENT_PROBLEMS_UNLOCKED_KEY = "probleemilahendaja_recent_problems_unlocked";
 const RECENT_PROBLEM_EQUIVALENT_WINDOW_MS = 15000;
 const RECENT_PROBLEMS_REFRESH_INTERVAL = 10000;
+const RECENT_PROBLEM_DETAIL_REQUEST_TIMEOUT = 12000;
+const RECENT_PROBLEM_LIKES_STORAGE_KEY = "probleemilahendaja_recent_problem_likes";
+const URGITS_BANNER_IMAGE_ROTATION_MS = 5200;
+const URGITS_BANNER_IMAGES = [urgitsFirePrimary, urgitsFireSecondary];
+const PROBLEM_CATEGORY_STATS_DAYS = 30;
+const PROBLEM_CATEGORY_STATS_REFRESH_INTERVAL = 60 * 1000;
 const DAILY_COVER_STORY_REFRESH_INTERVAL = 60 * 60 * 1000;
 const DAILY_ARTICLES_LIMIT = 8;
 const DAILY_ARTICLES_MOBILE_INITIAL_COUNT = 1;
 const DAILY_ARTICLES_LOAD_STEP = 1;
 const DAILY_ARTICLES_REFRESH_INTERVAL = 60 * 60 * 1000;
+const DAILY_ARTICLE_PREVIEW_PARAGRAPHS = 2;
 const DAILY_PERSONA_STORIES_LIMIT = 8;
 const DAILY_PERSONA_STORIES_MOBILE_INITIAL_COUNT = 1;
 const DAILY_PERSONA_STORIES_LOAD_STEP = 1;
@@ -179,6 +245,21 @@ const DAILY_PERSONA_REFRESH_SIGNAL_KEY = "probleemilahendaja:daily-persona-refre
 const DAILY_HOROSCOPE_REFRESH_INTERVAL = 60 * 60 * 1000;
 const DAILY_WEATHER_REFRESH_INTERVAL = 20 * 60 * 1000;
 const WEATHER_LOCATION_TIMEOUT = 6500;
+const SOLVER_SKIN_STORAGE_KEY = "probleemilahendaja_solver_skin";
+const SOLVER_SKIN_SWIPE_THRESHOLD = 54;
+const SOLVER_SKIN_MOTION_DURATION = 360;
+const SOLVER_SKINS = [
+    { id: "gold" },
+    { id: "rose" },
+    { id: "platinum" },
+    { id: "ocean" },
+    { id: "mint" },
+    { id: "lavender" },
+    { id: "citrus" },
+    { id: "cherry" },
+    { id: "forest" },
+    { id: "graphite" }
+];
 const DEFAULT_WEATHER_LOCATION = {
     label: "Tallinn",
     latitude: 59.437,
@@ -210,6 +291,8 @@ let lastRecentProblemsInitialCount = recentProblemsViewportQuery.matches
     : RECENT_PROBLEMS_DESKTOP_INITIAL_COUNT;
 let lastDailyArticlesMobileView = recentProblemsViewportQuery.matches;
 let lastPersonaStoriesMobileView = recentProblemsViewportQuery.matches;
+const recentProblemDetailCache = new Map();
+const prefersReducedMotionQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
 const weatherTimeFormatter = new Intl.DateTimeFormat("et-EE", {
     hour: "2-digit",
     minute: "2-digit"
@@ -289,6 +372,132 @@ function renderDailyCoverStory() {
     }
 
     loadCoverStoryHeroImage();
+    renderDailyCoverStoryFeature();
+}
+
+function hasDailyCoverStoryFeature(story = dailyCoverStory) {
+    return Boolean(
+        story
+        && (
+            story.title
+            || story.summary
+            || story.lead
+            || story.pullQuote
+            || story.subjectName
+            || (Array.isArray(story.paragraphs) && story.paragraphs.length > 0)
+        )
+    );
+}
+
+function getDailyCoverStoryFeatureTitle(story = dailyCoverStory) {
+    return story?.title || story?.subjectName || "Kaane lugu";
+}
+
+function setDailyCoverStoryExpanded(nextOpen, options = {}) {
+    if (!coverStoryHero || !coverStoryHeroToggle || !coverStoryFeature || !hasDailyCoverStoryFeature()) {
+        isDailyCoverStoryOpen = false;
+        coverStoryHero?.classList.remove("intake-hero--expanded");
+        coverStoryHeroToggle?.setAttribute("aria-expanded", "false");
+        coverStoryHeroToggle?.setAttribute("aria-label", "Ava kaanelugu");
+        coverStoryFeature?.classList.remove("is-open");
+        coverStoryFeature?.setAttribute("aria-hidden", "true");
+
+        return;
+    }
+
+    isDailyCoverStoryOpen = Boolean(nextOpen);
+    coverStoryHero.classList.toggle("intake-hero--expanded", isDailyCoverStoryOpen);
+    coverStoryHeroToggle.setAttribute("aria-expanded", String(isDailyCoverStoryOpen));
+    coverStoryHeroToggle.setAttribute("aria-label", isDailyCoverStoryOpen ? "Sulge kaanelugu" : "Ava kaanelugu");
+    coverStoryFeature.classList.toggle("is-open", isDailyCoverStoryOpen);
+    coverStoryFeature.setAttribute("aria-hidden", String(!isDailyCoverStoryOpen));
+}
+
+function renderDailyCoverStoryFeature() {
+    if (!coverStoryHero || !coverStoryHeroToggle || !coverStoryFeature) {
+        return;
+    }
+
+    const hasFeature = hasDailyCoverStoryFeature();
+
+    coverStoryHero.classList.toggle("intake-hero--clickable", hasFeature);
+    coverStoryHeroToggle.classList.toggle("intake-hero__cover--interactive", hasFeature);
+    coverStoryHeroToggle.setAttribute("aria-disabled", String(!hasFeature));
+    coverStoryHeroToggle.tabIndex = hasFeature ? 0 : -1;
+    coverStoryFeature.hidden = !hasFeature;
+
+    if (coverStoryToggleHint) {
+        coverStoryToggleHint.hidden = !hasFeature;
+    }
+
+    if (!hasFeature) {
+        setDailyCoverStoryExpanded(false);
+        return;
+    }
+
+    if (coverStoryFeatureDate) {
+        coverStoryFeatureDate.textContent = formatEditorialDate(dailyCoverStory);
+    }
+
+    if (coverStoryFeatureTitle) {
+        coverStoryFeatureTitle.textContent = getDailyCoverStoryFeatureTitle(dailyCoverStory);
+    }
+
+    if (coverStoryFeatureSummary) {
+        coverStoryFeatureSummary.hidden = !dailyCoverStory?.summary;
+        coverStoryFeatureSummary.textContent = dailyCoverStory?.summary || "";
+    }
+
+    const summaryText = dailyCoverStory?.summary || "";
+    const transcriptSummaryText = dailyCoverStory?.transcriptSummary || "";
+    const leadText = dailyCoverStory?.lead || (transcriptSummaryText !== summaryText ? transcriptSummaryText : "");
+    const quoteText = dailyCoverStory?.pullQuote || "";
+    const bodyParagraphs = (dailyCoverStory?.paragraphs || [])
+        .filter(Boolean)
+        .filter(function (paragraphText, index, paragraphs) {
+            return paragraphs.indexOf(paragraphText) === index
+                && paragraphText !== summaryText
+                && paragraphText !== leadText;
+        });
+
+    if (coverStoryFeatureLead) {
+        coverStoryFeatureLead.hidden = !leadText || leadText === summaryText;
+        coverStoryFeatureLead.textContent = leadText || "";
+    }
+
+    if (coverStoryFeatureQuote) {
+        coverStoryFeatureQuote.hidden = !quoteText || quoteText === summaryText || quoteText === leadText;
+        coverStoryFeatureQuote.textContent = quoteText || "";
+    }
+
+    if (coverStoryFeatureBody) {
+        coverStoryFeatureBody.hidden = bodyParagraphs.length === 0;
+
+        if (bodyParagraphs.length === 0) {
+            coverStoryFeatureBody.replaceChildren();
+        } else {
+            const bodyFragment = document.createDocumentFragment();
+
+            bodyParagraphs.forEach(function (paragraphText) {
+                const paragraph = document.createElement("p");
+                paragraph.textContent = paragraphText;
+                bodyFragment.append(paragraph);
+            });
+
+            coverStoryFeatureBody.replaceChildren(bodyFragment);
+        }
+    }
+
+    if (coverStoryFeatureSubject) {
+        coverStoryFeatureSubject.hidden = !dailyCoverStory?.subjectName;
+        coverStoryFeatureSubject.textContent = dailyCoverStory?.subjectName || "";
+    }
+
+    coverStoryFeature.setAttribute("aria-hidden", String(!isDailyCoverStoryOpen));
+    coverStoryFeature.classList.toggle("is-open", isDailyCoverStoryOpen);
+    coverStoryHero.classList.toggle("intake-hero--expanded", isDailyCoverStoryOpen);
+    coverStoryHeroToggle.setAttribute("aria-expanded", String(isDailyCoverStoryOpen));
+    coverStoryHeroToggle.setAttribute("aria-label", isDailyCoverStoryOpen ? "Sulge kaanelugu" : "Ava kaanelugu");
 }
 
 const HOROSCOPE_SIGNS = [
@@ -698,49 +907,6 @@ const PROBLEM_QUIZ_INPUT_FRAGMENTS = {
 };
 const sections = [container, loadingDiv, solutionDiv, reportDiv];
 
-const CATEGORY_RULES = [
-    {
-        label: "Töö ja vastutus",
-        meta: "Tööga seotud pinge on vaibunud ja koormus on taas paigas.",
-        keywords: ["töö", "projekt", "tähtaeg", "klient", "boss", "juht", "koosolek", "kolleeg", "karjäär"],
-        resolved: "Lahenes tööga seotud surve, mis venitas tähelepanu ja sisemist rahu.",
-        state: "Töö on taas kontrolli all ja päev tundub selgem.",
-        summary: "Tööteema ei paina enam ja fookus on tagasi."
-    },
-    {
-        label: "Raha ja kohustused",
-        meta: "Rahaline olukord on stabiilsem ja igapäevane pinge on taandunud.",
-        keywords: ["raha", "palk", "eelarve", "võlg", "laen", "arve", "kulud", "sissetulek", "makse"],
-        resolved: "Lahenes rahaline pinge, mis tekitas nappuse või kohustuste survet.",
-        state: "Rahaline seis on rahulikum, kindlam ja tasakaalus.",
-        summary: "Raha ei mõju enam pideva probleemina."
-    },
-    {
-        label: "Suhted ja suhtlus",
-        meta: "Suhtlus on pehmem, lähedus on taastunud ja pinge on taandunud.",
-        keywords: ["suhe", "partner", "sõber", "pere", "ema", "isa", "abikaasa", "tüli", "konflikt", "suhtlus"],
-        resolved: "Lahenes suhte või suhtluse ümber olnud pinge.",
-        state: "Suhe on soojem, vastastikune ja tasakaalus.",
-        summary: "See suheteema ei hoia enam midagi kinni."
-    },
-    {
-        label: "Tervis ja koormus",
-        meta: "Koormus on leevenenud ja sisemine rahu on tagasi.",
-        keywords: ["stress", "ärevus", "väsimus", "tervis", "uni", "läbipõlemine", "kurnatus", "pinge", "depressioon"],
-        resolved: "Lahenes pinge või ülekoormuse osa, mis kurnas kõige rohkem.",
-        state: "Enesetunne on ühtlasem ja olukord ei rõhu enam.",
-        summary: "See teema ei koorma enam samal viisil."
-    },
-    {
-        label: "Otsus ja suunavalik",
-        meta: "Suund on selge ja sisemine kõhklus on taandunud.",
-        keywords: ["otsus", "valik", "valima", "kas", "kolida", "lahkuda", "jääda", "suund", "variant"],
-        resolved: "Lahenes valiku ümber olnud ebaselgus.",
-        state: "Otsus on paigas ja edasi liikumine on lihtsam.",
-        summary: "See küsimus ei ripu enam õhus."
-    }
-];
-
 const RATING_MESSAGES = {
     1: "Tagasiside salvestatud. Tulemus ei olnud seekord sinu jaoks piisav.",
     2: "Tagasiside salvestatud. Tulemus jäi pigem nõrgaks.",
@@ -766,6 +932,30 @@ const REPORT_FIELD_LIMITS = {
 
 function sanitizeProblemText(text) {
     return text.replace(/\s+/g, " ").trim();
+}
+
+function normalizeProblemInputText(text) {
+    return String(text || "")
+        .replace(/\r\n?/g, "\n")
+        .split("\n")
+        .map(function (line) {
+            return line.replace(/[^\S\n]+/g, " ").trim();
+        })
+        .join("\n")
+        .replace(/\n{3,}/g, "\n\n")
+        .trim();
+}
+
+function normalizeProblemDetailText(text) {
+    return String(text || "")
+        .replace(/\r\n?/g, "\n")
+        .split("\n")
+        .map(function (line) {
+            return line.replace(/[^\S\n]+/g, " ").trim();
+        })
+        .join("\n")
+        .replace(/\n{3,}/g, "\n\n")
+        .trim();
 }
 
 function truncate(text, maxLength) {
@@ -803,6 +993,10 @@ function isGenericMeta(value, genericValues) {
 }
 
 function animateValue(element, start, end, duration) {
+    if (!element) {
+        return;
+    }
+
     const safeStart = Number.isFinite(start) ? start : 0;
     const safeEnd = Number.isFinite(end) ? end : 0;
 
@@ -836,7 +1030,213 @@ function renderSolvedCount() {
     const total = typeof remoteSolvedCount === "number" ? remoteSolvedCount : 0;
 
     animateValue(solvedCount, currentSolvedCount, total, 420);
+
     currentSolvedCount = total;
+}
+
+function normalizeSolverSkin(value) {
+    return SOLVER_SKINS.some(function (skin) {
+        return skin.id === value;
+    })
+        ? value
+        : SOLVER_SKINS[0].id;
+}
+
+function getSolverSkinIndex(value = currentSolverSkinId) {
+    const normalizedValue = normalizeSolverSkin(value);
+    const index = SOLVER_SKINS.findIndex(function (skin) {
+        return skin.id === normalizedValue;
+    });
+
+    return index >= 0 ? index : 0;
+}
+
+function renderSolverSkinDots() {
+    if (!solverSkinDots) {
+        return;
+    }
+
+    const fragment = document.createDocumentFragment();
+    const activeIndex = getSolverSkinIndex();
+
+    SOLVER_SKINS.forEach(function (_skin, index) {
+        const dot = document.createElement("span");
+        dot.className = "intake-stage__skin-dot";
+        dot.classList.toggle("is-active", index === activeIndex);
+        fragment.append(dot);
+    });
+
+    solverSkinDots.replaceChildren(fragment);
+}
+
+function applySolverSkin(value, options = {}) {
+    const nextSkin = normalizeSolverSkin(value);
+    const motion = options.motion === "prev" || options.motion === "next"
+        ? options.motion
+        : "";
+
+    currentSolverSkinId = nextSkin;
+
+    if (document.body) {
+        document.body.dataset.solverSkin = nextSkin;
+    }
+
+    if (intakeStage) {
+        intakeStage.dataset.solverSkin = nextSkin;
+    }
+
+    if (motion) {
+        if (intakeStage) {
+            intakeStage.dataset.solverSkinMotion = motion;
+        }
+
+        if (document.body) {
+            document.body.dataset.solverSkinMotion = motion;
+        }
+
+        window.clearTimeout(solverSkinMotionTimer);
+        solverSkinMotionTimer = window.setTimeout(function () {
+            if (intakeStage && intakeStage.dataset.solverSkinMotion === motion) {
+                delete intakeStage.dataset.solverSkinMotion;
+            }
+
+            if (document.body && document.body.dataset.solverSkinMotion === motion) {
+                delete document.body.dataset.solverSkinMotion;
+            }
+        }, SOLVER_SKIN_MOTION_DURATION);
+    }
+
+    renderSolverSkinDots();
+}
+
+function loadSolverSkinPreference() {
+    try {
+        return normalizeSolverSkin(window.localStorage.getItem(SOLVER_SKIN_STORAGE_KEY) || "");
+    } catch (_error) {
+        return SOLVER_SKINS[0].id;
+    }
+}
+
+function persistSolverSkinPreference(value) {
+    try {
+        window.localStorage.setItem(SOLVER_SKIN_STORAGE_KEY, normalizeSolverSkin(value));
+    } catch (_error) {
+        // Ignore storage failures and keep the in-memory preference.
+    }
+}
+
+function cycleSolverSkin(step, motion) {
+    const currentIndex = getSolverSkinIndex();
+    const nextIndex = (currentIndex + step + SOLVER_SKINS.length) % SOLVER_SKINS.length;
+    const nextSkinId = SOLVER_SKINS[nextIndex].id;
+
+    applySolverSkin(nextSkinId, {
+        motion: prefersReducedMotionQuery.matches ? "" : motion
+    });
+    persistSolverSkinPreference(nextSkinId);
+}
+
+function initializeSolverSkinSwipe() {
+    applySolverSkin(loadSolverSkinPreference());
+
+    if (!intakeStageFrame || intakeStageFrame.dataset.solverSkinSwipeBound === "true") {
+        return;
+    }
+
+    intakeStageFrame.addEventListener("touchstart", function (event) {
+        if (event.touches.length !== 1) {
+            solverSkinTouchActive = false;
+            return;
+        }
+
+        const touch = event.touches[0];
+        solverSkinTouchStartX = touch.clientX;
+        solverSkinTouchStartY = touch.clientY;
+        solverSkinTouchActive = true;
+    }, { passive: true });
+
+    intakeStageFrame.addEventListener("touchend", function (event) {
+        if (!solverSkinTouchActive || event.changedTouches.length !== 1) {
+            solverSkinTouchActive = false;
+            return;
+        }
+
+        const touch = event.changedTouches[0];
+        const deltaX = touch.clientX - solverSkinTouchStartX;
+        const deltaY = touch.clientY - solverSkinTouchStartY;
+
+        solverSkinTouchActive = false;
+
+        if (Math.abs(deltaX) < SOLVER_SKIN_SWIPE_THRESHOLD || Math.abs(deltaX) <= Math.abs(deltaY) * 1.2) {
+            return;
+        }
+
+        cycleSolverSkin(deltaX < 0 ? 1 : -1, deltaX < 0 ? "next" : "prev");
+    }, { passive: true });
+
+    intakeStageFrame.addEventListener("touchcancel", function () {
+        solverSkinTouchActive = false;
+    }, { passive: true });
+
+    intakeStageFrame.dataset.solverSkinSwipeBound = "true";
+}
+
+function setUrgitsBannerLayerImage(layer, imageSrc) {
+    if (!layer) {
+        return;
+    }
+
+    layer.style.backgroundImage = imageSrc ? 'url("' + imageSrc + '")' : "";
+}
+
+function advanceUrgitsBannerImage() {
+    if (!urgitsBannerFrame || urgitsBannerImageLayers.length < 2 || URGITS_BANNER_IMAGES.length < 2) {
+        return;
+    }
+
+    const nextImageIndex = (urgitsBannerActiveImageIndex + 1) % URGITS_BANNER_IMAGES.length;
+    const nextLayerIndex = (urgitsBannerActiveLayerIndex + 1) % urgitsBannerImageLayers.length;
+    const currentLayer = urgitsBannerImageLayers[urgitsBannerActiveLayerIndex];
+    const nextLayer = urgitsBannerImageLayers[nextLayerIndex];
+
+    setUrgitsBannerLayerImage(nextLayer, URGITS_BANNER_IMAGES[nextImageIndex]);
+    nextLayer.classList.add("is-active");
+    currentLayer?.classList.remove("is-active");
+
+    urgitsBannerActiveImageIndex = nextImageIndex;
+    urgitsBannerActiveLayerIndex = nextLayerIndex;
+}
+
+function initializeUrgitsBannerRotation() {
+    if (!urgitsBannerFrame || urgitsBannerImageLayers.length === 0 || URGITS_BANNER_IMAGES.length === 0) {
+        return;
+    }
+
+    setUrgitsBannerLayerImage(urgitsBannerImageLayers[0], URGITS_BANNER_IMAGES[0]);
+
+    if (urgitsBannerImageLayers[1]) {
+        setUrgitsBannerLayerImage(urgitsBannerImageLayers[1], URGITS_BANNER_IMAGES[1] || URGITS_BANNER_IMAGES[0]);
+        urgitsBannerImageLayers[1].classList.remove("is-active");
+    }
+
+    urgitsBannerActiveLayerIndex = 0;
+    urgitsBannerActiveImageIndex = 0;
+
+    if (urgitsBannerImageTimer) {
+        window.clearInterval(urgitsBannerImageTimer);
+    }
+
+    if (prefersReducedMotionQuery.matches || URGITS_BANNER_IMAGES.length < 2) {
+        return;
+    }
+
+    urgitsBannerImageTimer = window.setInterval(function () {
+        if (document.hidden) {
+            return;
+        }
+
+        advanceUrgitsBannerImage();
+    }, URGITS_BANNER_IMAGE_ROTATION_MS);
 }
 
 function normalizeEmailAddress(value) {
@@ -986,22 +1386,38 @@ function showPanel(panel, state) {
 
     panel.style.display = "block";
     body.dataset.state = state;
+
+    window.requestAnimationFrame(function () {
+        const scrollTarget = panel.querySelector(".panel__frame") || panel;
+        const bodyPaddingTop = parseFloat(window.getComputedStyle(body).paddingTop) || 0;
+        const targetTop = Math.max(0, window.scrollY + scrollTarget.getBoundingClientRect().top - bodyPaddingTop);
+
+        window.scrollTo({
+            top: targetTop,
+            behavior: prefersReducedMotionQuery.matches ? "auto" : "smooth"
+        });
+    });
+}
+
+function formatSolveDurationLabel(durationMs) {
+    const totalSeconds = Math.max(1, Math.round(durationMs / 1000));
+
+    if (totalSeconds < 60) {
+        return "Valmis " + totalSeconds + " sekundiga.";
+    }
+
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = totalSeconds % 60;
+
+    if (seconds === 0) {
+        return "Valmis " + minutes + " minutiga.";
+    }
+
+    return "Valmis " + minutes + " min " + seconds + " s.";
 }
 
 function detectCategory(problemText) {
-    const lowerText = problemText.toLowerCase();
-
-    return CATEGORY_RULES.find(function (category) {
-        return category.keywords.some(function (keyword) {
-            return lowerText.includes(keyword);
-        });
-    }) || {
-        label: "Üldine olukord",
-        meta: "Varasem ebaselgus on taandunud ja olukord mõjub kindlamalt.",
-        resolved: "Lahenes pinge või ebaselguse osa, mis hoidis teemat lahtisena.",
-        state: "Olukord on nüüd selgem, rahulikum ja lõpetatud.",
-        summary: "Algne segadus on läbi ja tunne on kindlam."
-    };
+    return detectProblemCategory(problemText) || GENERAL_PROBLEM_CATEGORY;
 }
 
 function getClarity(problemText) {
@@ -1187,6 +1603,10 @@ function normalizeDailyCoverStory(record) {
         subjectName,
         title,
         summary: truncate(sanitizeProblemText(record.summary || ""), 220),
+        transcriptSummary: truncate(sanitizeProblemText(record.transcriptSummary || record.transcript_summary || ""), 320),
+        lead: truncate(sanitizeProblemText(record.lead || ""), 220),
+        paragraphs: normalizeTextArray(record.paragraphs, [], 4, 360),
+        pullQuote: truncate(sanitizeProblemText(record.pullQuote || record.pull_quote || ""), 220),
         imageUrl,
         imageAlt: truncate(sanitizeProblemText(record.imageAlt || record.image_alt || ""), 180),
         publishedAt: new Date(parseDateToTimestamp(record.publishedAt || record.published_at)).toISOString()
@@ -1421,34 +1841,41 @@ function renderFeaturedHoroscope(sign) {
     horoscopeFeatured.classList.remove("horoscope-card--empty");
     horoscopeFeatured.style.setProperty("--horoscope-accent", sign.accent);
     horoscopeFeatured.style.setProperty("--horoscope-glow", sign.accentSoft);
+    if (dailyHoroscopeSection) {
+        dailyHoroscopeSection.style.setProperty("--horoscope-section-accent", sign.accent);
+        dailyHoroscopeSection.style.setProperty("--horoscope-section-glow", sign.accentSoft);
+    }
 
     const fragment = document.createDocumentFragment();
-    const top = document.createElement("div");
-    const emblem = document.createElement("div");
+    const hero = document.createElement("div");
     const meta = document.createElement("div");
+    const visual = document.createElement("div");
+    const visualSymbol = document.createElement("span");
     const signLabel = document.createElement("span");
+    const title = document.createElement("p");
     const date = document.createElement("span");
-    const title = document.createElement("h3");
     const body = document.createElement("div");
     const indicators = document.createElement("div");
 
-    top.className = "horoscope-card__top";
-    emblem.className = "horoscope-card__emblem";
+    hero.className = "horoscope-card__hero";
     meta.className = "horoscope-card__meta";
+    visual.className = "horoscope-card__visual";
+    visualSymbol.className = "horoscope-card__visual-symbol";
     signLabel.className = "horoscope-card__sign";
-    date.className = "horoscope-card__date";
     title.className = "horoscope-card__title";
+    date.className = "horoscope-card__date";
     body.className = "horoscope-card__body";
     indicators.className = "horoscope-card__indicators";
 
-    emblem.textContent = sign.symbol;
+    visualSymbol.textContent = sign.symbol;
     signLabel.textContent = sign.label;
-    date.textContent = articleDateFormatter.format(new Date(sign.publishedAt || dailyHoroscopePublishedAt || Date.now()));
     title.textContent = sign.title;
+    date.textContent = articleDateFormatter.format(new Date(sign.publishedAt || dailyHoroscopePublishedAt || Date.now()));
 
-    meta.append(signLabel, date);
-    top.append(emblem, meta);
-    fragment.append(top, title);
+    meta.append(signLabel, title, date);
+    visual.append(visualSymbol);
+    hero.append(meta, visual);
+    fragment.append(hero);
 
     sign.paragraphs.forEach(function (paragraphText, index) {
         const paragraph = document.createElement("p");
@@ -1467,8 +1894,10 @@ function renderFeaturedHoroscope(sign) {
         const label = document.createElement("span");
         const meter = document.createElement("span");
         const value = sign.indicators?.[item.key] ?? 3;
+        const tone = value <= 2 ? "low" : value === 3 ? "mid" : "high";
 
         block.className = "horoscope-indicator";
+        block.classList.add("is-" + tone);
         label.className = "horoscope-indicator__label";
         meter.className = "horoscope-indicator__meter";
 
@@ -1541,6 +1970,15 @@ function renderDailyHoroscope() {
     });
 
     horoscopeSignGrid.replaceChildren(fragment);
+
+    const activeButton = horoscopeSignGrid.querySelector(".horoscope-sign.is-selected");
+    if (activeButton && window.matchMedia("(max-width: 767px)").matches) {
+        activeButton.scrollIntoView({
+            block: "nearest",
+            inline: "center",
+            behavior: "smooth"
+        });
+    }
 }
 
 function setDailyHoroscope(payload) {
@@ -1972,7 +2410,7 @@ function renderWeatherStrip() {
         weatherStripTemp.textContent = "--°";
         weatherStripCondition.textContent = "Laadimine";
         weatherStripRange.textContent = "--° / --°";
-        weatherStripMeta.textContent = "Ava detailne ilmavaade";
+        weatherStripMeta.textContent = "";
         weatherStripPeek.replaceChildren();
         applyWeatherTheme(weatherStrip, "cloudy");
         weatherStrip.style.removeProperty("--weather-strip-photo");
@@ -1998,9 +2436,7 @@ function renderWeatherStrip() {
     weatherStripTemp.textContent = formatWeatherTemperature(dailyWeather.current.temperature);
     weatherStripCondition.textContent = currentMeta.label;
     weatherStripRange.textContent = `${formatWeatherTemperature(dailyWeather.today.temperatureMax)} / ${formatWeatherTemperature(dailyWeather.today.temperatureMin)}`;
-    weatherStripMeta.textContent = dailyWeather.location.source === "device"
-        ? "Ava 5 päeva prognoos"
-        : "Tallinna vaikimisi prognoos";
+    weatherStripMeta.textContent = "";
     renderWeatherPeekDays(dailyWeather.forecast);
     applyWeatherTheme(weatherStrip, dailyWeather.current.conditionKey);
     loadWeatherSceneImage();
@@ -2530,6 +2966,26 @@ function getProblemQuizMetricTone(value) {
     return "madal";
 }
 
+function setProblemQuizState(state) {
+    if (!problemQuizSection) {
+        return;
+    }
+
+    problemQuizSection.dataset.quizState = state;
+}
+
+function focusProblemQuizPrimaryAction() {
+    const focusTarget = problemQuizCard?.querySelector(".problem-quiz__answer, .problem-quiz__action--primary, .problem-quiz__action--secondary");
+
+    if (!focusTarget) {
+        return;
+    }
+
+    window.setTimeout(function () {
+        focusTarget.focus();
+    }, 80);
+}
+
 function getProblemQuizSnapshotState() {
     const totals = {
         pressure: 0,
@@ -2915,7 +3371,8 @@ function renderProblemQuizResult() {
     });
 
     secondary.addEventListener("click", function () {
-        resetProblemQuiz();
+        resetProblemQuiz({ keepStarted: true });
+        focusProblemQuizPrimaryAction();
     });
 
     score.append(scoreLabel, scoreValue, scoreUnit);
@@ -2935,24 +3392,49 @@ function renderProblemQuiz() {
         return;
     }
 
+    if (!isProblemQuizStarted) {
+        setProblemQuizState("intro");
+        return;
+    }
+
     renderProblemQuizProgress();
     renderProblemQuizSnapshot();
 
     if (currentProblemQuizStep >= PROBLEM_QUIZ_QUESTIONS.length) {
+        setProblemQuizState("result");
         renderProblemQuizResult();
         return;
     }
 
+    setProblemQuizState("active");
     renderProblemQuizQuestion();
 }
 
-function resetProblemQuiz() {
+function resetProblemQuiz(options = {}) {
+    const keepStarted = options.keepStarted === true;
+
     clearProblemQuizAdvanceTimer();
     problemQuizAnswers = PROBLEM_QUIZ_QUESTIONS.map(function () {
         return null;
     });
     currentProblemQuizStep = 0;
+    isProblemQuizStarted = keepStarted;
     renderProblemQuiz();
+}
+
+function startProblemQuiz() {
+    isProblemQuizStarted = true;
+
+    if (currentProblemQuizStep >= PROBLEM_QUIZ_QUESTIONS.length) {
+        currentProblemQuizStep = 0;
+    }
+
+    renderProblemQuiz();
+    problemQuizSection?.scrollIntoView({
+        behavior: prefersReducedMotionQuery.matches ? "auto" : "smooth",
+        block: "start"
+    });
+    focusProblemQuizPrimaryAction();
 }
 
 function initializeProblemQuiz() {
@@ -2960,7 +3442,10 @@ function initializeProblemQuiz() {
         return;
     }
 
-    problemQuizRestartButton?.addEventListener("click", resetProblemQuiz);
+    problemQuizStartButton?.addEventListener("click", startProblemQuiz);
+    problemQuizRestartButton?.addEventListener("click", function () {
+        resetProblemQuiz({ keepStarted: true });
+    });
     resetProblemQuiz();
 }
 
@@ -2975,8 +3460,8 @@ function normalizeRecentProblem(record) {
         return null;
     }
 
-    const problemType = sanitizeProblemText(record.problemType || record.problem_type || "Üldine olukord")
-        || "Üldine olukord";
+    const problemType = sanitizeProblemText(record.problemType || record.problem_type || GENERAL_PROBLEM_CATEGORY.label)
+        || GENERAL_PROBLEM_CATEGORY.label;
     const status = sanitizeProblemText(record.status || "Lahendatud") || "Lahendatud";
     const createdAt = new Date(parseDateToTimestamp(record.createdAt || record.created_at)).toISOString();
 
@@ -2986,6 +3471,39 @@ function normalizeRecentProblem(record) {
         problemType: truncate(problemType, 40),
         status: truncate(status, 24),
         createdAt
+    };
+}
+
+function normalizeRecentProblemDetail(record) {
+    if (!record || typeof record !== "object") {
+        return null;
+    }
+
+    const reportId = sanitizeProblemText(record.reportId || record.report_id || "");
+    const detailText = normalizeProblemDetailText(record.detailText || record.detail_text || record.problemText || "");
+    const resolutionText = normalizeProblemDetailText(
+        record.resolutionText
+        || record.resolution_text
+        || record.summary
+        || ""
+    );
+
+    if (!reportId || !detailText) {
+        return null;
+    }
+
+    return {
+        reportId,
+        publicProblemText: sanitizeProblemText(
+            record.publicProblemText || record.public_problem_text || record.problemType || "Probleemi kirjeldus"
+        ) || "Probleemi kirjeldus",
+        detailText,
+        resolutionText,
+        problemType: sanitizeProblemText(record.problemType || record.problem_type || GENERAL_PROBLEM_CATEGORY.label)
+            || GENERAL_PROBLEM_CATEGORY.label,
+        status: sanitizeProblemText(record.status || "Lahendatud") || "Lahendatud",
+        createdAt: new Date(parseDateToTimestamp(record.createdAt || record.created_at)).toISOString(),
+        visibility: sanitizeProblemText(record.visibility || "original") || "original"
     };
 }
 
@@ -3042,6 +3560,31 @@ function mergeRecentProblems() {
     return merged.slice(0, RECENT_PROBLEMS_LIMIT);
 }
 
+function areRecentProblemListsEqual(firstCollection, secondCollection) {
+    if (firstCollection === secondCollection) {
+        return true;
+    }
+
+    if (!Array.isArray(firstCollection) || !Array.isArray(secondCollection)) {
+        return false;
+    }
+
+    if (firstCollection.length !== secondCollection.length) {
+        return false;
+    }
+
+    return firstCollection.every(function (firstProblem, index) {
+        const secondProblem = secondCollection[index];
+
+        return Boolean(secondProblem)
+            && firstProblem.reportId === secondProblem.reportId
+            && firstProblem.problemText === secondProblem.problemText
+            && firstProblem.problemType === secondProblem.problemType
+            && firstProblem.status === secondProblem.status
+            && firstProblem.createdAt === secondProblem.createdAt;
+    });
+}
+
 function persistRecentProblems() {
     try {
         window.localStorage.setItem(RECENT_PROBLEMS_STORAGE_KEY, JSON.stringify(recentProblems));
@@ -3066,6 +3609,94 @@ function loadRecentProblems() {
     }
 }
 
+function loadRecentProblemsUnlocked() {
+    try {
+        const unlockedValue = window.localStorage.getItem(RECENT_PROBLEMS_UNLOCKED_KEY);
+
+        if (unlockedValue === "true") {
+            return true;
+        }
+
+        if (unlockedValue === "false") {
+            return false;
+        }
+
+        return loadRecentProblems().length > 0;
+    } catch (_error) {
+        return false;
+    }
+}
+
+function persistRecentProblemsUnlocked(value) {
+    try {
+        window.localStorage.setItem(RECENT_PROBLEMS_UNLOCKED_KEY, value ? "true" : "false");
+    } catch (_error) {
+        // Ignore storage failures and keep the in-memory state.
+    }
+}
+
+function setRecentProblemsUnlocked(value) {
+    recentProblemsUnlocked = Boolean(value);
+
+    if (recentProblemsSection) {
+        recentProblemsSection.hidden = !recentProblemsUnlocked;
+    }
+
+    persistRecentProblemsUnlocked(recentProblemsUnlocked);
+}
+
+function loadLikedRecentProblemIds() {
+    try {
+        const raw = window.localStorage.getItem(RECENT_PROBLEM_LIKES_STORAGE_KEY);
+
+        if (!raw) {
+            return new Set();
+        }
+
+        const parsed = JSON.parse(raw);
+
+        if (!Array.isArray(parsed)) {
+            return new Set();
+        }
+
+        return new Set(parsed.map(function (value) {
+            return sanitizeProblemText(value);
+        }).filter(Boolean));
+    } catch (_error) {
+        return new Set();
+    }
+}
+
+function persistLikedRecentProblemIds() {
+    try {
+        window.localStorage.setItem(
+            RECENT_PROBLEM_LIKES_STORAGE_KEY,
+            JSON.stringify(Array.from(likedRecentProblemIds))
+        );
+    } catch (_error) {
+        // Ignore storage failures and keep the in-memory state.
+    }
+}
+
+function isRecentProblemLiked(reportId) {
+    return Boolean(reportId) && likedRecentProblemIds.has(reportId);
+}
+
+function toggleRecentProblemLike(reportId) {
+    if (!reportId) {
+        return;
+    }
+
+    if (likedRecentProblemIds.has(reportId)) {
+        likedRecentProblemIds.delete(reportId);
+    } else {
+        likedRecentProblemIds.add(reportId);
+    }
+
+    persistLikedRecentProblemIds();
+    renderRecentProblems();
+}
+
 function formatRecentProblemTime(createdAt) {
     const timestamp = parseDateToTimestamp(createdAt);
     const diffInMinutes = Math.round((timestamp - Date.now()) / 60000);
@@ -3087,6 +3718,22 @@ function formatRecentProblemTime(createdAt) {
 
     const diffInDays = Math.round(diffInHours / 24);
     return relativeTimeFormatter.format(diffInDays, "day");
+}
+
+function formatRecentProblemDetailMeta(problem) {
+    if (!problem) {
+        return "";
+    }
+
+    const pieces = [];
+
+    if (problem.problemType) {
+        pieces.push(problem.problemType);
+    }
+
+    pieces.push(articleDateFormatter.format(new Date(parseDateToTimestamp(problem.createdAt))));
+
+    return pieces.join(" · ");
 }
 
 function maskProfanity(word) {
@@ -3129,39 +3776,384 @@ function appendPublicProblemText(container, text) {
     }
 }
 
-function createRecentProblemCard(problem) {
+function appendRecentProblemDetailParagraphs(container, text) {
+    const paragraphs = normalizeProblemDetailText(text)
+        .split(/\n{2,}/)
+        .map(function (paragraph) {
+            return paragraph.trim();
+        })
+        .filter(Boolean);
+
+    container.replaceChildren();
+
+    if (paragraphs.length === 0) {
+        const paragraph = document.createElement("p");
+        paragraph.textContent = "Täispikk kirjeldus ei ole hetkel saadaval.";
+        container.append(paragraph);
+        return;
+    }
+
+    paragraphs.forEach(function (paragraphText) {
+        const paragraph = document.createElement("p");
+        paragraph.textContent = paragraphText;
+        container.append(paragraph);
+    });
+}
+
+function getRecentProblemSolutionIconMarkup(iconKey) {
+    const iconBodyByKey = {
+        spark: `
+            <path d="M12 2.8L13.9 8.1L19.2 10L13.9 11.9L12 17.2L10.1 11.9L4.8 10L10.1 8.1L12 2.8Z"></path>
+            <path d="M18.6 3.8L19.2 5.5L20.9 6.1L19.2 6.7L18.6 8.4L18 6.7L16.3 6.1L18 5.5L18.6 3.8Z"></path>
+        `,
+        check: `
+            <circle cx="12" cy="12" r="8.2"></circle>
+            <path d="M8.7 12.1L11 14.4L15.5 9.9"></path>
+        `,
+        bloom: `
+            <path d="M12 4.1C13.4 6.1 13.6 8.4 12 10C10.4 8.4 10.6 6.1 12 4.1Z"></path>
+            <path d="M17.9 9C16 10.4 13.7 10.6 12 9C13.7 7.4 16 7.6 17.9 9Z"></path>
+            <path d="M12 13.9C13.6 15.5 13.4 17.8 12 19.9C10.6 17.8 10.4 15.5 12 13.9Z"></path>
+            <path d="M6.1 9C8 7.6 10.3 7.4 12 9C10.3 10.6 8 10.4 6.1 9Z"></path>
+            <circle cx="12" cy="9.1" r="1.2"></circle>
+        `
+    };
+
+    return `
+        <svg class="recent-problem__solution-icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            ${iconBodyByKey[iconKey] || iconBodyByKey.check}
+        </svg>
+    `;
+}
+
+function buildRecentProblemSolutionModel(text) {
+    const paragraphs = normalizeProblemDetailText(text)
+        .split(/\n{2,}/)
+        .map(function (paragraph) {
+            return paragraph.trim();
+        })
+        .filter(Boolean);
+
+    const sentencePattern = /(?<=[.!?])\s+/;
+    const sentences = paragraphs.flatMap(function (paragraph) {
+        return paragraph
+            .split(sentencePattern)
+            .map(function (sentence) {
+                return sentence.trim();
+            })
+            .filter(Boolean);
+    });
+
+    if (sentences.length === 0) {
+        return {
+            lead: "Selle teema ümber on nüüd palju rohkem selgust ja kergust.",
+            points: []
+        };
+    }
+
+    return {
+        lead: sentences[0],
+        points: sentences.slice(1, 4)
+    };
+}
+
+function appendRecentProblemSolutionParagraphs(container, text) {
+    const model = buildRecentProblemSolutionModel(text);
+    const shell = document.createElement("div");
+    const hero = document.createElement("div");
+    const mark = document.createElement("span");
+    const lead = document.createElement("p");
+    const points = document.createElement("div");
+    const iconKeys = ["spark", "check", "bloom"];
+
+    container.replaceChildren();
+
+    shell.className = "recent-problem__solution-shell";
+    hero.className = "recent-problem__solution-hero";
+    mark.className = "recent-problem__solution-mark";
+    lead.className = "recent-problem__solution-lead";
+    points.className = "recent-problem__solution-points";
+
+    mark.innerHTML = getRecentProblemSolutionIconMarkup("spark");
+    lead.textContent = model.lead;
+    hero.append(mark, lead);
+    shell.append(hero);
+
+    model.points.forEach(function (pointText, index) {
+        const item = document.createElement("div");
+        const icon = document.createElement("span");
+        const paragraph = document.createElement("p");
+        item.className = "recent-problem__solution-point";
+        icon.className = "recent-problem__solution-point-icon";
+        paragraph.className = "recent-problem__solution-point-text";
+        icon.innerHTML = getRecentProblemSolutionIconMarkup(iconKeys[index % iconKeys.length]);
+        paragraph.textContent = pointText;
+        item.append(icon, paragraph);
+        points.append(item);
+    });
+
+    if (points.childElementCount > 0) {
+        shell.append(points);
+    }
+
+    container.append(shell);
+}
+
+function createRecentProblemDetailContent(problem) {
+    const detail = document.createElement("div");
+    const problemSection = document.createElement("section");
+    const problemLabel = document.createElement("span");
+    const problemBody = document.createElement("div");
+    const solutionSection = document.createElement("section");
+    const solutionLabel = document.createElement("span");
+    const solutionBody = document.createElement("div");
+    const revealWrap = document.createElement("div");
+    const revealButton = document.createElement("button");
+    const footer = document.createElement("div");
+    const likeButton = document.createElement("button");
+    const note = document.createElement("p");
+
+    detail.className = "recent-problem__detail";
+    problemSection.className = "recent-problem__detail-section recent-problem__detail-section--problem";
+    problemLabel.className = "recent-problem__detail-label";
+    problemBody.className = "recent-problem__detail-body";
+    solutionSection.className = "recent-problem__detail-section recent-problem__detail-section--solution";
+    solutionLabel.className = "recent-problem__detail-label recent-problem__detail-label--solution";
+    solutionBody.className = "recent-problem__solution";
+    revealWrap.className = "recent-problem__reveal-wrap";
+    revealButton.className = "recent-problem__reveal";
+    footer.className = "recent-problem__detail-footer";
+    likeButton.className = "recent-problem__like";
+    note.className = "recent-problem__detail-note";
+
+    problemLabel.textContent = "Probleem";
+    solutionLabel.textContent = "Lahendus";
+
+    detail.addEventListener("click", function (event) {
+        event.stopPropagation();
+    });
+
+    if (isRecentProblemDetailLoading) {
+        detail.dataset.state = "loading";
+        appendRecentProblemSolutionParagraphs(solutionBody, "Koostan veel korraks selle pikema kinnituse, et see teema on nüüd päriselt maas.");
+        solutionSection.append(solutionLabel, solutionBody);
+        detail.append(solutionSection);
+        return detail;
+    }
+
+    if (recentProblemDetailError) {
+        detail.dataset.state = "error";
+        appendRecentProblemSolutionParagraphs(solutionBody, "Selle lahenduse helgem lõppseis ei jõudnud praegu kohale.");
+        solutionSection.append(solutionLabel, solutionBody);
+        detail.append(solutionSection);
+        return detail;
+    }
+
+    detail.dataset.state = "ready";
+    appendRecentProblemSolutionParagraphs(
+        solutionBody,
+        problem?.resolutionText || "See teema ei suru enam peale ja asemele on tulnud palju kergem tunne."
+    );
+    solutionSection.append(solutionLabel, solutionBody);
+    detail.append(solutionSection);
+
+    if (problem?.detailText) {
+        const problemSectionId = `recent-problem-original-${String(problem.reportId || "preview").replace(/[^a-z0-9_-]+/gi, "-")}`;
+
+        revealButton.type = "button";
+        revealButton.textContent = isRecentProblemOriginalVisible ? "Peida probleem" : "Vaata milles oli probleem";
+        revealButton.setAttribute("aria-expanded", String(isRecentProblemOriginalVisible));
+        revealButton.setAttribute("aria-controls", problemSectionId);
+        revealButton.addEventListener("click", function (event) {
+            event.preventDefault();
+            event.stopPropagation();
+            isRecentProblemOriginalVisible = !isRecentProblemOriginalVisible;
+            renderRecentProblems();
+        });
+        revealButton.addEventListener("keydown", function (event) {
+            event.stopPropagation();
+        });
+        revealWrap.append(revealButton);
+        detail.append(revealWrap);
+
+        if (isRecentProblemOriginalVisible) {
+            problemSection.id = problemSectionId;
+            appendRecentProblemDetailParagraphs(problemBody, problem.detailText);
+            problemSection.append(problemLabel, problemBody);
+            detail.append(problemSection);
+        }
+    }
+
+    if (problem?.reportId) {
+        const liked = isRecentProblemLiked(problem.reportId);
+
+        likeButton.type = "button";
+        likeButton.classList.toggle("is-liked", liked);
+        likeButton.setAttribute("aria-pressed", String(liked));
+        likeButton.setAttribute("aria-label", liked ? "Eemalda meeldimine" : "Märgi see lahendus meeldivaks");
+        likeButton.textContent = liked ? "Meeldib" : "Märgi meeldivaks";
+        likeButton.addEventListener("click", function (event) {
+            event.preventDefault();
+            event.stopPropagation();
+            toggleRecentProblemLike(problem.reportId);
+        });
+        likeButton.addEventListener("keydown", function (event) {
+            event.stopPropagation();
+        });
+        footer.append(likeButton);
+    }
+
+    if (problem?.visibility === "sanitized") {
+        note.textContent = "Avaliku vaate jaoks on roppused või solvangud pehmemaks toimetatud.";
+    } else if (problem?.visibility === "hidden") {
+        note.textContent = "Avaliku vaate jaoks tuli kirjeldust tugevamalt toimetada.";
+    }
+
+    if (note.textContent) {
+        footer.append(note);
+    }
+
+    if (footer.childElementCount > 0) {
+        detail.append(footer);
+    }
+
+    return detail;
+}
+
+function closeRecentProblemDetail() {
+    selectedRecentProblemReportId = "";
+    selectedRecentProblemPreview = null;
+    selectedRecentProblemDetail = null;
+    isRecentProblemOriginalVisible = false;
+    recentProblemDetailError = "";
+    isRecentProblemDetailLoading = false;
+    renderRecentProblems();
+}
+
+async function fetchRecentProblemDetail(reportId) {
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(function () {
+        controller.abort();
+    }, RECENT_PROBLEM_DETAIL_REQUEST_TIMEOUT);
+
+    try {
+        const response = await fetch(`/api/recent-problems/${encodeURIComponent(reportId)}`, {
+            headers: {
+                Accept: "application/json"
+            },
+            signal: controller.signal
+        });
+
+        let payload = null;
+
+        try {
+            payload = await response.json();
+        } catch (_error) {
+            payload = null;
+        }
+
+        if (!response.ok) {
+            throw new Error(payload?.error || "Täispika kirjelduse laadimine ebaõnnestus.");
+        }
+
+        const detail = normalizeRecentProblemDetail(payload?.problem);
+
+        if (!detail) {
+            throw new Error("Täispika kirjelduse laadimine ebaõnnestus.");
+        }
+
+        recentProblemDetailCache.set(reportId, detail);
+        return detail;
+    } finally {
+        window.clearTimeout(timeoutId);
+    }
+}
+
+async function toggleRecentProblemDetail(problem) {
+    if (!problem?.reportId) {
+        return;
+    }
+
+    if (selectedRecentProblemReportId === problem.reportId) {
+        closeRecentProblemDetail();
+        return;
+    }
+
+    selectedRecentProblemReportId = problem.reportId;
+    selectedRecentProblemPreview = problem;
+    selectedRecentProblemDetail = recentProblemDetailCache.get(problem.reportId) || null;
+    isRecentProblemOriginalVisible = false;
+    recentProblemDetailError = "";
+    isRecentProblemDetailLoading = !selectedRecentProblemDetail;
+
+    renderRecentProblems();
+
+    if (selectedRecentProblemDetail) {
+        document.querySelector(".recent-problem.is-active")?.scrollIntoView({
+            behavior: "smooth",
+            block: "nearest"
+        });
+        return;
+    }
+
+    try {
+        const detail = await fetchRecentProblemDetail(problem.reportId);
+
+        if (selectedRecentProblemReportId !== problem.reportId) {
+            return;
+        }
+
+        selectedRecentProblemDetail = detail;
+        isRecentProblemDetailLoading = false;
+        renderRecentProblems();
+        document.querySelector(".recent-problem.is-active")?.scrollIntoView({
+            behavior: "smooth",
+            block: "nearest"
+        });
+    } catch (error) {
+        if (selectedRecentProblemReportId !== problem.reportId) {
+            return;
+        }
+
+        selectedRecentProblemDetail = null;
+        recentProblemDetailError = error.message || "Täispika kirjelduse laadimine ebaõnnestus.";
+        isRecentProblemDetailLoading = false;
+        renderRecentProblems();
+    }
+}
+
+function createRecentProblemCard(problem, index) {
     const article = document.createElement("article");
+    const meta = document.createElement("div");
+    const category = document.createElement("span");
+    const time = document.createElement("span");
     article.className = "recent-problem";
 
-    const meta = document.createElement("div");
+    const issueNumber = document.createElement("span");
+    issueNumber.className = "recent-problem__index";
+    issueNumber.textContent = String(index + 1).padStart(2, "0");
+
     meta.className = "recent-problem__meta";
-
-    const status = document.createElement("span");
-    status.className = "recent-problem__status";
-    status.textContent = problem.status || "Lahendatud";
-
-    const time = document.createElement("span");
+    category.className = "recent-problem__category";
     time.className = "recent-problem__time";
+    category.textContent = problem.problemType || GENERAL_PROBLEM_CATEGORY.label;
     time.textContent = formatRecentProblemTime(problem.createdAt);
+    meta.append(category, time);
 
     const text = document.createElement("p");
     text.className = "recent-problem__text";
     appendPublicProblemText(text, problem.problemText);
 
-    const footer = document.createElement("div");
-    footer.className = "recent-problem__footer";
+    const verdict = document.createElement("div");
+    verdict.className = "recent-problem__verdict";
+    verdict.dataset.stamp = "LAHENDATUD";
 
-    const type = document.createElement("span");
-    type.className = "recent-problem__type";
-    type.textContent = problem.problemType || "Üldine olukord";
+    const verdictWord = document.createElement("span");
+    verdictWord.className = "recent-problem__verdict-word";
+    verdictWord.textContent = problem.status || "Lahendatud";
 
-    const state = document.createElement("span");
-    state.className = "recent-problem__state";
-    state.textContent = "Nüüd korras";
-
-    meta.append(status, time);
-    footer.append(type, state);
-    article.append(meta, text, footer);
+    verdict.append(verdictWord);
+    article.append(issueNumber, meta, text, verdict);
 
     return article;
 }
@@ -3194,16 +4186,26 @@ function updateRecentProblemsMoreButton() {
         return;
     }
 
-    const hasMoreProblems = recentProblems.length > 0 && visibleRecentProblemsCount < recentProblems.length;
-    recentProblemsMoreButton.hidden = !hasMoreProblems;
+    const initialCount = getInitialRecentProblemsCount();
+    const hasProblems = recentProblems.length > 0;
+    const canExpand = hasProblems && visibleRecentProblemsCount < recentProblems.length;
+    const canCollapse = recentProblems.length > initialCount && visibleRecentProblemsCount > initialCount;
 
-    if (hasMoreProblems) {
-        recentProblemsMoreButton.textContent = "Vaata veel";
-    }
+    recentProblemsMoreButton.hidden = !canExpand && !canCollapse;
+    recentProblemsMoreButton.textContent = canExpand ? "Vaata veel" : "Näita vähem";
 }
 
 function renderRecentProblems() {
     if (!recentProblemsList) {
+        return;
+    }
+
+    if (recentProblemsSection) {
+        recentProblemsSection.hidden = !recentProblemsUnlocked;
+    }
+
+    if (!recentProblemsUnlocked) {
+        recentProblemsMoreButton.hidden = true;
         return;
     }
 
@@ -3225,13 +4227,959 @@ function renderRecentProblems() {
         emptyCard.append(emptyTitle, emptyNote);
         fragment.append(emptyCard);
     } else {
-        recentProblems.slice(0, visibleRecentProblemsCount).forEach(function (problem) {
-            fragment.append(createRecentProblemCard(problem));
+        const visibleProblems = recentProblems.slice(0, visibleRecentProblemsCount);
+        const grid = document.createElement("div");
+
+        grid.className = "recent-feed__folio-grid";
+
+        visibleProblems.forEach(function (problem, index) {
+            grid.append(createRecentProblemCard(problem, index));
         });
+
+        fragment.append(grid);
     }
 
     recentProblemsList.replaceChildren(fragment);
     updateRecentProblemsMoreButton();
+}
+
+function normalizeProblemCategoryStatsRows(rows) {
+    const rawRows = Array.isArray(rows) ? rows : [];
+    const totalReportsFromRows = rawRows.reduce(function (largestTotal, row) {
+        return Math.max(largestTotal, Number(row?.totalReports || 0));
+    }, 0);
+    const totalReports = totalReportsFromRows || rawRows.reduce(function (sum, row) {
+        return sum + Number(row?.problemCount || 0);
+    }, 0);
+    const rowByLabel = new Map();
+
+    rawRows.forEach(function (row) {
+        const category = getProblemCategoryDefinition(row?.problemType || row?.problem_type || "");
+        const problemCount = Number(row?.problemCount || row?.problem_count || 0);
+        const sharePercent = Number(row?.sharePercent || row?.share_percent || 0);
+
+        rowByLabel.set(category.label, {
+            category,
+            problemType: category.label,
+            problemCount: Number.isFinite(problemCount) ? problemCount : 0,
+            sharePercent: Number.isFinite(sharePercent) ? sharePercent : 0,
+            totalReports
+        });
+    });
+
+    return PROBLEM_CATEGORY_DEFINITIONS
+        .concat(GENERAL_PROBLEM_CATEGORY)
+        .map(function (category) {
+            return rowByLabel.get(category.label) || {
+                category,
+                problemType: category.label,
+                problemCount: 0,
+                sharePercent: 0,
+                totalReports
+            };
+        })
+        .filter(function (entry) {
+            return entry.problemCount > 0;
+        })
+        .sort(function (firstEntry, secondEntry) {
+            if (secondEntry.problemCount !== firstEntry.problemCount) {
+                return secondEntry.problemCount - firstEntry.problemCount;
+            }
+
+            return firstEntry.problemType.localeCompare(secondEntry.problemType, "et");
+        });
+}
+
+function normalizeProblemCategoryTrendRows(rows) {
+    const rawRows = Array.isArray(rows) ? rows : [];
+    const rowByLabel = new Map();
+
+    rawRows.forEach(function (row) {
+        const category = getProblemCategoryDefinition(row?.problemType || row?.problem_type || "");
+        const currentCount = Number(row?.currentCount || row?.current_count || 0);
+        const previousCount = Number(row?.previousCount || row?.previous_count || 0);
+        const currentSharePercent = Number(row?.currentSharePercent || row?.current_share_percent || 0);
+        const previousSharePercent = Number(row?.previousSharePercent || row?.previous_share_percent || 0);
+        const deltaSharePoints = Number(row?.deltaSharePoints || row?.delta_share_points || 0);
+        const deltaCount = Number(row?.deltaCount || row?.delta_count || 0);
+
+        rowByLabel.set(category.label, {
+            category,
+            problemType: category.label,
+            currentCount: Number.isFinite(currentCount) ? currentCount : 0,
+            previousCount: Number.isFinite(previousCount) ? previousCount : 0,
+            currentSharePercent: Number.isFinite(currentSharePercent) ? currentSharePercent : 0,
+            previousSharePercent: Number.isFinite(previousSharePercent) ? previousSharePercent : 0,
+            deltaSharePoints: Number.isFinite(deltaSharePoints) ? deltaSharePoints : 0,
+            deltaCount: Number.isFinite(deltaCount) ? deltaCount : 0
+        });
+    });
+
+    return PROBLEM_CATEGORY_DEFINITIONS
+        .concat(GENERAL_PROBLEM_CATEGORY)
+        .map(function (category) {
+            return rowByLabel.get(category.label) || {
+                category,
+                problemType: category.label,
+                currentCount: 0,
+                previousCount: 0,
+                currentSharePercent: 0,
+                previousSharePercent: 0,
+                deltaSharePoints: 0,
+                deltaCount: 0
+            };
+        })
+        .filter(function (entry) {
+            return entry.currentCount > 0 || entry.previousCount > 0;
+        })
+        .sort(function (firstEntry, secondEntry) {
+            if (secondEntry.deltaSharePoints !== firstEntry.deltaSharePoints) {
+                return secondEntry.deltaSharePoints - firstEntry.deltaSharePoints;
+            }
+
+            if (secondEntry.currentCount !== firstEntry.currentCount) {
+                return secondEntry.currentCount - firstEntry.currentCount;
+            }
+
+            return firstEntry.problemType.localeCompare(secondEntry.problemType, "et");
+        });
+}
+
+function normalizeProblemTimeSegmentRows(rows) {
+    const rawRows = Array.isArray(rows) ? rows : [];
+    const rowByIndex = new Map();
+
+    rawRows.forEach(function (row) {
+        const segmentIndex = Number(row?.segmentIndex ?? row?.segment_index ?? -1);
+        const problemCount = Number(row?.problemCount ?? row?.problem_count ?? 0);
+        const sharePercent = Number(row?.sharePercent ?? row?.share_percent ?? 0);
+        const startHour = Number(row?.startHour ?? row?.start_hour ?? segmentIndex * 2);
+        const endHour = Number(row?.endHour ?? row?.end_hour ?? ((segmentIndex * 2) + 2) % 24);
+
+        if (!Number.isFinite(segmentIndex) || segmentIndex < 0 || segmentIndex > 11) {
+            return;
+        }
+
+        rowByIndex.set(segmentIndex, {
+            segmentIndex,
+            segmentLabel: row?.segmentLabel || row?.segment_label || `${String(startHour).padStart(2, "0")}–${String(endHour).padStart(2, "0")}`,
+            startHour: Number.isFinite(startHour) ? startHour : segmentIndex * 2,
+            endHour: Number.isFinite(endHour) ? endHour : ((segmentIndex * 2) + 2) % 24,
+            problemCount: Number.isFinite(problemCount) ? problemCount : 0,
+            sharePercent: Number.isFinite(sharePercent) ? sharePercent : 0
+        });
+    });
+
+    return Array.from({ length: 12 }, function (_item, segmentIndex) {
+        const startHour = segmentIndex * 2;
+        const endHour = (startHour + 2) % 24;
+
+        return rowByIndex.get(segmentIndex) || {
+            segmentIndex,
+            segmentLabel: `${String(startHour).padStart(2, "0")}–${String(endHour).padStart(2, "0")}`,
+            startHour,
+            endHour,
+            problemCount: 0,
+            sharePercent: 0
+        };
+    });
+}
+
+function setProblemStatsStoryData(nextData) {
+    problemCategoryStats = normalizeProblemCategoryStatsRows(nextData?.stats);
+    problemCategoryTrends = normalizeProblemCategoryTrendRows(nextData?.trends);
+    problemTimeSegments = normalizeProblemTimeSegmentRows(nextData?.timeSegments);
+    renderProblemCategoryStats();
+}
+
+function getProblemCategoryIconMarkup(categoryKey) {
+    const iconBodyByKey = {
+        work: `
+            <path d="M8 7.5V6.8C8 5.8 8.8 5 9.8 5H14.2C15.2 5 16 5.8 16 6.8V7.5"></path>
+            <path d="M5.5 8.5H18.5V17.2C18.5 18.2 17.7 19 16.7 19H7.3C6.3 19 5.5 18.2 5.5 17.2V8.5Z"></path>
+            <path d="M10.2 11.5H13.8"></path>
+        `,
+        money: `
+            <circle cx="12" cy="12" r="6.8"></circle>
+            <path d="M12 8.3V15.7"></path>
+            <path d="M14.4 10.1C14.4 9.2 13.3 8.5 12 8.5C10.7 8.5 9.6 9.1 9.6 10.1C9.6 11.1 10.6 11.5 12 11.8C13.4 12.1 14.4 12.5 14.4 13.5C14.4 14.5 13.3 15.2 12 15.2C10.7 15.2 9.6 14.5 9.6 13.5"></path>
+        `,
+        relationships: `
+            <path d="M12 18.2L6.4 12.8C4.9 11.4 4.9 9.1 6.4 7.7C7.9 6.3 10.2 6.4 11.6 7.9L12 8.3L12.4 7.9C13.8 6.4 16.1 6.3 17.6 7.7C19.1 9.1 19.1 11.4 17.6 12.8L12 18.2Z"></path>
+        `,
+        home: `
+            <path d="M6.2 10.4L12 5.7L17.8 10.4"></path>
+            <path d="M7.4 9.8V18.3H16.6V9.8"></path>
+            <path d="M10.5 18.3V13.6H13.5V18.3"></path>
+        `,
+        health: `
+            <path d="M5 12H8.1L9.8 8.7L12.3 15.2L14.1 11.5H19"></path>
+            <path d="M12 19C8.1 19 5 15.9 5 12C5 8.1 8.1 5 12 5C15.9 5 19 8.1 19 12C19 15.9 15.9 19 12 19Z"></path>
+        `,
+        decision: `
+            <circle cx="12" cy="12" r="7"></circle>
+            <path d="M12 12L15.8 8.2"></path>
+            <path d="M12 7V9"></path>
+            <path d="M17 12H15"></path>
+            <path d="M12 17V15"></path>
+            <path d="M7 12H9"></path>
+        `,
+        general: `
+            <path d="M12 4.8L13.9 9L18.5 9.5L15 12.6L16 17.2L12 14.9L8 17.2L9 12.6L5.5 9.5L10.1 9L12 4.8Z"></path>
+        `
+    };
+
+    return `
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            ${iconBodyByKey[categoryKey] || iconBodyByKey.general}
+        </svg>
+    `;
+}
+
+const PROBLEM_STATS_EDITORIAL_PALETTE = [
+    { color: "#de6f56", glow: "rgba(222, 111, 86, 0.24)" },
+    { color: "#d9a24a", glow: "rgba(217, 162, 74, 0.24)" },
+    { color: "#78afa4", glow: "rgba(120, 175, 164, 0.22)" },
+    { color: "#6675d1", glow: "rgba(102, 117, 209, 0.22)" },
+    { color: "#b87eb5", glow: "rgba(184, 126, 181, 0.22)" },
+    { color: "#8ea3b5", glow: "rgba(142, 163, 181, 0.22)" }
+];
+
+const PROBLEM_STATS_OTHER_CATEGORY = {
+    key: "other",
+    label: "Muud teemad",
+    shortLabel: "Muud"
+};
+
+function getProblemCategoryDisplayStats(stats) {
+    if (!stats.length) {
+        return PROBLEM_CATEGORY_DEFINITIONS.slice(0, 5).map(function (category, index) {
+            const placeholderShares = [34, 23, 18, 14, 11];
+            return {
+                category,
+                problemType: category.label,
+                problemCount: placeholderShares[index],
+                sharePercent: placeholderShares[index],
+                totalReports: placeholderShares.reduce(function (sum, value) {
+                    return sum + value;
+                }, 0)
+            };
+        });
+    }
+
+    if (stats.length <= 5) {
+        return stats.slice();
+    }
+
+    const visibleStats = stats.slice(0, 4);
+    const remainingStats = stats.slice(4);
+    const totalReports = stats[0]?.totalReports || remainingStats.reduce(function (sum, entry) {
+        return sum + entry.problemCount;
+    }, 0);
+    const remainingCount = remainingStats.reduce(function (sum, entry) {
+        return sum + entry.problemCount;
+    }, 0);
+
+    visibleStats.push({
+        category: PROBLEM_STATS_OTHER_CATEGORY,
+        problemType: PROBLEM_STATS_OTHER_CATEGORY.label,
+        problemCount: remainingCount,
+        sharePercent: totalReports > 0 ? (remainingCount / totalReports) * 100 : 0,
+        totalReports
+    });
+
+    return visibleStats;
+}
+
+function buildProblemCategoryGaugeGradient(stats) {
+    const gaugeSweep = 250;
+    let currentAngle = 0;
+    const segments = stats.map(function (stat, index) {
+        const palette = PROBLEM_STATS_EDITORIAL_PALETTE[index % PROBLEM_STATS_EDITORIAL_PALETTE.length];
+        const segmentSweep = gaugeSweep * (Math.max(0, stat.sharePercent) / 100);
+        const nextAngle = Math.min(gaugeSweep, currentAngle + segmentSweep);
+        const segment = `${palette.color} ${currentAngle.toFixed(2)}deg ${nextAngle.toFixed(2)}deg`;
+        currentAngle = nextAngle;
+        return segment;
+    });
+
+    if (currentAngle < gaugeSweep) {
+        segments.push(`rgba(20, 32, 48, 0.12) ${currentAngle.toFixed(2)}deg ${gaugeSweep.toFixed(2)}deg`);
+    }
+
+    segments.push(`rgba(255, 255, 255, 0) ${gaugeSweep.toFixed(2)}deg 360deg`);
+
+    return `conic-gradient(from 145deg, ${segments.join(", ")})`;
+}
+
+function createProblemCategoryScaleMarker(value) {
+    const marker = document.createElement("span");
+    const angle = 145 + ((250 * value) / 100);
+
+    marker.className = "problem-barometer__scale-mark";
+    marker.style.setProperty("--problem-scale-angle", `${angle}deg`);
+    marker.textContent = String(value);
+
+    return marker;
+}
+
+function createProblemCategoryPressureItem(stat, index, leaderShare) {
+    const palette = PROBLEM_STATS_EDITORIAL_PALETTE[index % PROBLEM_STATS_EDITORIAL_PALETTE.length];
+    const item = document.createElement("article");
+    const top = document.createElement("div");
+    const rank = document.createElement("span");
+    const name = document.createElement("strong");
+    const value = document.createElement("span");
+    const track = document.createElement("div");
+    const fill = document.createElement("span");
+    const meta = document.createElement("span");
+    const fillRatio = leaderShare > 0 ? (stat.sharePercent / leaderShare) * 100 : 0;
+
+    item.className = "problem-barometer__item";
+    item.style.setProperty("--problem-barometer-item-color", palette.color);
+    item.style.setProperty("--problem-barometer-item-glow", palette.glow);
+    item.style.setProperty("--problem-barometer-item-index", String(index));
+    item.style.setProperty("--problem-barometer-fill", `${Math.max(10, Math.min(100, fillRatio)).toFixed(2)}%`);
+    item.setAttribute("role", "listitem");
+
+    top.className = "problem-barometer__item-top";
+    rank.className = "problem-barometer__item-rank";
+    name.className = "problem-barometer__item-name";
+    value.className = "problem-barometer__item-value";
+    track.className = "problem-barometer__item-track";
+    fill.className = "problem-barometer__item-fill";
+    meta.className = "problem-barometer__item-meta";
+
+    rank.textContent = String(index + 1).padStart(2, "0");
+    name.textContent = stat.category.label;
+    value.textContent = `${Math.max(1, Math.round(stat.sharePercent))}%`;
+    meta.textContent = `${numberFormatter.format(stat.problemCount)} lahendust`;
+
+    track.append(fill);
+    top.append(rank, name, value);
+    item.append(top, track, meta);
+
+    return item;
+}
+
+function createProblemCategoryShowcase(stats) {
+    const visibleStats = getProblemCategoryDisplayStats(stats);
+    const totalReports = visibleStats[0]?.totalReports || 0;
+    const leader = visibleStats[0];
+    const leaderPalette = PROBLEM_STATS_EDITORIAL_PALETTE[0];
+    const barometer = document.createElement("div");
+    const board = document.createElement("div");
+    const dialCard = document.createElement("article");
+    const dialHeader = document.createElement("div");
+    const eyebrow = document.createElement("span");
+    const headline = document.createElement("strong");
+    const context = document.createElement("span");
+    const stage = document.createElement("div");
+    const glow = document.createElement("div");
+    const dial = document.createElement("div");
+    const arc = document.createElement("div");
+    const ticks = document.createElement("div");
+    const scale = document.createElement("div");
+    const needle = document.createElement("div");
+    const pivot = document.createElement("div");
+    const queue = document.createElement("div");
+    const queueList = document.createElement("div");
+    const footer = document.createElement("p");
+
+    barometer.className = "problem-barometer";
+    board.className = "problem-barometer__board";
+    dialCard.className = "problem-barometer__dial-card";
+    dialHeader.className = "problem-barometer__dial-header";
+    eyebrow.className = "problem-barometer__eyebrow";
+    headline.className = "problem-barometer__headline";
+    context.className = "problem-barometer__context";
+    stage.className = "problem-barometer__stage";
+    glow.className = "problem-barometer__glow";
+    dial.className = "problem-barometer__dial";
+    arc.className = "problem-barometer__arc";
+    ticks.className = "problem-barometer__ticks";
+    scale.className = "problem-barometer__scale";
+    needle.className = "problem-barometer__needle";
+    pivot.className = "problem-barometer__pivot";
+    queue.className = "problem-barometer__queue";
+    queueList.className = "problem-barometer__queue-list";
+    queueList.setAttribute("role", "list");
+    footer.className = "problem-barometer__footer";
+
+    const gaugeAngle = 145 + ((250 * Math.max(0, Math.min(100, leader.sharePercent))) / 100);
+
+    barometer.style.setProperty("--problem-barometer-accent", leaderPalette.color);
+    barometer.style.setProperty("--problem-barometer-accent-soft", leaderPalette.glow);
+    barometer.style.setProperty("--problem-barometer-gauge", buildProblemCategoryGaugeGradient(visibleStats));
+    barometer.style.setProperty("--problem-barometer-angle", `${gaugeAngle - 90}deg`);
+
+    eyebrow.textContent = "Praegu kõige kõrgem surve";
+    headline.textContent = leader.category.label;
+    context.textContent = `${Math.max(1, Math.round(leader.sharePercent))}% kõigist viimase ${PROBLEM_CATEGORY_STATS_DAYS} päeva lahendustest`;
+
+    [0, 25, 50, 75, 100].forEach(function (value) {
+        scale.append(createProblemCategoryScaleMarker(value));
+    });
+
+    visibleStats.forEach(function (stat, index) {
+        queueList.append(createProblemCategoryPressureItem(stat, index, leader.sharePercent));
+    });
+
+    footer.textContent = `${numberFormatter.format(totalReports)} lahendust viimase ${PROBLEM_CATEGORY_STATS_DAYS} päeva jooksul`;
+
+    dial.append(arc, ticks, scale, needle, pivot);
+    stage.append(glow, dial);
+    dialHeader.append(eyebrow, headline, context);
+    dialCard.append(dialHeader, stage);
+    queue.append(queueList);
+    board.append(dialCard, queue);
+    barometer.append(board, footer);
+
+    return barometer;
+}
+
+function getProblemCategoryTrendDisplayRows(trends, stats) {
+    if (Array.isArray(trends) && trends.length) {
+        return trends.slice();
+    }
+
+    const visibleStats = getProblemCategoryDisplayStats(stats).slice(0, 5);
+    const placeholderDeltas = [7.2, 3.6, 1.1, -2.8, -5.3];
+
+    return visibleStats.map(function (stat, index) {
+        const deltaSharePoints = placeholderDeltas[index] || 0;
+        const deltaCount = Math.round((deltaSharePoints / 100) * Math.max(stat.totalReports || 0, stat.problemCount || 0));
+
+        return {
+            category: stat.category,
+            problemType: stat.problemType,
+            currentCount: stat.problemCount,
+            previousCount: Math.max(0, stat.problemCount - deltaCount),
+            currentSharePercent: stat.sharePercent,
+            previousSharePercent: Math.max(0, stat.sharePercent - deltaSharePoints),
+            deltaSharePoints,
+            deltaCount
+        };
+    }).sort(function (firstEntry, secondEntry) {
+        return secondEntry.deltaSharePoints - firstEntry.deltaSharePoints;
+    });
+}
+
+function getProblemTimeSegmentDisplayRows(segments) {
+    if (Array.isArray(segments) && segments.some(function (segment) {
+        return segment.problemCount > 0;
+    })) {
+        return segments.slice();
+    }
+
+    const placeholderCounts = [1, 1, 1, 2, 2, 3, 4, 5, 6, 9, 11, 7];
+    const total = placeholderCounts.reduce(function (sum, value) {
+        return sum + value;
+    }, 0);
+
+    return placeholderCounts.map(function (problemCount, segmentIndex) {
+        const startHour = segmentIndex * 2;
+        const endHour = (startHour + 2) % 24;
+
+        return {
+            segmentIndex,
+            segmentLabel: `${String(startHour).padStart(2, "0")}–${String(endHour).padStart(2, "0")}`,
+            startHour,
+            endHour,
+            problemCount,
+            sharePercent: total > 0 ? (problemCount / total) * 100 : 0
+        };
+    });
+}
+
+function formatProblemTrendDelta(value) {
+    const normalizedValue = Number.isFinite(value) ? value : 0;
+    const roundedValue = Math.round(normalizedValue * 10) / 10;
+    const valueText = Number.isInteger(roundedValue)
+        ? String(roundedValue)
+        : roundedValue.toFixed(1).replace(".", ",");
+
+    return `${roundedValue > 0 ? "+" : ""}${valueText}p`;
+}
+
+function createProblemTrendItem(entry, direction, index, maxDelta) {
+    const item = document.createElement("article");
+    const head = document.createElement("div");
+    const name = document.createElement("strong");
+    const delta = document.createElement("span");
+    const rail = document.createElement("div");
+    const fill = document.createElement("span");
+    const meta = document.createElement("span");
+    const palette = PROBLEM_STATS_EDITORIAL_PALETTE[index % PROBLEM_STATS_EDITORIAL_PALETTE.length];
+    const ratio = maxDelta > 0 ? Math.abs(entry.deltaSharePoints) / maxDelta : 0;
+
+    item.className = `problem-trend__item problem-trend__item--${direction}`;
+    item.style.setProperty("--problem-trend-color", palette.color);
+    item.style.setProperty("--problem-trend-glow", palette.glow);
+    item.style.setProperty("--problem-trend-width", `${(Math.max(0.18, Math.min(1, ratio)) * 100).toFixed(2)}%`);
+
+    head.className = "problem-trend__item-head";
+    name.className = "problem-trend__item-name";
+    delta.className = "problem-trend__item-delta";
+    rail.className = "problem-trend__item-rail";
+    fill.className = "problem-trend__item-fill";
+    meta.className = "problem-trend__item-meta";
+
+    name.textContent = entry.category.label;
+    delta.textContent = formatProblemTrendDelta(entry.deltaSharePoints);
+    meta.textContent = `${numberFormatter.format(entry.currentCount)} nüüd · ${numberFormatter.format(entry.previousCount)} enne`;
+
+    rail.append(fill);
+    head.append(name, delta);
+    item.append(head, rail, meta);
+
+    return item;
+}
+
+function createProblemTrendShowcase(stats, trends) {
+    const rows = getProblemCategoryTrendDisplayRows(trends, stats);
+    const sortedDescending = rows.slice().sort(function (firstEntry, secondEntry) {
+        return secondEntry.deltaSharePoints - firstEntry.deltaSharePoints;
+    });
+    const sortedAscending = rows.slice().sort(function (firstEntry, secondEntry) {
+        return firstEntry.deltaSharePoints - secondEntry.deltaSharePoints;
+    });
+    const rising = sortedDescending.filter(function (entry) {
+        return entry.deltaSharePoints > 0;
+    }).slice(0, 3);
+    const falling = sortedAscending.filter(function (entry) {
+        return entry.deltaSharePoints < 0;
+    }).slice(0, 3);
+    const fallbackRising = rising.length ? rising : sortedDescending.slice(0, 3);
+    const usedLabels = new Set(fallbackRising.map(function (entry) {
+        return entry.category.label;
+    }));
+    const fallbackFalling = falling.length
+        ? falling
+        : sortedAscending.filter(function (entry) {
+            return !usedLabels.has(entry.category.label);
+        }).slice(0, 3);
+    const strongestDelta = rows.reduce(function (largestValue, entry) {
+        return Math.max(largestValue, Math.abs(entry.deltaSharePoints));
+    }, 0);
+    const strongestRise = fallbackRising[0];
+    const strongestFall = fallbackFalling[0];
+    const showcase = document.createElement("div");
+    const header = document.createElement("div");
+    const eyebrow = document.createElement("span");
+    const title = document.createElement("strong");
+    const context = document.createElement("span");
+    const lanes = document.createElement("div");
+    const risingLane = document.createElement("section");
+    const fallingLane = document.createElement("section");
+    const risingLabel = document.createElement("span");
+    const fallingLabel = document.createElement("span");
+
+    showcase.className = "problem-trend";
+    header.className = "problem-trend__header";
+    eyebrow.className = "problem-trend__eyebrow";
+    title.className = "problem-trend__title";
+    context.className = "problem-trend__context";
+    lanes.className = "problem-trend__lanes";
+    risingLane.className = "problem-trend__lane problem-trend__lane--rising";
+    fallingLane.className = "problem-trend__lane problem-trend__lane--falling";
+    risingLabel.className = "problem-trend__lane-label";
+    fallingLabel.className = "problem-trend__lane-label";
+
+    eyebrow.textContent = "Võrreldes eelmise 30 päevaga";
+    title.textContent = "Tõusjad ja langejad";
+    context.textContent = strongestRise && strongestFall
+        ? `${strongestRise.category.label} kerkib, ${strongestFall.category.label} vajub taha.`
+        : "Teemad liiguvad eri suundades.";
+    risingLabel.textContent = "Tõusvad teemad";
+    fallingLabel.textContent = "Rahunevad teemad";
+
+    fallbackRising.forEach(function (entry, index) {
+        risingLane.append(createProblemTrendItem(entry, "rising", index, strongestDelta));
+    });
+
+    fallbackFalling.forEach(function (entry, index) {
+        fallingLane.append(createProblemTrendItem(entry, "falling", index + fallbackRising.length, strongestDelta));
+    });
+
+    risingLane.prepend(risingLabel);
+    fallingLane.prepend(fallingLabel);
+    lanes.append(risingLane, fallingLane);
+    header.append(eyebrow, title, context);
+    showcase.append(header, lanes);
+
+    return showcase;
+}
+
+function getProblemTimeSegmentColor(segment, intensity) {
+    if (segment.startHour < 6) {
+        return `rgba(107, 119, 232, ${0.2 + (intensity * 0.78)})`;
+    }
+
+    if (segment.startHour < 12) {
+        return `rgba(98, 190, 219, ${0.2 + (intensity * 0.78)})`;
+    }
+
+    if (segment.startHour < 18) {
+        return `rgba(240, 189, 93, ${0.22 + (intensity * 0.76)})`;
+    }
+
+    return `rgba(229, 121, 87, ${0.22 + (intensity * 0.76)})`;
+}
+
+function buildProblemTimeClockGradient(segments) {
+    const largestCount = segments.reduce(function (largestValue, segment) {
+        return Math.max(largestValue, segment.problemCount);
+    }, 0);
+    const gradientSegments = [];
+
+    segments.forEach(function (segment, index) {
+        const startAngle = index * 30;
+        const endAngle = startAngle + 30;
+        const fillStart = startAngle + 1.8;
+        const fillEnd = endAngle - 2.8;
+        const intensity = largestCount > 0 ? segment.problemCount / largestCount : 0;
+
+        gradientSegments.push(`rgba(255, 255, 255, 0) ${startAngle.toFixed(2)}deg ${fillStart.toFixed(2)}deg`);
+        gradientSegments.push(`${getProblemTimeSegmentColor(segment, intensity)} ${fillStart.toFixed(2)}deg ${fillEnd.toFixed(2)}deg`);
+        gradientSegments.push(`rgba(255, 255, 255, 0) ${fillEnd.toFixed(2)}deg ${endAngle.toFixed(2)}deg`);
+    });
+
+    return `conic-gradient(from -90deg, ${gradientSegments.join(", ")})`;
+}
+
+function describeProblemTimeMoment(startHour) {
+    if (startHour < 6) {
+        return "öö";
+    }
+
+    if (startHour < 10) {
+        return "hommik";
+    }
+
+    if (startHour < 14) {
+        return "päev";
+    }
+
+    if (startHour < 18) {
+        return "pärastlõuna";
+    }
+
+    if (startHour < 22) {
+        return "õhtu";
+    }
+
+    return "hilisõhtu";
+}
+
+function createProblemTimeSpark(segment, largestCount) {
+    const spark = document.createElement("span");
+    const intensity = largestCount > 0 ? segment.problemCount / largestCount : 0;
+    const angle = -90 + (segment.segmentIndex * 30) + 15;
+
+    spark.className = "problem-clock__spark";
+    spark.style.setProperty("--problem-clock-angle", `${angle}deg`);
+    spark.style.setProperty("--problem-clock-color", getProblemTimeSegmentColor(segment, intensity));
+    spark.style.setProperty("--problem-clock-scale", `${(0.52 + (intensity * 0.84)).toFixed(3)}`);
+
+    return spark;
+}
+
+function createProblemTimeShowcase(segments) {
+    const rows = getProblemTimeSegmentDisplayRows(segments);
+    const largestCount = rows.reduce(function (largestValue, row) {
+        return Math.max(largestValue, row.problemCount);
+    }, 0);
+    const peakSegment = rows.reduce(function (strongestSegment, row) {
+        if (!strongestSegment || row.problemCount > strongestSegment.problemCount) {
+            return row;
+        }
+
+        return strongestSegment;
+    }, null);
+    const showcase = document.createElement("div");
+    const header = document.createElement("div");
+    const eyebrow = document.createElement("span");
+    const title = document.createElement("strong");
+    const context = document.createElement("span");
+    const stage = document.createElement("div");
+    const halo = document.createElement("div");
+    const dial = document.createElement("div");
+    const ring = document.createElement("div");
+    const sparks = document.createElement("div");
+    const core = document.createElement("div");
+    const coreEyebrow = document.createElement("span");
+    const coreValue = document.createElement("strong");
+    const coreMeta = document.createElement("span");
+    const footer = document.createElement("p");
+
+    showcase.className = "problem-clock";
+    header.className = "problem-clock__header";
+    eyebrow.className = "problem-clock__eyebrow";
+    title.className = "problem-clock__title";
+    context.className = "problem-clock__context";
+    stage.className = "problem-clock__stage";
+    halo.className = "problem-clock__halo";
+    dial.className = "problem-clock__dial";
+    ring.className = "problem-clock__ring";
+    sparks.className = "problem-clock__sparks";
+    core.className = "problem-clock__core";
+    coreEyebrow.className = "problem-clock__core-eyebrow";
+    coreValue.className = "problem-clock__core-value";
+    coreMeta.className = "problem-clock__core-meta";
+    footer.className = "problem-clock__footer";
+
+    eyebrow.textContent = "Millal abi enim otsitakse";
+    title.textContent = "Murekell";
+    context.textContent = peakSegment
+        ? `${describeProblemTimeMoment(peakSegment.startHour)} hoiab praegu kõige tugevamat rütmi.`
+        : "Päeva jooksul tekib oma selge mureteekond.";
+
+    ring.style.setProperty("--problem-clock-gradient", buildProblemTimeClockGradient(rows));
+
+    rows.forEach(function (row) {
+        sparks.append(createProblemTimeSpark(row, largestCount));
+    });
+
+    coreEyebrow.textContent = "Kõige tihedam hetk";
+    coreValue.textContent = peakSegment?.segmentLabel || "20–22";
+    coreMeta.textContent = peakSegment
+        ? `${Math.max(1, Math.round(peakSegment.sharePercent))}% kõigist pöördumistest`
+        : "Õhtune tippaeg";
+    footer.textContent = "00 · 06 · 12 · 18 · 24";
+
+    core.append(coreEyebrow, coreValue, coreMeta);
+    dial.append(ring, sparks, core);
+    stage.append(halo, dial);
+    header.append(eyebrow, title, context);
+    showcase.append(header, stage, footer);
+
+    return showcase;
+}
+
+function getProblemStatsStoryPanels(stats, trends, timeSegments) {
+    const displayStats = getProblemCategoryDisplayStats(stats);
+    const leader = displayStats[0];
+    const trendRows = getProblemCategoryTrendDisplayRows(trends, stats);
+    const strongestRise = trendRows[0];
+    const strongestFall = trendRows.slice().sort(function (firstEntry, secondEntry) {
+        return firstEntry.deltaSharePoints - secondEntry.deltaSharePoints;
+    })[0];
+    const timeRows = getProblemTimeSegmentDisplayRows(timeSegments);
+    const peakSegment = timeRows.reduce(function (strongestSegment, row) {
+        if (!strongestSegment || row.problemCount > strongestSegment.problemCount) {
+            return row;
+        }
+
+        return strongestSegment;
+    }, null);
+
+    return [
+        {
+            label: "Murebaromeeter",
+            summary: leader
+                ? `Murebaromeeter näitab, et ${leader.category.label} hoiab suurimat osa, ${Math.max(1, Math.round(leader.sharePercent))} protsenti.`
+                : "Murebaromeeter valmistub värskeid andmeid kuvama.",
+            content: createProblemCategoryShowcase(stats)
+        },
+        {
+            label: "Tõusjad ja langejad",
+            summary: strongestRise && strongestFall
+                ? `${strongestRise.category.label} on tõusul ja ${strongestFall.category.label} liigub rahulikumas suunas.`
+                : "Teemade liikumine täitub automaatselt värskete andmetega.",
+            content: createProblemTrendShowcase(stats, trends)
+        },
+        {
+            label: "Murekell",
+            summary: peakSegment
+                ? `${peakSegment.segmentLabel} on kõige aktiivsem aeg probleemide jagamiseks.`
+                : "Murekell kogub päeva rütmi.",
+            content: createProblemTimeShowcase(timeSegments)
+        }
+    ];
+}
+
+function createProblemStatsStory(stats, trends, timeSegments) {
+    const story = document.createElement("div");
+    const viewport = document.createElement("div");
+    const track = document.createElement("div");
+    const pager = document.createElement("div");
+    const panels = getProblemStatsStoryPanels(stats, trends, timeSegments);
+
+    story.className = "problem-story";
+    viewport.className = "problem-story__viewport";
+    track.className = "problem-story__track";
+    pager.className = "problem-story__pager";
+
+    panels.forEach(function (panel, index) {
+        const slide = document.createElement("article");
+        const frame = document.createElement("div");
+        const dot = document.createElement("button");
+
+        slide.className = "problem-story__panel";
+        slide.dataset.panelIndex = String(index);
+        slide.setAttribute("aria-label", panel.label);
+
+        frame.className = "problem-story__panel-frame";
+        frame.append(panel.content);
+        slide.append(frame);
+        track.append(slide);
+
+        dot.className = "problem-story__pager-dot";
+        dot.type = "button";
+        dot.dataset.panelIndex = String(index);
+        dot.setAttribute("aria-label", `Ava ${panel.label}`);
+        pager.append(dot);
+    });
+
+    viewport.append(track);
+    story.append(viewport, pager);
+
+    return {
+        element: story,
+        summaries: panels.map(function (panel) {
+            return panel.summary;
+        })
+    };
+}
+
+function enhanceProblemStatsStory(storyElement, summaries) {
+    const viewport = storyElement.querySelector(".problem-story__viewport");
+    const panels = Array.from(storyElement.querySelectorAll(".problem-story__panel"));
+    const dots = Array.from(storyElement.querySelectorAll(".problem-story__pager-dot"));
+    let frameId = 0;
+
+    if (!viewport || panels.length === 0) {
+        return function () {
+            // No-op cleanup when no story viewport is present.
+        };
+    }
+
+    function setActivePanel(nextIndex) {
+        storyElement.dataset.activeIndex = String(nextIndex);
+
+        dots.forEach(function (dot, index) {
+            const isActive = index === nextIndex;
+            dot.classList.toggle("is-active", isActive);
+            dot.setAttribute("aria-pressed", String(isActive));
+        });
+
+        if (problemStatsLead) {
+            problemStatsLead.textContent = summaries[nextIndex] || summaries[0] || "Murebaromeeter.";
+        }
+    }
+
+    function syncPanelProgress() {
+        if (viewport.scrollWidth <= viewport.clientWidth + 8) {
+            panels.forEach(function (panel) {
+                panel.style.setProperty("--problem-story-shift", "0");
+                panel.style.setProperty("--problem-story-focus", "1");
+            });
+
+            setActivePanel(0);
+            frameId = 0;
+            return;
+        }
+
+        const viewportRect = viewport.getBoundingClientRect();
+        const viewportCenter = viewportRect.left + (viewportRect.width / 2);
+        let activeIndex = 0;
+        let shortestDistance = Number.POSITIVE_INFINITY;
+
+        panels.forEach(function (panel, index) {
+            const panelRect = panel.getBoundingClientRect();
+            const panelCenter = panelRect.left + (panelRect.width / 2);
+            const shift = (panelCenter - viewportCenter) / Math.max(viewportRect.width, 1);
+            const clampedShift = Math.max(-1.2, Math.min(1.2, shift));
+            const focus = Math.max(0, 1 - (Math.abs(clampedShift) * 1.25));
+
+            panel.style.setProperty("--problem-story-shift", clampedShift.toFixed(3));
+            panel.style.setProperty("--problem-story-focus", focus.toFixed(3));
+
+            if (Math.abs(clampedShift) < shortestDistance) {
+                shortestDistance = Math.abs(clampedShift);
+                activeIndex = index;
+            }
+        });
+
+        setActivePanel(activeIndex);
+        frameId = 0;
+    }
+
+    function requestSync() {
+        if (frameId) {
+            return;
+        }
+
+        frameId = window.requestAnimationFrame(syncPanelProgress);
+    }
+
+    function scrollToPanel(index) {
+        const panel = panels[index];
+
+        if (!panel) {
+            return;
+        }
+
+        const targetLeft = panel.offsetLeft - ((viewport.clientWidth - panel.clientWidth) / 2);
+        viewport.scrollTo({
+            left: Math.max(0, targetLeft),
+            behavior: prefersReducedMotionQuery.matches ? "auto" : "smooth"
+        });
+    }
+
+    const dotHandlers = dots.map(function (dot, index) {
+        const handler = function () {
+            scrollToPanel(index);
+        };
+
+        dot.addEventListener("click", handler);
+        return handler;
+    });
+
+    viewport.addEventListener("scroll", requestSync, { passive: true });
+    window.addEventListener("resize", requestSync);
+    requestSync();
+
+    return function cleanupProblemStatsStory() {
+        if (frameId) {
+            window.cancelAnimationFrame(frameId);
+            frameId = 0;
+        }
+
+        viewport.removeEventListener("scroll", requestSync);
+        window.removeEventListener("resize", requestSync);
+        dots.forEach(function (dot, index) {
+            dot.removeEventListener("click", dotHandlers[index]);
+        });
+    };
+}
+
+function renderProblemCategoryStats() {
+    if (!problemStatsChart || !problemStatsLead) {
+        return;
+    }
+
+    if (typeof problemStatsStoryCleanup === "function") {
+        problemStatsStoryCleanup();
+        problemStatsStoryCleanup = null;
+    }
+
+    const hasStats = problemCategoryStats.length > 0;
+    const statsForDisplay = hasStats ? problemCategoryStats : [];
+    const leader = getProblemCategoryDisplayStats(statsForDisplay)[0];
+
+    problemStatsLead.textContent = hasStats
+        ? (leader.category.key === PROBLEM_STATS_OTHER_CATEGORY.key
+            ? `Murebaromeeter näitab, et väiksemad teemad kokku moodustavad suurima osa, ${Math.max(1, Math.round(leader.sharePercent))} protsenti.`
+            : `Murebaromeeter näitab, et ${leader.category.label} on suurim mureallikas osakaaluga ${Math.max(1, Math.round(leader.sharePercent))} protsenti.`)
+        : (isSupabaseConfigured
+            ? "Murebaromeeter täitub automaatselt, kui lahendusi koguneb."
+            : "Murebaromeetri jaoks peab salvestus olema Supabase'iga ühendatud.");
+    const story = createProblemStatsStory(statsForDisplay, problemCategoryTrends, problemTimeSegments);
+
+    problemStatsChart.replaceChildren(story.element);
+    problemStatsStoryCleanup = enhanceProblemStatsStory(story.element, story.summaries);
 }
 
 function getSelectedDailyArticle() {
@@ -3273,7 +5221,7 @@ function pickLorienMockupImage(article) {
     return LORIEN_MOCKUP_IMAGES[hash % LORIEN_MOCKUP_IMAGES.length];
 }
 
-function createLorienStoryInsert(article) {
+function createLorienStoryInsert(article, options = {}) {
     const mockup = article?.imageUrl
         ? {
             src: article.imageUrl,
@@ -3290,8 +5238,10 @@ function createLorienStoryInsert(article) {
     const image = document.createElement("img");
     const caption = document.createElement("figcaption");
     const note = document.createElement("p");
+    const isCompact = options.compact === true;
 
     figure.className = "science-article__mockup";
+    figure.classList.toggle("science-article__mockup--compact", isCompact);
     image.className = "science-article__mockup-image";
     caption.className = "science-article__mockup-caption";
     note.className = "science-article__mockup-note";
@@ -3305,8 +5255,25 @@ function createLorienStoryInsert(article) {
     caption.textContent = "Lorien Velmore";
     note.textContent = article.bannerNote;
 
-    figure.append(image, caption, note);
+    figure.append(image, caption);
+
+    if (!isCompact) {
+        figure.append(note);
+    }
+
     return figure;
+}
+
+function createStoryPreviewToggle(options) {
+    const button = document.createElement("button");
+
+    button.type = "button";
+    button.className = "button--ghost story-preview__toggle";
+    button.textContent = options.expanded ? "Näita vähem" : "Ava täislugu";
+    button.setAttribute("aria-expanded", String(Boolean(options.expanded)));
+    button.addEventListener("click", options.onClick);
+
+    return button;
 }
 
 function renderFeaturedDailyArticle(article) {
@@ -3316,6 +5283,7 @@ function renderFeaturedDailyArticle(article) {
 
     if (!article) {
         scienceArticleFeatured.classList.add("science-article--empty");
+        scienceArticleFeatured.classList.remove("is-preview", "is-expanded");
         scienceArticleFeatured.replaceChildren(createSciencePlaceholder());
         return;
     }
@@ -3323,21 +5291,26 @@ function renderFeaturedDailyArticle(article) {
     scienceArticleFeatured.classList.remove("science-article--empty");
 
     const fragment = document.createDocumentFragment();
+    const isExpanded = article.id === expandedDailyArticleId;
     const date = document.createElement("span");
     const title = document.createElement("h3");
     const lead = document.createElement("p");
     const highlight = document.createElement("blockquote");
     const body = document.createElement("div");
-    const tags = document.createElement("div");
     const takeaways = document.createElement("div");
     const takeawaysLabel = document.createElement("span");
+    const previewParagraphs = article.paragraphs.slice(0, DAILY_ARTICLE_PREVIEW_PARAGRAPHS);
+    const visibleParagraphs = isExpanded ? article.paragraphs : previewParagraphs;
+    const storyInsert = createLorienStoryInsert(article, { compact: !isExpanded });
+    const hasMockup = Boolean(storyInsert);
+    const hasTakeaways = article.takeaways.length > 0;
+    const hasMoreContent = article.paragraphs.length > previewParagraphs.length || hasMockup || hasTakeaways;
 
     date.className = "science-article__date";
     title.className = "science-article__title";
     lead.className = "science-article__lead";
     highlight.className = "science-article__highlight";
     body.className = "science-article__body";
-    tags.className = "science-article__lenses";
     takeaways.className = "science-article__takeaways";
     takeawaysLabel.className = "science-article__section-label";
 
@@ -3346,26 +5319,14 @@ function renderFeaturedDailyArticle(article) {
     lead.textContent = article.lead;
     highlight.textContent = article.highlight;
     takeawaysLabel.textContent = "Miks see töötab";
+    scienceArticleFeatured.classList.toggle("is-preview", hasMoreContent && !isExpanded);
+    scienceArticleFeatured.classList.toggle("is-expanded", hasMoreContent && isExpanded);
 
-    article.lenses.forEach(function (label) {
-        const pill = document.createElement("span");
-        pill.className = "science-article__lens";
-        pill.textContent = label;
-        tags.append(pill);
-    });
-
-    article.paragraphs.forEach(function (paragraphText, index) {
+    visibleParagraphs.forEach(function (paragraphText, index) {
         const paragraph = document.createElement("p");
         paragraph.textContent = paragraphText;
         body.append(paragraph);
 
-        if (index === 1) {
-            const storyInsert = createLorienStoryInsert(article);
-
-            if (storyInsert) {
-                body.append(storyInsert);
-            }
-        }
     });
 
     article.takeaways.forEach(function (takeawayText) {
@@ -3375,7 +5336,28 @@ function renderFeaturedDailyArticle(article) {
         takeaways.append(pill);
     });
 
-    fragment.append(date, title, lead, highlight, tags, body, takeawaysLabel, takeaways);
+    fragment.append(date, title, lead, highlight);
+
+    if (storyInsert) {
+        fragment.append(storyInsert);
+    }
+
+    fragment.append(body);
+
+    if (isExpanded && hasTakeaways) {
+        fragment.append(takeawaysLabel, takeaways);
+    }
+
+    if (hasMoreContent) {
+        fragment.append(createStoryPreviewToggle({
+            expanded: isExpanded,
+            onClick: function () {
+                expandedDailyArticleId = isExpanded ? "" : article.id;
+                renderDailyArticles();
+            }
+        }));
+    }
+
     scienceArticleFeatured.replaceChildren(fragment);
 }
 
@@ -3409,6 +5391,7 @@ function createDailyArticleListItem(article) {
     button.append(meta, title, lead);
     button.addEventListener("click", function () {
         selectedDailyArticleId = article.id;
+        expandedDailyArticleId = "";
         renderDailyArticles();
     });
 
@@ -3543,6 +5526,7 @@ function renderFeaturedPersonaStory(story, imageAsset = null) {
 
     if (!story) {
         personaStoryFeatured.classList.add("persona-story--empty");
+        personaStoryFeatured.classList.remove("is-preview", "is-expanded");
         personaStoryFeatured.replaceChildren(createPersonaStoryPlaceholder());
         return;
     }
@@ -3550,6 +5534,7 @@ function renderFeaturedPersonaStory(story, imageAsset = null) {
     personaStoryFeatured.classList.remove("persona-story--empty");
 
     const fragment = document.createDocumentFragment();
+    const isExpanded = story.id === expandedDailyPersonaStoryId;
     const media = document.createElement("div");
     const image = document.createElement("img");
     const content = document.createElement("div");
@@ -3563,6 +5548,11 @@ function renderFeaturedPersonaStory(story, imageAsset = null) {
     const galleryImages = (Array.isArray(story.galleryImages) ? story.galleryImages : []).filter(function (galleryImage) {
         return galleryImage?.url && galleryImage.url !== imageAsset?.src;
     });
+    const allParagraphs = (story.paragraphs || []).filter(Boolean);
+    const visibleParagraphs = isExpanded ? allParagraphs : [];
+    const hasResult = Boolean(story.resultNote);
+    const hasGallery = galleryImages.length > 0;
+    const hasMoreContent = allParagraphs.length > 0 || Boolean(story.highlight) || hasResult || hasGallery;
 
     media.className = "persona-story__media";
     image.className = "persona-story__image";
@@ -3574,6 +5564,8 @@ function renderFeaturedPersonaStory(story, imageAsset = null) {
     body.className = "persona-story__body";
     result.className = "persona-story__result";
     gallery.className = "persona-story__gallery";
+    personaStoryFeatured.classList.toggle("is-preview", hasMoreContent && !isExpanded);
+    personaStoryFeatured.classList.toggle("is-expanded", hasMoreContent && isExpanded);
 
     if (imageAsset) {
         image.src = imageAsset.src;
@@ -3587,7 +5579,7 @@ function renderFeaturedPersonaStory(story, imageAsset = null) {
     date.textContent = formatEditorialDate(story);
     title.textContent = story.title;
 
-    (story.paragraphs || []).filter(Boolean).forEach(function (paragraphText) {
+    visibleParagraphs.forEach(function (paragraphText) {
         const paragraph = document.createElement("p");
         paragraph.textContent = paragraphText;
         body.append(paragraph);
@@ -3627,7 +5619,7 @@ function renderFeaturedPersonaStory(story, imageAsset = null) {
         content.append(lead);
     }
 
-    if (story.highlight) {
+    if (isExpanded && story.highlight) {
         highlight.textContent = story.highlight;
         content.append(highlight);
     }
@@ -3636,13 +5628,23 @@ function renderFeaturedPersonaStory(story, imageAsset = null) {
         content.append(body);
     }
 
-    if (story.resultNote) {
+    if (isExpanded && story.resultNote) {
         result.textContent = story.resultNote;
         content.append(result);
     }
 
-    if (gallery.childElementCount > 0) {
+    if (isExpanded && gallery.childElementCount > 0) {
         content.append(gallery);
+    }
+
+    if (hasMoreContent) {
+        content.append(createStoryPreviewToggle({
+            expanded: isExpanded,
+            onClick: function () {
+                expandedDailyPersonaStoryId = isExpanded ? "" : story.id;
+                renderDailyPersonaStories();
+            }
+        }));
     }
 
     fragment.append(content);
@@ -3709,6 +5711,7 @@ function createPersonaStoryListItem(story, imageAsset = null) {
     button.append(body);
     button.addEventListener("click", function () {
         selectedDailyPersonaStoryId = story.id;
+        expandedDailyPersonaStoryId = "";
         renderDailyPersonaStories();
         scrollFeaturedPersonaStoryIntoView();
     });
@@ -3807,6 +5810,12 @@ function setDailyArticles(nextArticles) {
         selectedDailyArticleId = dailyArticles[0]?.id || "";
     }
 
+    if (!dailyArticles.some(function (article) {
+        return article.id === expandedDailyArticleId;
+    })) {
+        expandedDailyArticleId = "";
+    }
+
     renderDailyArticles();
 }
 
@@ -3825,17 +5834,48 @@ function setDailyPersonaStories(nextStories) {
         selectedDailyPersonaStoryId = dailyPersonaStories[0]?.id || "";
     }
 
+    if (!dailyPersonaStories.some(function (story) {
+        return story.id === expandedDailyPersonaStoryId;
+    })) {
+        expandedDailyPersonaStoryId = "";
+    }
+
     renderDailyPersonaStories();
 }
 
 function setRecentProblems(nextProblems) {
-    recentProblems = mergeRecentProblems(nextProblems);
+    const mergedProblems = mergeRecentProblems(nextProblems);
+    const nextSelectedPreview = mergedProblems.find(function (problem) {
+        return problem.reportId && problem.reportId === selectedRecentProblemReportId;
+    }) || null;
+    const isSameList = areRecentProblemListsEqual(recentProblems, mergedProblems);
+    const hasSelectionMismatch = Boolean(selectedRecentProblemReportId) && !nextSelectedPreview;
+
+    recentProblems = mergedProblems;
+    selectedRecentProblemPreview = nextSelectedPreview || selectedRecentProblemPreview;
+
+    if (hasSelectionMismatch) {
+        selectedRecentProblemReportId = "";
+        selectedRecentProblemPreview = null;
+        selectedRecentProblemDetail = null;
+        isRecentProblemOriginalVisible = false;
+        recentProblemDetailError = "";
+        isRecentProblemDetailLoading = false;
+    }
+
+    if (isSameList && !hasSelectionMismatch) {
+        return;
+    }
+
     persistRecentProblems();
     renderRecentProblems();
 }
 
 function pushRecentProblem(problem) {
     recentProblems = mergeRecentProblems([problem], recentProblems);
+    selectedRecentProblemPreview = recentProblems.find(function (entry) {
+        return entry.reportId && entry.reportId === selectedRecentProblemReportId;
+    }) || selectedRecentProblemPreview;
     persistRecentProblems();
     renderRecentProblems();
 }
@@ -3945,13 +5985,19 @@ function applyPersistedReport(persistedReport) {
         setRemoteSolvedCount(persistedReport.solvedReportsTotal);
     }
 
-    if (persistedReport.recentProblem) {
-        pushRecentProblem(persistedReport.recentProblem);
-    } else {
-        void refreshRecentProblems().catch(function (error) {
-            console.error("Failed to refresh recent problems.", error);
-        });
+    if (recentProblemsSection && recentProblemsList) {
+        if (persistedReport.recentProblem) {
+            pushRecentProblem(persistedReport.recentProblem);
+        } else {
+            void refreshRecentProblems().catch(function (error) {
+                console.error("Failed to refresh recent problems.", error);
+            });
+        }
     }
+
+    void refreshProblemCategoryStats().catch(function (error) {
+        console.error("Failed to refresh problem category stats.", error);
+    });
 }
 
 function queueReportPersistence(report) {
@@ -4157,12 +6203,58 @@ async function submitNewsletterSignup(email) {
 }
 
 async function refreshRecentProblems() {
+    if (!recentProblemsSection || !recentProblemsList) {
+        return;
+    }
+
     const [serverProblems, remoteProblems] = await Promise.all([
         fetchRecentProblemsFromServer(),
         refreshRecentProblemsFromSupabase()
     ]);
 
     setRecentProblems(mergeRecentProblems(serverProblems, remoteProblems, recentProblems));
+}
+
+async function refreshProblemCategoryStats() {
+    if (!isSupabaseConfigured) {
+        setProblemStatsStoryData({
+            stats: [],
+            trends: [],
+            timeSegments: []
+        });
+        return;
+    }
+
+    try {
+        const stats = await fetchProblemCategoryStats(PROBLEM_CATEGORY_STATS_DAYS);
+        const [trendResult, timeResult] = await Promise.allSettled([
+            fetchProblemCategoryTrends(PROBLEM_CATEGORY_STATS_DAYS),
+            fetchProblemTimeSegments(PROBLEM_CATEGORY_STATS_DAYS)
+        ]);
+        const trends = trendResult.status === "fulfilled" ? trendResult.value : [];
+        const timeSegments = timeResult.status === "fulfilled" ? timeResult.value : [];
+
+        if (trendResult.status === "rejected") {
+            console.error("Failed to sync problem category trends from Supabase.", trendResult.reason);
+        }
+
+        if (timeResult.status === "rejected") {
+            console.error("Failed to sync problem time segments from Supabase.", timeResult.reason);
+        }
+
+        setProblemStatsStoryData({
+            stats,
+            trends,
+            timeSegments
+        });
+    } catch (error) {
+        console.error("Failed to sync problem category stats from Supabase.", error);
+        setProblemStatsStoryData({
+            stats: [],
+            trends: [],
+            timeSegments: []
+        });
+    }
 }
 
 async function refreshDailyCoverStory() {
@@ -4240,14 +6332,26 @@ function resetApp() {
     currentPublicProblemText = "";
     currentReportId = null;
     pendingReportSave = null;
+    currentSolveStartedAt = 0;
     problemInput.value = "";
     resetRating();
+    if (solutionLead) {
+        solutionLead.textContent = "Valmis mõne sekundiga.";
+    }
     showPanel(container, "idle");
     problemInput.focus();
 }
 
 function initializeRecentProblems() {
+    if (!recentProblemsSection || !recentProblemsList) {
+        recentProblems = [];
+        recentProblemsUnlocked = false;
+        return;
+    }
+
     recentProblems = mergeRecentProblems(loadRecentProblems());
+    recentProblemsUnlocked = loadRecentProblemsUnlocked();
+    likedRecentProblemIds = loadLikedRecentProblemIds();
     renderRecentProblems();
 
     if (recentProblemsSyncTimer) {
@@ -4260,9 +6364,60 @@ function initializeRecentProblems() {
     }, RECENT_PROBLEMS_REFRESH_INTERVAL);
 }
 
+function initializeProblemCategoryStats() {
+    renderProblemCategoryStats();
+
+    if (problemCategoryStatsSyncTimer) {
+        window.clearInterval(problemCategoryStatsSyncTimer);
+    }
+
+    if (typeof problemCategoryStatsRealtimeCleanup === "function") {
+        problemCategoryStatsRealtimeCleanup();
+    }
+
+    void refreshProblemCategoryStats();
+    problemCategoryStatsSyncTimer = window.setInterval(function () {
+        void refreshProblemCategoryStats();
+    }, PROBLEM_CATEGORY_STATS_REFRESH_INTERVAL);
+
+    if (isSupabaseConfigured) {
+        problemCategoryStatsRealtimeCleanup = subscribeToReportInserts(
+            function () {
+                void refreshProblemCategoryStats();
+            },
+            "reports-insert-problem-stats"
+        );
+    }
+}
+
 function initializeDailyCoverStory() {
-    if (!coverStoryHero) {
+    if (!coverStoryHero || !coverStoryHeroToggle) {
         return;
+    }
+
+    if (coverStoryHeroToggle.dataset.coverStoryToggleBound !== "true") {
+        coverStoryHeroToggle.addEventListener("click", function () {
+            if (!hasDailyCoverStoryFeature()) {
+                return;
+            }
+
+            setDailyCoverStoryExpanded(!isDailyCoverStoryOpen);
+        });
+
+        coverStoryHeroToggle.addEventListener("keydown", function (event) {
+            if (!hasDailyCoverStoryFeature()) {
+                return;
+            }
+
+            if (event.key !== "Enter" && event.key !== " ") {
+                return;
+            }
+
+            event.preventDefault();
+            setDailyCoverStoryExpanded(!isDailyCoverStoryOpen);
+        });
+
+        coverStoryHeroToggle.dataset.coverStoryToggleBound = "true";
     }
 
     renderDailyCoverStory();
@@ -4278,10 +6433,17 @@ function initializeDailyCoverStory() {
 }
 
 recentProblemsMoreButton?.addEventListener("click", function () {
-    visibleRecentProblemsCount = Math.min(
-        recentProblems.length,
-        visibleRecentProblemsCount + RECENT_PROBLEMS_LOAD_STEP
-    );
+    const initialCount = getInitialRecentProblemsCount();
+
+    if (visibleRecentProblemsCount < recentProblems.length) {
+        visibleRecentProblemsCount = Math.min(
+            recentProblems.length,
+            visibleRecentProblemsCount + RECENT_PROBLEMS_LOAD_STEP
+        );
+    } else {
+        visibleRecentProblemsCount = Math.min(initialCount, recentProblems.length);
+    }
+
     renderRecentProblems();
 });
 
@@ -4414,7 +6576,7 @@ solveButton.addEventListener("click", async function () {
         return;
     }
 
-    const problemText = sanitizeProblemText(problemInput.value);
+    const problemText = normalizeProblemInputText(problemInput.value);
 
     if (problemText === "") {
         setProblemFeedback("Sisesta enne probleem, mida lahendada.", "error");
@@ -4424,6 +6586,7 @@ solveButton.addEventListener("click", async function () {
 
     setProblemFeedback("", "");
     isGeneratingReport = true;
+    currentSolveStartedAt = performance.now();
     currentProblemText = problemText;
     resetRating();
     showPanel(loadingDiv, "loading");
@@ -4441,6 +6604,10 @@ solveButton.addEventListener("click", async function () {
         setLoadingProgress(1);
         currentPublicProblemText = publicProblemText;
         populateReport(report);
+        if (solutionLead) {
+            solutionLead.textContent = formatSolveDurationLabel(performance.now() - currentSolveStartedAt);
+        }
+        setRecentProblemsUnlocked(true);
         pushRecentProblem({
             problemText: publicProblemText,
             problemType: report.typeValue,
@@ -4484,15 +6651,29 @@ ratingButtons.forEach(function (button) {
 window.addEventListener("storage", function (event) {
     if (event.key === DAILY_PERSONA_REFRESH_SIGNAL_KEY) {
         void refreshDailyPersonaStories();
+        return;
+    }
+
+    if (event.key === RECENT_PROBLEM_LIKES_STORAGE_KEY) {
+        likedRecentProblemIds = loadLikedRecentProblemIds();
+        renderRecentProblems();
+        return;
+    }
+
+    if (event.key === SOLVER_SKIN_STORAGE_KEY) {
+        applySolverSkin(event.newValue || "");
     }
 });
 
 setLoadingProgress(0);
 resetRating();
 initializeCoverIssueMeta();
+initializeSolverSkinSwipe();
+initializeUrgitsBannerRotation();
 initializeDailyCoverStory();
 initializeDailyWeather();
 initializeRecentProblems();
+initializeProblemCategoryStats();
 initializeDailyArticles();
 initializeDailyPersonaStories();
 initializeDailyHoroscope();

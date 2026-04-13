@@ -90,6 +90,9 @@ const INTERVIEW_COVER_JSON_SCHEMA = {
         "subjectName",
         "title",
         "summary",
+        "lead",
+        "paragraphs",
+        "pullQuote",
         "photoBrief",
         "imageAlt"
     ],
@@ -98,6 +101,14 @@ const INTERVIEW_COVER_JSON_SCHEMA = {
         subjectName: { type: "string" },
         title: { type: "string" },
         summary: { type: "string" },
+        lead: { type: "string" },
+        paragraphs: {
+            type: "array",
+            minItems: 3,
+            maxItems: 4,
+            items: { type: "string" }
+        },
+        pullQuote: { type: "string" },
         photoBrief: { type: "string" },
         imageAlt: { type: "string" }
     }
@@ -883,6 +894,9 @@ export function registerInterviewWorkflow(options) {
                     "subjectName peab olema inimese nimi nii, nagu see vestlusest usutavalt välja tuleb.",
                     "title peab olema lühike, lööv ja ajakirjalik pealkiri.",
                     "summary peab olema üks tugev sissejuhatav coverline, mitte pikk lõik.",
+                    "lead peab olema lühike ava-paragrahv, mis tundub nagu luksusajakirja juhtloo algus.",
+                    "paragraphs peab olema 3 kuni 4 lühikest lõiku, mis avavad sama lugu edasi ilma uusi fakte juurde leiutamata.",
+                    "pullQuote peab olema üks lühike tugev tsitaat, mis põhineb vestluse päris sõnastusel; ära leiuta.",
                     "photoBrief peab olema ingliskeelne 2 kuni 4 lausega editorial cover photography brief, mis kasutab vestluse päris konteksti.",
                     "imageAlt peab kirjeldama peamist portreefotot lühidalt ja arusaadavalt.",
                     "transcriptSummary peab olema üks lühike toimetuslik kokkuvõte.",
@@ -1035,6 +1049,9 @@ export function registerInterviewWorkflow(options) {
             subjectName,
             title: normalizeField(rawDraft?.title, fallbacks.summary, 96),
             summary: normalizeField(rawDraft?.summary, fallbacks.summary, 220),
+            lead: normalizeField(rawDraft?.lead, rawDraft?.summary || fallbacks.summary, 220),
+            paragraphs: normalizeInterviewList(rawDraft?.paragraphs, 4, 360, ""),
+            pullQuote: normalizeField(rawDraft?.pullQuote, "", 220),
             photoBrief: normalizeField(rawDraft?.photoBrief, "", 420),
             imageAlt: normalizeField(rawDraft?.imageAlt, `${subjectName} kaaneloo portree`, 180),
             transcriptSummary: fallbacks.summary
@@ -1622,6 +1639,9 @@ export function registerInterviewWorkflow(options) {
                         variant: "cover_story",
                         styleVersion: dailyCoverStoryStyleVersion,
                         subjectName: normalizedStory.subjectName,
+                        lead: normalizedStory.lead,
+                        paragraphs: normalizedStory.paragraphs,
+                        pullQuote: normalizedStory.pullQuote,
                         photoBrief: normalizedStory.photoBrief,
                         imageAlt: normalizedStory.imageAlt,
                         transcriptSummary: normalizedStory.transcriptSummary
