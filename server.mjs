@@ -127,6 +127,7 @@ let newsletterSignupsLoaded = false;
 let newsletterSignupsWritePromise = Promise.resolve();
 const dailyWeatherGenerationPromises = new Map();
 const weatherSceneGenerationPromises = new Map();
+const weatherScenePublicUrlCache = new Map();
 const weatherLocationLabelCache = new Map();
 let editorialWarmupPromise = null;
 let lastEditorialWarmupDateKey = "";
@@ -1281,6 +1282,13 @@ function getWeatherLocationKey(latitude, longitude) {
     return `${latitude.toFixed(2)}:${longitude.toFixed(2)}`;
 }
 
+function isDefaultWeatherLocation(location) {
+    return getWeatherLocationKey(
+        roundWeatherCoordinate(location?.latitude, WEATHER_DEFAULT_LOCATION.latitude),
+        roundWeatherCoordinate(location?.longitude, WEATHER_DEFAULT_LOCATION.longitude)
+    ) === getWeatherLocationKey(WEATHER_DEFAULT_LOCATION.latitude, WEATHER_DEFAULT_LOCATION.longitude);
+}
+
 function getWeatherCodeMeta(code, isDay = true) {
     const safeCode = Number(code);
 
@@ -1560,6 +1568,10 @@ function buildEditorialImageStoragePath(contentType, dateKey, itemSlug, extensio
         sanitizeStoragePathSegment(dateKey) || getLocalDateKey(),
         `${sanitizeStoragePathSegment(itemSlug) || hashText(itemSlug)}.${safeExtension}`
     ].join("/");
+}
+
+function buildDailyWeatherSceneStoragePath(dateKey, sceneKey) {
+    return buildEditorialImageStoragePath("daily_weather", dateKey, sceneKey, "jpg");
 }
 
 function getEditorialStoragePublicUrl(storagePath) {
@@ -1994,6 +2006,42 @@ async function fetchPublishedEditorialRowBySlug(slug) {
     return data || null;
 }
 
+async function fetchLatestPublishedDailyWeatherRow(dateKey, locationKey) {
+    if (!supabaseAdmin || !dateKey || !locationKey) {
+        return null;
+    }
+
+    const { data, error } = await supabaseAdmin
+        .from("editorial_items")
+        .select(`
+            id,
+            slug,
+            content_type,
+            date_key,
+            location_key,
+            generation_signature,
+            style_version,
+            title,
+            summary,
+            payload,
+            cover_media_url,
+            published_at
+        `)
+        .eq("content_type", "daily_weather")
+        .eq("date_key", dateKey)
+        .eq("location_key", locationKey)
+        .eq("status", EDITORIAL_STATUS_PUBLISHED)
+        .order("published_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+    if (error) {
+        throw error;
+    }
+
+    return data || null;
+}
+
 function omitUndefinedProperties(record) {
     return Object.fromEntries(Object.entries(record || {}).filter(function ([, value]) {
         return value !== undefined;
@@ -2068,6 +2116,25 @@ async function updateEditorialItemMediaFields(slug, media) {
     return data;
 }
 
+async function syncDailyWeatherSceneMediaFields(dateKey, media) {
+    if (!supabaseAdmin || !dateKey || !media?.publicUrl) {
+        return;
+    }
+
+    const { error } = await supabaseAdmin
+        .from("editorial_items")
+        .update({
+            cover_media_path: media.storagePath,
+            cover_media_url: media.publicUrl
+        })
+        .eq("content_type", "daily_weather")
+        .eq("date_key", dateKey);
+
+    if (error) {
+        throw error;
+    }
+}
+
 async function uploadEditorialImageAsset(input) {
     if (!supabaseAdmin || !input?.imageBuffer || !input?.itemSlug) {
         return null;
@@ -2112,6 +2179,31 @@ async function uploadEditorialImageAsset(input) {
         storagePath,
         publicUrl
     };
+}
+
+async function doesEditorialAssetExist(storagePath) {
+    if (!supabaseAdmin || !storagePath) {
+        return false;
+    }
+
+    const { data, error } = await supabaseAdmin.storage.from(editorialBucketName).download(storagePath);
+
+    if (error) {
+        const errorMessage = normalizeField(error?.message, "", 240).toLocaleLowerCase("en-US");
+
+        if (
+            errorMessage.includes("not found")
+            || errorMessage.includes("does not exist")
+            || errorMessage.includes("404")
+            || errorMessage.includes("no such object")
+        ) {
+            return false;
+        }
+
+        throw error;
+    }
+
+    return Boolean(data);
 }
 
 async function insertAiGenerationRun(run) {
@@ -2845,20 +2937,43 @@ function buildDailyWeatherImageAltText(snapshot) {
     return `Ilmavaate taustpilt asukohas ${label}`;
 }
 
-async function generateDailyWeatherSceneForItem(snapshot, entry, itemRow) {
-    if (!client || !supabaseAdmin || !itemRow?.slug || itemRow.cover_media_url) {
-        return itemRow;
+function cacheWeatherScenePublicUrl(sceneKey, publicUrl) {
+    const normalizedUrl = normalizeField(publicUrl, "", 500);
+
+    if (!sceneKey || !normalizedUrl) {
+        return normalizedUrl;
+    }
+
+    weatherScenePublicUrlCache.set(sceneKey, normalizedUrl);
+    dailyWeatherEntries = dailyWeatherEntries.map(function (entry) {
+        if (entry.sceneKey !== sceneKey) {
+            return entry;
+        }
+
+        return {
+            ...entry,
+            coverMediaUrl: normalizedUrl
+        };
+    });
+
+    return normalizedUrl;
+}
+
+async function generateSharedDailyWeatherScene(snapshot, entry) {
+    if (!client || !supabaseAdmin || !entry?.sceneKey) {
+        return null;
     }
 
     const imageResponse = await runWithAiGenerationLog({
-        contentType: "daily_weather",
-        itemSlug: itemRow.slug,
+        contentType: "daily_weather_image",
+        itemSlug: entry.sceneKey,
         model: imageModel,
         promptVersion: EDITORIAL_PROMPT_VERSIONS.daily_weather_image,
         inputPayload: {
             dateKey: entry.dateKey,
             locationKey: entry.locationKey,
-            scenePrompt: entry.scenePrompt
+            sceneKey: entry.sceneKey,
+            signature: entry.signature
         }
     }, async function () {
         return await client.images.generate({
@@ -2878,11 +2993,11 @@ async function generateDailyWeatherSceneForItem(snapshot, entry, itemRow) {
     }
 
     const media = await uploadEditorialImageAsset({
-        itemId: itemRow.id,
-        itemSlug: itemRow.slug,
+        itemId: null,
+        itemSlug: entry.sceneKey,
         contentType: "daily_weather",
         dateKey: entry.dateKey,
-        fileBaseName: itemRow.slug,
+        fileBaseName: entry.sceneKey,
         imageBuffer: Buffer.from(imageData, "base64"),
         mimeType: "image/jpeg",
         extension: "jpg",
@@ -2890,14 +3005,17 @@ async function generateDailyWeatherSceneForItem(snapshot, entry, itemRow) {
         metadata: {
             promptVersion: EDITORIAL_PROMPT_VERSIONS.daily_weather_image,
             locationKey: entry.locationKey,
-            signature: entry.signature
+            signature: entry.signature,
+            sceneKey: entry.sceneKey
         }
     });
 
-    return await updateEditorialItemMediaFields(itemRow.slug, media);
+    await syncDailyWeatherSceneMediaFields(entry.dateKey, media);
+    return media;
 }
 
 async function persistDailyWeatherEntry(snapshot, entry) {
+    const sourceModel = normalizeField(entry?.sourceModel, client ? weatherModel : "fallback", 64);
     const normalizedEntry = normalizeDailyWeatherPayload(
         snapshot,
         entry,
@@ -2933,7 +3051,7 @@ async function persistDailyWeatherEntry(snapshot, entry) {
             sceneKey: normalizedEntry.sceneKey,
             locationLabel: normalizeField(snapshot.location.label, WEATHER_DEFAULT_LOCATION.label, 48)
         },
-        source_model: client ? weatherModel : "fallback",
+        source_model: sourceModel,
         prompt_version: EDITORIAL_PROMPT_VERSIONS.daily_weather,
         style_version: DAILY_WEATHER_STYLE_VERSION,
         published_at: normalizedEntry.publishedAt
@@ -3042,8 +3160,11 @@ async function requestDailyWeatherFromModel(model, snapshot, locationKey, signat
 async function generateDailyWeatherEntry(snapshot, locationKey, signature) {
     const fallbackEntry = normalizeDailyWeatherPayload(snapshot, null, locationKey, signature);
 
-    if (!client) {
-        return fallbackEntry;
+    if (!client || !isDefaultWeatherLocation(snapshot.location)) {
+        return {
+            ...fallbackEntry,
+            sourceModel: "fallback"
+        };
     }
 
     const candidateModels = [...new Set([weatherModel, openAiModel, "gpt-4.1"])];
@@ -3051,7 +3172,7 @@ async function generateDailyWeatherEntry(snapshot, locationKey, signature) {
 
     for (const model of candidateModels) {
         try {
-            return await runWithAiGenerationLog({
+            const generatedEntry = await runWithAiGenerationLog({
                 contentType: "daily_weather",
                 itemSlug: buildDailyWeatherSlug(snapshot.dateKey, locationKey, signature),
                 model,
@@ -3064,6 +3185,11 @@ async function generateDailyWeatherEntry(snapshot, locationKey, signature) {
             }, async function () {
                 return await requestDailyWeatherFromModel(model, snapshot, locationKey, signature);
             });
+
+            return {
+                ...generatedEntry,
+                sourceModel: model
+            };
         } catch (error) {
             lastError = error;
             console.error(`Failed to generate daily weather copy with model ${model}.`, error);
@@ -3071,7 +3197,10 @@ async function generateDailyWeatherEntry(snapshot, locationKey, signature) {
     }
 
     console.error("Failed to generate daily weather copy.", lastError);
-    return fallbackEntry;
+    return {
+        ...fallbackEntry,
+        sourceModel: "fallback"
+    };
 }
 
 async function ensureDailyWeatherEntry(snapshot) {
@@ -3079,11 +3208,10 @@ async function ensureDailyWeatherEntry(snapshot) {
 
     const locationKey = getWeatherLocationKey(snapshot.location.latitude, snapshot.location.longitude);
     const signature = buildWeatherSignature(snapshot);
-    const slug = buildDailyWeatherSlug(snapshot.dateKey, locationKey, signature);
 
     if (isSupabaseAdminConfigured()) {
         try {
-            const row = await fetchPublishedEditorialRowBySlug(slug);
+            const row = await fetchLatestPublishedDailyWeatherRow(snapshot.dateKey, locationKey);
 
             if (row) {
                 const entry = buildWeatherRecordFromEditorialRow(row);
@@ -3098,14 +3226,14 @@ async function ensureDailyWeatherEntry(snapshot) {
     }
 
     const existingEntry = dailyWeatherEntries.find(function (entry) {
-        return entry.locationKey === locationKey && entry.signature === signature && entry.dateKey === snapshot.dateKey;
+        return entry.locationKey === locationKey && entry.dateKey === snapshot.dateKey;
     });
 
     if (existingEntry) {
         return existingEntry;
     }
 
-    const generationKey = `${locationKey}:${signature}`;
+    const generationKey = `${locationKey}:${snapshot.dateKey}`;
 
     if (!dailyWeatherGenerationPromises.has(generationKey)) {
         dailyWeatherGenerationPromises.set(generationKey, (async function () {
@@ -3141,12 +3269,51 @@ async function prepareDefaultDailyWeatherForToday() {
 }
 
 async function ensureWeatherSceneForEntry(entry) {
-    if (entry?.coverMediaUrl) {
+    if (!entry?.sceneKey || !entry?.scenePrompt) {
         return null;
     }
 
-    if (!entry?.sceneKey || !entry?.scenePrompt) {
-        return null;
+    if (entry.coverMediaUrl) {
+        return cacheWeatherScenePublicUrl(entry.sceneKey, entry.coverMediaUrl);
+    }
+
+    if (weatherScenePublicUrlCache.has(entry.sceneKey)) {
+        return weatherScenePublicUrlCache.get(entry.sceneKey);
+    }
+
+    if (supabaseAdmin) {
+        const storagePath = buildDailyWeatherSceneStoragePath(entry.dateKey, entry.sceneKey);
+        const publicUrl = getEditorialStoragePublicUrl(storagePath);
+
+        if (!weatherSceneGenerationPromises.has(entry.sceneKey)) {
+            weatherSceneGenerationPromises.set(entry.sceneKey, (async function () {
+                if (await doesEditorialAssetExist(storagePath)) {
+                    const media = {
+                        storagePath,
+                        publicUrl
+                    };
+
+                    await syncDailyWeatherSceneMediaFields(entry.dateKey, media);
+                    return cacheWeatherScenePublicUrl(entry.sceneKey, publicUrl);
+                }
+
+                if (!client) {
+                    return null;
+                }
+
+                const media = await generateSharedDailyWeatherScene({
+                    location: {
+                        label: WEATHER_DEFAULT_LOCATION.label
+                    }
+                }, entry);
+
+                return cacheWeatherScenePublicUrl(entry.sceneKey, media?.publicUrl || "");
+            }()).finally(function () {
+                weatherSceneGenerationPromises.delete(entry.sceneKey);
+            }));
+        }
+
+        return weatherSceneGenerationPromises.get(entry.sceneKey);
     }
 
     const sceneFilePath = getWeatherSceneFilePath(entry.sceneKey);
@@ -3163,13 +3330,26 @@ async function ensureWeatherSceneForEntry(entry) {
         weatherSceneGenerationPromises.set(entry.sceneKey, (async function () {
             await mkdir(generatedWeatherSceneDir, { recursive: true });
 
-            const imageResponse = await client.images.generate({
+            const imageResponse = await runWithAiGenerationLog({
+                contentType: "daily_weather_image",
+                itemSlug: entry.sceneKey,
                 model: imageModel,
-                prompt: entry.scenePrompt,
-                size: "1536x1024",
-                quality: "high",
-                output_format: "jpeg",
-                output_compression: 82
+                promptVersion: EDITORIAL_PROMPT_VERSIONS.daily_weather_image,
+                inputPayload: {
+                    dateKey: entry.dateKey,
+                    locationKey: entry.locationKey,
+                    sceneKey: entry.sceneKey,
+                    signature: entry.signature
+                }
+            }, async function () {
+                return await client.images.generate({
+                    model: imageModel,
+                    prompt: entry.scenePrompt,
+                    size: "1536x1024",
+                    quality: "high",
+                    output_format: "jpeg",
+                    output_compression: 82
+                });
             });
 
             const imageData = imageResponse?.data?.[0]?.b64_json;
@@ -3225,7 +3405,7 @@ function buildWeatherResponsePayload(snapshot, entry) {
         forecast: forecastDays,
         timelines: snapshot.timelines,
         planningTips: Array.isArray(entry?.planningTips) ? entry.planningTips : buildWeatherFallbackPlanningTips(snapshot),
-        backgroundImageUrl: entry?.sceneKey ? `/api/weather-scene/${entry.sceneKey}.jpg` : "",
+        backgroundImageUrl: normalizeField(entry?.coverMediaUrl, "", 500) || (entry?.sceneKey ? `/api/weather-scene/${entry.sceneKey}.jpg` : ""),
         publishedAt: entry?.publishedAt || new Date().toISOString(),
         attribution: {
             forecast: "Open-Meteo",
@@ -5087,10 +5267,14 @@ app.get("/api/weather", async function (request, response) {
         };
         const forecastSnapshot = await fetchWeatherForecastSnapshot(location);
         const weatherEntry = await ensureDailyWeatherEntry(forecastSnapshot);
-
-        ensureWeatherSceneForEntry(weatherEntry).catch(function (error) {
+        const weatherSceneAsset = await ensureWeatherSceneForEntry(weatherEntry).catch(function (error) {
             console.error("Failed to pre-generate weather scene.", error);
+            return null;
         });
+
+        if (typeof weatherSceneAsset === "string" && /^https?:\/\//iu.test(weatherSceneAsset)) {
+            weatherEntry.coverMediaUrl = weatherSceneAsset;
+        }
 
         response.json(buildWeatherResponsePayload(forecastSnapshot, weatherEntry));
     } catch (error) {
@@ -5126,7 +5310,14 @@ app.get("/api/weather-scene/:sceneFile", async function (request, response) {
             return;
         }
 
-        const filePath = await ensureWeatherSceneForEntry(matchingEntry);
+        const sceneAsset = await ensureWeatherSceneForEntry(matchingEntry);
+
+        if (typeof sceneAsset === "string" && /^https?:\/\//iu.test(sceneAsset)) {
+            response.redirect(302, sceneAsset);
+            return;
+        }
+
+        const filePath = sceneAsset;
 
         if (!filePath) {
             response.setHeader("Cache-Control", "public, max-age=3600");
@@ -5265,6 +5456,14 @@ async function warmupEditorialBundleForDate(dateKey) {
         ensureDailyHoroscopeForToday(),
         prepareDefaultDailyWeatherForToday()
     ]);
+
+    if (weather) {
+        try {
+            await ensureWeatherSceneForEntry(weather);
+        } catch (error) {
+            console.error("Failed to warm up daily weather scene.", error);
+        }
+    }
 
     lastEditorialWarmupDateKey = dateKey;
 
