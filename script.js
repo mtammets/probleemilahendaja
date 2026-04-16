@@ -1,8 +1,6 @@
 import {
     createProblemReport,
     fetchProblemCategoryStats,
-    fetchProblemCategoryTrends,
-    fetchProblemTimeSegments,
     fetchRecentProblemReports,
     fetchSolvedReportsTotal,
     getOrCreateSessionId,
@@ -18,6 +16,9 @@ import {
 } from "./problem-categories.mjs";
 import urgitsFirePrimary from "./assets/Urgits-branch-1.png";
 import urgitsFireSecondary from "./assets/Urgits-branch-2.png";
+
+const ENABLE_ADVANCED_PROBLEM_STATS_RPC = String(import.meta.env.VITE_ENABLE_ADVANCED_PROBLEM_STATS_RPC || "").trim() === "true";
+const ENABLE_BROWSER_GEOLOCATION = String(import.meta.env.VITE_ENABLE_BROWSER_GEOLOCATION || "").trim() === "true";
 
 const lorienMockupModules = import.meta.glob("./assets/Lorien mockups/*.{png,jpg,jpeg,webp,avif}", {
     eager: true,
@@ -44,6 +45,7 @@ const LORIEN_MOCKUP_IMAGES = Object.entries(lorienMockupModules)
     });
 
 const body = document.body;
+const appShell = document.querySelector(".app-shell");
 const container = document.querySelector(".container");
 const loadingDiv = document.getElementById("loading");
 const solutionDiv = document.getElementById("solution");
@@ -212,6 +214,26 @@ let coverStoryImageLoadToken = 0;
 let urgitsBannerImageTimer = 0;
 let urgitsBannerActiveLayerIndex = 0;
 let urgitsBannerActiveImageIndex = 0;
+let idleScreensaverTimer = 0;
+let idleScreensaverFrame = 0;
+let idleScreensaverTargets = [];
+let idleScreensaverTargetIndex = 0;
+let idleScreensaverDirection = 1;
+let idleScreensaverPhase = "idle";
+let idleScreensaverPhaseStartedAt = 0;
+let idleScreensaverPhaseDuration = 0;
+let idleScreensaverFromTop = 0;
+let idleScreensaverToTop = 0;
+let idleScreensaverFocusedElement = null;
+let idleScreensaverCurrentScale = 1;
+let idleScreensaverScaleFrom = 1;
+let idleScreensaverScaleTo = 1;
+let idleShowcaseOverlay = null;
+let idleShowcaseEyebrow = null;
+let idleShowcaseTitle = null;
+let idleShowcaseNote = null;
+let idleShowcaseTrack = null;
+let isIdleScreensaverActive = false;
 
 const MIN_SOLVE_DURATION = 3200;
 const LOADING_PROGRESS_CAP = 0.92;
@@ -245,6 +267,17 @@ const DAILY_PERSONA_REFRESH_SIGNAL_KEY = "probleemilahendaja:daily-persona-refre
 const DAILY_HOROSCOPE_REFRESH_INTERVAL = 60 * 60 * 1000;
 const DAILY_WEATHER_REFRESH_INTERVAL = 20 * 60 * 1000;
 const WEATHER_LOCATION_TIMEOUT = 6500;
+const IDLE_SCREEN_SAVER_DELAY_MS = 60 * 1000;
+const IDLE_SCREEN_SAVER_TRAVEL_SPEED_PX_PER_SECOND = 980;
+const IDLE_SCREEN_SAVER_READ_SPEED_PX_PER_SECOND = 48;
+const IDLE_SCREEN_SAVER_VIEWPORT_TOP_OFFSET_RATIO = 0.08;
+const IDLE_SCREEN_SAVER_MIN_READ_DISTANCE_PX = 120;
+const IDLE_SCREEN_SAVER_MAX_READ_DISTANCE_RATIO = 0.52;
+const IDLE_SCREEN_SAVER_MIN_TARGET_HEIGHT_PX = 120;
+const IDLE_SCREEN_SAVER_CAMERA_MIN_SCALE = 1.16;
+const IDLE_SCREEN_SAVER_CAMERA_MAX_SCALE = 1.62;
+const IDLE_SCREEN_SAVER_CAMERA_TRAVEL_EXTRA = 0.026;
+const IDLE_SCREEN_SAVER_CAMERA_READ_EXTRA = 0.132;
 const SOLVER_SKIN_STORAGE_KEY = "probleemilahendaja_solver_skin";
 const SOLVER_SKIN_SWIPE_THRESHOLD = 54;
 const SOLVER_SKIN_MOTION_DURATION = 360;
@@ -266,6 +299,62 @@ const DEFAULT_WEATHER_LOCATION = {
     longitude: 24.7536,
     source: "fallback"
 };
+const IDLE_SCREEN_SAVER_TARGET_SPECS = [
+    {
+        selector: "#coverStoryHero .intake-hero__cover",
+        anchorSelector: "#coverStoryHero .intake-hero__cover",
+        titleSelector: "#coverStoryHero .brand-wordmark",
+        eyebrow: "Eesti digiajakiri",
+        fallbackTitle: "Probleemilahendaja",
+        note: "Üks leht, kus probleemist saab hetkega kaanelugu.",
+        readRatio: 0.18
+    },
+    {
+        selector: "#dailyPersonas #personaStoryFeatured",
+        anchorSelector: ".persona-story__media, .persona-story__title",
+        titleSelector: ".persona-story__title",
+        eyebrow: "Persoonilood",
+        fallbackTitle: "Päris inimesed. Päris pöörded.",
+        note: "Intervjuud, fotod ja lood, mis tõmbavad sisse nagu ajakirja cover story.",
+        readRatio: 0.42
+    },
+    {
+        selector: "#dailyHoroscope #horoscopeFeatured",
+        anchorSelector: ".horoscope-card__visual, .horoscope-card__title",
+        titleSelector: ".horoscope-card__title",
+        eyebrow: "Päeva horoskoop",
+        fallbackTitle: "Iga päev oma märk ja meeleolu.",
+        note: "Tugev visuaal, kiire hook ja hetkega loetav rütm.",
+        readRatio: 0.36
+    },
+    {
+        selector: "#problemStatsChart",
+        anchorSelector: ".problem-barometer__dial-card, .problem-barometer__headline",
+        titleSelector: ".problem-barometer__headline",
+        eyebrow: "Murebaromeeter",
+        fallbackTitle: "Vaata, mis päriselt inimeste pead vaevab.",
+        note: "Elus andmed, mõjuv kujundus ja täpne toimetatud tunnetus.",
+        readRatio: 0.3
+    },
+    {
+        selector: "#problemQuiz #problemQuizCard",
+        anchorSelector: "#problemQuizTitle, .problem-quiz__title, .problem-quiz__cover-art",
+        titleSelector: "#problemQuizTitle, .problem-quiz__title-main",
+        eyebrow: "45 sekundi test",
+        fallbackTitle: "Kiire sissehüpe, mis tekitab kohe järgmise kliki.",
+        note: "Lühike, mänguline ja loodud selleks, et leht elaks edasi ka pärast esimest muljet.",
+        readRatio: 0.3
+    },
+    {
+        selector: "#dailyArticles #scienceArticleFeatured",
+        anchorSelector: ".science-article__mockup-image, .science-article__title",
+        titleSelector: ".science-article__title",
+        eyebrow: "Pikad lood",
+        fallbackTitle: "Artiklid, mis näevad välja nagu premium ajakiri.",
+        note: "Pildid, pealkirjad ja rütm, mis panevad kerima järgmise looni.",
+        readRatio: 0.44
+    }
+];
 const NEWSLETTER_EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/i;
 const PUBLIC_FEED_PROFANITY_REGEX = /\b(?:pers(?:e|se|es|et|ed|ega|ele|el|esse|est|i)?|t(?:ü|y)r(?:a|ad|aga|ale|al|ast|i)?|munn(?:i|e|id|idega|ile|il|ist)?|vitt(?:u|i|e|ud|idega|ile|is|a)?|niku(?:da|n|d|b|s|tud|ga|le)?|pask(?:a|e|i|aks|aga|ale|as|ast|u)?|sit(?:t|a|ad|ane|ase|aks|aga|ale|as|ast)?|hui(?:a|i|d|ga|le|s)?|fuck(?:ing|ed|er|s)?|shit(?:ty|ted|ting|s)?)\b/giu;
 const numberFormatter = new Intl.NumberFormat("et-EE");
@@ -1386,6 +1475,7 @@ function showPanel(panel, state) {
 
     panel.style.display = "block";
     body.dataset.state = state;
+    resetIdleScreensaverActivity();
 
     window.requestAnimationFrame(function () {
         const scrollTarget = panel.querySelector(".panel__frame") || panel;
@@ -2816,9 +2906,9 @@ async function fetchDailyWeatherFromServer(location) {
 }
 
 async function refreshDailyWeather(options = {}) {
-    const location = options.refreshLocation || !activeWeatherLocation
+    const location = options.refreshLocation && ENABLE_BROWSER_GEOLOCATION
         ? await resolveBrowserWeatherLocation()
-        : activeWeatherLocation;
+        : (activeWeatherLocation || DEFAULT_WEATHER_LOCATION);
     const payload = await fetchDailyWeatherFromServer(location);
 
     if (payload) {
@@ -2858,6 +2948,513 @@ function initializeDailyWeather() {
     dailyWeatherSyncTimer = window.setInterval(function () {
         void refreshDailyWeather();
     }, DAILY_WEATHER_REFRESH_INTERVAL);
+}
+
+function getIdleScreensaverMaxScrollTop() {
+    return Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
+}
+
+function hasIdleScreensaverInteractiveFocus() {
+    const activeElement = document.activeElement;
+
+    if (!activeElement || activeElement === document.body) {
+        return false;
+    }
+
+    if (activeElement.isContentEditable) {
+        return true;
+    }
+
+    return ["INPUT", "TEXTAREA", "SELECT", "BUTTON"].includes(activeElement.tagName);
+}
+
+function canStartIdleScreensaver() {
+    if (prefersReducedMotionQuery.matches || document.hidden) {
+        return false;
+    }
+
+    if (body.dataset.state !== "idle") {
+        return false;
+    }
+
+    if (weatherModal && !weatherModal.hidden) {
+        return false;
+    }
+
+    if (hasIdleScreensaverInteractiveFocus()) {
+        return false;
+    }
+
+    return getIdleScreensaverReadingTargets().length > 0;
+}
+
+function getIdleScreensaverReadingTargets() {
+    return IDLE_SCREEN_SAVER_TARGET_SPECS
+        .map(function (spec) {
+            const element = document.querySelector(spec.selector);
+
+            if (!element) {
+                return null;
+            }
+
+            const rect = element.getBoundingClientRect();
+
+            if (rect.height < IDLE_SCREEN_SAVER_MIN_TARGET_HEIGHT_PX || rect.width < 40) {
+                return null;
+            }
+
+            const anchorElement = spec.anchorSelector
+                ? element.querySelector(spec.anchorSelector) || document.querySelector(spec.anchorSelector) || element
+                : element;
+            const titleElement = spec.titleSelector
+                ? element.querySelector(spec.titleSelector) || document.querySelector(spec.titleSelector) || anchorElement
+                : anchorElement;
+
+            return {
+                element,
+                anchorElement,
+                titleElement,
+                eyebrow: spec.eyebrow,
+                fallbackTitle: spec.fallbackTitle,
+                note: spec.note,
+                readRatio: spec.readRatio
+            };
+        })
+        .filter(Boolean);
+}
+
+function clampIdleScreensaverTop(value) {
+    return Math.max(0, Math.min(getIdleScreensaverMaxScrollTop(), value));
+}
+
+function clampIdleScreensaverScale(value) {
+    return Math.max(1, Math.min(IDLE_SCREEN_SAVER_CAMERA_MAX_SCALE, value));
+}
+
+function getIdleScreensaverTargetProgressByIndex(index) {
+    if (idleScreensaverTargets.length <= 1) {
+        return 0;
+    }
+
+    return Math.max(0, Math.min(1, index / (idleScreensaverTargets.length - 1)));
+}
+
+function getIdleScreensaverBaseScale(index) {
+    const progress = getIdleScreensaverTargetProgressByIndex(index);
+
+    return IDLE_SCREEN_SAVER_CAMERA_MIN_SCALE
+        + ((IDLE_SCREEN_SAVER_CAMERA_MAX_SCALE - IDLE_SCREEN_SAVER_CAMERA_MIN_SCALE) * progress);
+}
+
+function normalizeIdleShowcaseText(value, maxLength = 120) {
+    const text = String(value || "")
+        .replace(/\s+/g, " ")
+        .trim();
+
+    if (!text) {
+        return "";
+    }
+
+    return text.length > maxLength
+        ? `${text.slice(0, maxLength - 1).trimEnd()}…`
+        : text;
+}
+
+function ensureIdleShowcaseOverlay() {
+    if (idleShowcaseOverlay) {
+        return;
+    }
+
+    const overlay = document.createElement("div");
+    const veil = document.createElement("div");
+    const brand = document.createElement("div");
+    const brandKicker = document.createElement("span");
+    const brandName = document.createElement("strong");
+    const copy = document.createElement("div");
+    const eyebrow = document.createElement("span");
+    const title = document.createElement("strong");
+    const note = document.createElement("p");
+    const track = document.createElement("div");
+
+    overlay.className = "idle-showcase";
+    veil.className = "idle-showcase__veil";
+    brand.className = "idle-showcase__brand";
+    brandKicker.className = "idle-showcase__brand-kicker";
+    brandName.className = "idle-showcase__brand-name";
+    copy.className = "idle-showcase__copy";
+    eyebrow.className = "idle-showcase__eyebrow";
+    title.className = "idle-showcase__title";
+    note.className = "idle-showcase__note";
+    track.className = "idle-showcase__track";
+
+    brandKicker.textContent = "Eesti digiajakiri";
+    brandName.textContent = "Probleemilahendaja";
+
+    brand.append(brandKicker, brandName);
+    copy.append(eyebrow, title, note, track);
+    overlay.append(veil, brand, copy);
+    document.body.append(overlay);
+
+    idleShowcaseOverlay = overlay;
+    idleShowcaseEyebrow = eyebrow;
+    idleShowcaseTitle = title;
+    idleShowcaseNote = note;
+    idleShowcaseTrack = track;
+}
+
+function syncIdleShowcaseTrack() {
+    if (!idleShowcaseTrack) {
+        return;
+    }
+
+    idleShowcaseTrack.replaceChildren();
+
+    idleScreensaverTargets.forEach(function (_target, index) {
+        const dot = document.createElement("span");
+        dot.className = "idle-showcase__dot";
+        dot.classList.toggle("is-active", index === idleScreensaverTargetIndex);
+        idleShowcaseTrack.append(dot);
+    });
+}
+
+function updateIdleShowcaseOverlay(target) {
+    ensureIdleShowcaseOverlay();
+
+    const resolvedTitle = normalizeIdleShowcaseText(target?.titleElement?.textContent, 92)
+        || target?.fallbackTitle
+        || "Probleemilahendaja";
+
+    if (idleShowcaseEyebrow) {
+        idleShowcaseEyebrow.textContent = target?.eyebrow || "Probleemilahendaja";
+    }
+
+    if (idleShowcaseTitle) {
+        idleShowcaseTitle.textContent = resolvedTitle;
+    }
+
+    if (idleShowcaseNote) {
+        idleShowcaseNote.textContent = target?.note || "";
+    }
+
+    syncIdleShowcaseTrack();
+}
+
+function resetIdleScreensaverCameraOrigin() {
+    if (!appShell) {
+        return;
+    }
+
+    appShell.style.setProperty("--idle-reading-shell-origin-x", "50%");
+    appShell.style.setProperty("--idle-reading-shell-origin-y", "0px");
+}
+
+function applyIdleScreensaverCameraOrigin(target) {
+    if (!appShell || !target?.element) {
+        return;
+    }
+
+    const shellRect = appShell.getBoundingClientRect();
+    const targetRect = (target.anchorElement || target.element).getBoundingClientRect();
+    const originX = ((targetRect.left + (targetRect.width / 2) - shellRect.left) / shellRect.width) * 100;
+    const originY = targetRect.top - shellRect.top + (targetRect.height * 0.18);
+
+    appShell.style.setProperty("--idle-reading-shell-origin-x", `${Math.max(0, Math.min(100, originX)).toFixed(2)}%`);
+    appShell.style.setProperty("--idle-reading-shell-origin-y", `${Math.max(0, Math.min(shellRect.height, originY)).toFixed(1)}px`);
+}
+
+function applyIdleScreensaverCameraScale(scale) {
+    idleScreensaverCurrentScale = clampIdleScreensaverScale(scale);
+
+    if (appShell) {
+        appShell.style.setProperty("--idle-reading-shell-scale", idleScreensaverCurrentScale.toFixed(4));
+    }
+}
+
+function resolveIdleScreensaverTargetStartTop(target) {
+    const targetRect = (target.anchorElement || target.element).getBoundingClientRect();
+    const viewportOffset = window.innerHeight * IDLE_SCREEN_SAVER_VIEWPORT_TOP_OFFSET_RATIO;
+
+    return clampIdleScreensaverTop(window.scrollY + targetRect.top - viewportOffset);
+}
+
+function resolveIdleScreensaverTargetReadDistance(target) {
+    const rect = target.element.getBoundingClientRect();
+    const anchorRect = (target.anchorElement || target.element).getBoundingClientRect();
+    const anchorOffset = Math.max(0, anchorRect.top - rect.top);
+    const remainingHeight = Math.max(anchorRect.height * 0.8, rect.height - anchorOffset);
+    const distance = Math.min(
+        Math.max(rect.height * target.readRatio, remainingHeight * 0.72),
+        window.innerHeight * IDLE_SCREEN_SAVER_MAX_READ_DISTANCE_RATIO
+    );
+
+    return Math.max(IDLE_SCREEN_SAVER_MIN_READ_DISTANCE_PX, distance);
+}
+
+function clearIdleScreensaverFocus() {
+    if (!idleScreensaverFocusedElement) {
+        return;
+    }
+
+    idleScreensaverFocusedElement.classList.remove("is-idle-reading-focus");
+    idleScreensaverFocusedElement = null;
+}
+
+function setIdleScreensaverFocus(target) {
+    clearIdleScreensaverFocus();
+
+    idleScreensaverFocusedElement = target?.element || null;
+
+    if (idleScreensaverFocusedElement) {
+        idleScreensaverFocusedElement.classList.add("is-idle-reading-focus");
+    }
+}
+
+function easeIdleScreensaverTravel(progress) {
+    const smoothedProgress = progress * progress * progress * (progress * ((progress * 6) - 15) + 10);
+
+    return Math.pow(smoothedProgress, 0.78);
+}
+
+function easeIdleScreensaverRead(progress) {
+    return progress;
+}
+
+function setIdleScreensaverPhase(phase, now, fromTop, toTop, duration) {
+    idleScreensaverPhase = phase;
+    idleScreensaverPhaseStartedAt = now;
+    idleScreensaverPhaseDuration = duration;
+    idleScreensaverFromTop = clampIdleScreensaverTop(fromTop);
+    idleScreensaverToTop = clampIdleScreensaverTop(toTop);
+    idleScreensaverScaleFrom = idleScreensaverCurrentScale;
+    idleScreensaverScaleTo = idleScreensaverCurrentScale;
+}
+
+function resolveIdleScreensaverNextIndex() {
+    if (idleScreensaverTargets.length <= 1) {
+        return 0;
+    }
+
+    let nextIndex = idleScreensaverTargetIndex + idleScreensaverDirection;
+
+    if (nextIndex >= idleScreensaverTargets.length) {
+        idleScreensaverDirection = -1;
+        nextIndex = idleScreensaverTargets.length - 2;
+    } else if (nextIndex < 0) {
+        idleScreensaverDirection = 1;
+        nextIndex = 1;
+    }
+
+    return Math.max(0, nextIndex);
+}
+
+function beginIdleScreensaverTravel(now) {
+    const target = idleScreensaverTargets[idleScreensaverTargetIndex];
+
+    if (!target) {
+        stopIdleScreensaver();
+        scheduleIdleScreensaver();
+        return;
+    }
+
+    clearIdleScreensaverFocus();
+    applyIdleScreensaverCameraOrigin(target);
+    updateIdleShowcaseOverlay(target);
+
+    const fromTop = window.scrollY;
+    const toTop = resolveIdleScreensaverTargetStartTop(target);
+    const distance = Math.abs(toTop - fromTop);
+    const duration = Math.max(460, Math.min(1650, (distance / IDLE_SCREEN_SAVER_TRAVEL_SPEED_PX_PER_SECOND) * 1000));
+
+    setIdleScreensaverPhase("travel", now, fromTop, toTop, duration);
+    idleScreensaverScaleTo = getIdleScreensaverBaseScale(idleScreensaverTargetIndex) + IDLE_SCREEN_SAVER_CAMERA_TRAVEL_EXTRA;
+}
+
+function beginIdleScreensaverRead(now) {
+    const target = idleScreensaverTargets[idleScreensaverTargetIndex];
+
+    if (!target) {
+        stopIdleScreensaver();
+        scheduleIdleScreensaver();
+        return;
+    }
+
+    setIdleScreensaverFocus(target);
+    applyIdleScreensaverCameraOrigin(target);
+
+    const fromTop = window.scrollY;
+    const toTop = clampIdleScreensaverTop(fromTop + resolveIdleScreensaverTargetReadDistance(target));
+    const distance = Math.abs(toTop - fromTop);
+    const duration = Math.max(2400, Math.min(6200, (distance / IDLE_SCREEN_SAVER_READ_SPEED_PX_PER_SECOND) * 1000));
+
+    setIdleScreensaverPhase("read", now, fromTop, toTop, duration);
+    idleScreensaverScaleTo = getIdleScreensaverBaseScale(idleScreensaverTargetIndex) + IDLE_SCREEN_SAVER_CAMERA_READ_EXTRA;
+}
+
+function advanceIdleScreensaverStory(now) {
+    idleScreensaverTargets = getIdleScreensaverReadingTargets();
+
+    if (!idleScreensaverTargets.length) {
+        stopIdleScreensaver();
+        scheduleIdleScreensaver();
+        return;
+    }
+
+    idleScreensaverTargetIndex = resolveIdleScreensaverNextIndex();
+    beginIdleScreensaverTravel(now);
+}
+
+function stopIdleScreensaver() {
+    if (idleScreensaverFrame) {
+        window.cancelAnimationFrame(idleScreensaverFrame);
+        idleScreensaverFrame = 0;
+    }
+
+    clearIdleScreensaverFocus();
+    body.classList.remove("is-idle-reading-screensaver");
+    idleScreensaverTargets = [];
+    isIdleScreensaverActive = false;
+    idleScreensaverPhase = "idle";
+    idleScreensaverPhaseStartedAt = 0;
+    idleScreensaverPhaseDuration = 0;
+    idleScreensaverFromTop = 0;
+    idleScreensaverToTop = 0;
+    idleScreensaverScaleFrom = 1;
+    idleScreensaverScaleTo = 1;
+    resetIdleScreensaverCameraOrigin();
+    applyIdleScreensaverCameraScale(1);
+
+    if (idleShowcaseTrack) {
+        idleShowcaseTrack.replaceChildren();
+    }
+}
+
+function scheduleIdleScreensaver() {
+    if (idleScreensaverTimer) {
+        window.clearTimeout(idleScreensaverTimer);
+    }
+
+    if (prefersReducedMotionQuery.matches) {
+        return;
+    }
+
+    idleScreensaverTimer = window.setTimeout(function () {
+        idleScreensaverTimer = 0;
+
+        if (canStartIdleScreensaver()) {
+            startIdleScreensaver();
+            return;
+        }
+
+        scheduleIdleScreensaver();
+    }, IDLE_SCREEN_SAVER_DELAY_MS);
+}
+
+function runIdleScreensaverFrame(now) {
+    if (!isIdleScreensaverActive) {
+        return;
+    }
+
+    if (!canStartIdleScreensaver()) {
+        stopIdleScreensaver();
+        scheduleIdleScreensaver();
+        return;
+    }
+
+    const phaseProgress = idleScreensaverPhaseDuration > 0
+        ? Math.min(1, (now - idleScreensaverPhaseStartedAt) / idleScreensaverPhaseDuration)
+        : 1;
+    const cameraProgress = idleScreensaverPhase === "travel"
+        ? easeIdleScreensaverTravel(phaseProgress)
+        : easeIdleScreensaverRead(phaseProgress);
+
+    if (idleScreensaverPhase === "travel" || idleScreensaverPhase === "read") {
+        const easedProgress = idleScreensaverPhase === "travel"
+            ? easeIdleScreensaverTravel(phaseProgress)
+            : easeIdleScreensaverRead(phaseProgress);
+
+        window.scrollTo({
+            top: idleScreensaverFromTop + ((idleScreensaverToTop - idleScreensaverFromTop) * easedProgress),
+            behavior: "auto"
+        });
+    }
+
+    applyIdleScreensaverCameraScale(
+        idleScreensaverScaleFrom + ((idleScreensaverScaleTo - idleScreensaverScaleFrom) * cameraProgress)
+    );
+
+    if (phaseProgress >= 1) {
+        if (idleScreensaverPhase === "travel") {
+            beginIdleScreensaverRead(now);
+        } else {
+            advanceIdleScreensaverStory(now);
+        }
+    }
+
+    idleScreensaverFrame = window.requestAnimationFrame(runIdleScreensaverFrame);
+}
+
+function startIdleScreensaver() {
+    if (isIdleScreensaverActive || !canStartIdleScreensaver()) {
+        return;
+    }
+
+    idleScreensaverTargets = getIdleScreensaverReadingTargets();
+
+    if (!idleScreensaverTargets.length) {
+        return;
+    }
+
+    const currentAnchor = window.scrollY + (window.innerHeight * 0.24);
+    const firstTargetBelowFold = idleScreensaverTargets.findIndex(function (target) {
+        return (window.scrollY + target.element.getBoundingClientRect().top) >= currentAnchor;
+    });
+
+    idleScreensaverTargetIndex = firstTargetBelowFold >= 0 ? firstTargetBelowFold : idleScreensaverTargets.length - 1;
+    idleScreensaverDirection = idleScreensaverTargetIndex >= idleScreensaverTargets.length - 1 ? -1 : 1;
+    isIdleScreensaverActive = true;
+    body.classList.add("is-idle-reading-screensaver");
+    applyIdleScreensaverCameraScale(1);
+    beginIdleScreensaverTravel(performance.now());
+    idleScreensaverFrame = window.requestAnimationFrame(runIdleScreensaverFrame);
+}
+
+function resetIdleScreensaverActivity() {
+    stopIdleScreensaver();
+    scheduleIdleScreensaver();
+}
+
+function initializeIdleScreensaver() {
+    ensureIdleShowcaseOverlay();
+
+    [
+        "mousemove",
+        "mousedown",
+        "wheel",
+        "keydown",
+        "touchstart",
+        "touchmove",
+        "pointerdown",
+        "focusin"
+    ].forEach(function (eventName) {
+        document.addEventListener(eventName, resetIdleScreensaverActivity);
+    });
+
+    document.addEventListener("visibilitychange", function () {
+        if (document.hidden) {
+            stopIdleScreensaver();
+            return;
+        }
+
+        resetIdleScreensaverActivity();
+    });
+
+    window.addEventListener("resize", resetIdleScreensaverActivity);
+
+    if (typeof prefersReducedMotionQuery.addEventListener === "function") {
+        prefersReducedMotionQuery.addEventListener("change", resetIdleScreensaverActivity);
+    }
+
+    resetIdleScreensaverActivity();
 }
 
 function clearProblemQuizAdvanceTimer() {
@@ -6227,19 +6824,29 @@ async function refreshProblemCategoryStats() {
 
     try {
         const stats = await fetchProblemCategoryStats(PROBLEM_CATEGORY_STATS_DAYS);
-        const [trendResult, timeResult] = await Promise.allSettled([
-            fetchProblemCategoryTrends(PROBLEM_CATEGORY_STATS_DAYS),
-            fetchProblemTimeSegments(PROBLEM_CATEGORY_STATS_DAYS)
-        ]);
-        const trends = trendResult.status === "fulfilled" ? trendResult.value : [];
-        const timeSegments = timeResult.status === "fulfilled" ? timeResult.value : [];
+        let trends = [];
+        let timeSegments = [];
 
-        if (trendResult.status === "rejected") {
-            console.error("Failed to sync problem category trends from Supabase.", trendResult.reason);
-        }
+        if (ENABLE_ADVANCED_PROBLEM_STATS_RPC) {
+            const [trendResult, timeResult] = await Promise.allSettled([
+                import("./supabase.js").then(function (module) {
+                    return module.fetchProblemCategoryTrends(PROBLEM_CATEGORY_STATS_DAYS);
+                }),
+                import("./supabase.js").then(function (module) {
+                    return module.fetchProblemTimeSegments(PROBLEM_CATEGORY_STATS_DAYS);
+                })
+            ]);
 
-        if (timeResult.status === "rejected") {
-            console.error("Failed to sync problem time segments from Supabase.", timeResult.reason);
+            trends = trendResult.status === "fulfilled" ? trendResult.value : [];
+            timeSegments = timeResult.status === "fulfilled" ? timeResult.value : [];
+
+            if (trendResult.status === "rejected") {
+                console.error("Failed to sync problem category trends from Supabase.", trendResult.reason);
+            }
+
+            if (timeResult.status === "rejected") {
+                console.error("Failed to sync problem time segments from Supabase.", timeResult.reason);
+            }
         }
 
         setProblemStatsStoryData({
@@ -6679,4 +7286,5 @@ initializeDailyPersonaStories();
 initializeDailyHoroscope();
 initializeProblemQuiz();
 initializeNewsletterForm();
+initializeIdleScreensaver();
 startSolvedCountSync();

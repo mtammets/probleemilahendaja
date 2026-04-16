@@ -28,6 +28,9 @@ RESEND_API_KEY=YOUR_RESEND_API_KEY
 RESEND_FROM_EMAIL=Probleemilahendaja <onboarding@yourdomain.com>
 ADMIN_ACCESS_CODE=CHANGE_ME
 APP_BASE_URL=https://YOUR_PUBLIC_DOMAIN
+VITE_ENABLE_ADVANCED_PROBLEM_STATS_RPC=false
+VITE_ENABLE_SUPABASE_REALTIME=false
+VITE_ENABLE_BROWSER_GEOLOCATION=false
 ```
 
 Näidisväärtused on failis `.env.example`.
@@ -37,6 +40,9 @@ Näidisväärtused on failis `.env.example`.
 `ADMIN_ACCESS_CODE` kaitseb admin-vaadet.
 `RESEND_API_KEY` ja `RESEND_FROM_EMAIL` on vajalikud siis, kui tahad intervjuu linke päriselt e-postiga välja saata. Kui need puuduvad, genereerib admin ikkagi kopeeritava lingi.
 `APP_BASE_URL` peaks viitama sinu avalikule domeenile, et meilides läheks välja õige intervjuu link.
+`VITE_ENABLE_ADVANCED_PROBLEM_STATS_RPC` lülitab sisse kaks lisastatistika RPC-d (`get_problem_category_trends`, `get_problem_time_segments`). Hoia see `false`, kuni need funktsioonid on sinu Supabase projektis päriselt loodud.
+`VITE_ENABLE_SUPABASE_REALTIME` lülitab sisse Supabase realtime websocketi. Hoia see `false`, kui Realtime pole sinu projektis seadistatud või tahad brauserikonsooli puhtana hoida.
+`VITE_ENABLE_BROWSER_GEOLOCATION` lubab avalehel kasutada seadme asukohta ilma jaoks. Vaikimisi kasutatakse Tallinna, et vältida automaatseid geolokatsioonihoiatusi ja õiguste küsimist.
 
 4. Käivita arendusserver:
 

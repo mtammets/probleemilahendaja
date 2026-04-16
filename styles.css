@@ -167,6 +167,9 @@ html {
 }
 
 body {
+    --idle-reading-shell-scale: 1;
+    --idle-reading-shell-origin-x: 50%;
+    --idle-reading-shell-origin-y: 0px;
     min-height: 100vh;
     margin: 0;
     padding: calc(env(safe-area-inset-top, 0px) + clamp(1rem, 3vw, 2rem)) clamp(1rem, 3vw, 2rem) clamp(1rem, 3vw, 2rem);
@@ -1000,6 +1003,13 @@ body[data-state="report"] {
     width: min(100%, 1080px);
     display: grid;
     gap: 1.15rem;
+    transform: translateZ(0) scale(var(--idle-reading-shell-scale));
+    transform-origin: var(--idle-reading-shell-origin-x) var(--idle-reading-shell-origin-y);
+}
+
+body.is-idle-reading-screensaver .app-shell {
+    will-change: transform;
+    filter: saturate(1.08) contrast(1.05) brightness(1.03);
 }
 
 .app-shell::before {
@@ -12528,6 +12538,184 @@ body.weather-modal-open {
 
     .horoscope-sign__name {
         font-size: 0.74rem;
+    }
+}
+
+body.is-idle-reading-screensaver .is-idle-reading-focus {
+    transform: translate3d(0, 0, 0) scale(1);
+    transform-origin: center 18%;
+    filter: brightness(1.03) saturate(1.04) contrast(1.015);
+    box-shadow: 0 14px 40px rgba(12, 16, 24, 0.14);
+    transition:
+        transform 1200ms cubic-bezier(0.22, 1, 0.36, 1),
+        filter 1200ms cubic-bezier(0.22, 1, 0.36, 1),
+        box-shadow 1200ms cubic-bezier(0.22, 1, 0.36, 1);
+    will-change: transform;
+    z-index: 2;
+}
+
+body.is-idle-reading-screensaver .is-idle-reading-focus.panel__frame,
+body.is-idle-reading-screensaver .is-idle-reading-focus.weather-strip,
+body.is-idle-reading-screensaver .is-idle-reading-focus.science-article,
+body.is-idle-reading-screensaver .is-idle-reading-focus.persona-story,
+body.is-idle-reading-screensaver .is-idle-reading-focus.horoscope-card,
+body.is-idle-reading-screensaver .is-idle-reading-focus.problem-quiz__card,
+body.is-idle-reading-screensaver .is-idle-reading-focus.intake-hero__cover,
+body.is-idle-reading-screensaver .is-idle-reading-focus.problem-stats__chart {
+    position: relative;
+}
+
+.idle-showcase {
+    --idle-showcase-bar-height: clamp(2.4rem, 8vh, 5.5rem);
+    --idle-showcase-side-gap: clamp(1rem, 3vw, 2rem);
+    --idle-showcase-copy-bottom-gap: clamp(0.85rem, 2.8vh, 1.7rem);
+    position: fixed;
+    inset: 0;
+    z-index: 60;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 700ms ease;
+}
+
+.idle-showcase::before,
+.idle-showcase::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    height: var(--idle-showcase-bar-height);
+    background: rgba(4, 7, 13, 0.9);
+    transform: scaleY(0.25);
+    transform-origin: center;
+    transition: transform 900ms cubic-bezier(0.22, 1, 0.36, 1), opacity 900ms ease;
+    opacity: 0;
+}
+
+.idle-showcase::before {
+    top: 0;
+}
+
+.idle-showcase::after {
+    bottom: 0;
+}
+
+body.is-idle-reading-screensaver .idle-showcase {
+    opacity: 1;
+}
+
+body.is-idle-reading-screensaver .idle-showcase::before,
+body.is-idle-reading-screensaver .idle-showcase::after {
+    transform: scaleY(1);
+    opacity: 1;
+}
+
+.idle-showcase__veil {
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    background:
+        radial-gradient(circle at 50% 46%, rgba(255, 255, 255, 0) 0%, rgba(255, 255, 255, 0) 34%, rgba(6, 10, 18, 0.18) 62%, rgba(6, 10, 18, 0.6) 100%),
+        linear-gradient(180deg, rgba(6, 10, 18, 0.16) 0%, rgba(6, 10, 18, 0) 26%, rgba(6, 10, 18, 0.44) 100%);
+}
+
+.idle-showcase__brand {
+    position: absolute;
+    z-index: 2;
+    top: calc(env(safe-area-inset-top, 0px) + clamp(0.85rem, 2.4vh, 1.8rem));
+    left: var(--idle-showcase-side-gap);
+    display: grid;
+    gap: 0.16rem;
+    color: #f7efe3;
+    text-shadow: 0 6px 24px rgba(0, 0, 0, 0.32);
+}
+
+.idle-showcase__brand-kicker,
+.idle-showcase__eyebrow {
+    font-family: "Rajdhani", sans-serif;
+    font-size: 0.76rem;
+    font-weight: 700;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: rgba(247, 239, 227, 0.74);
+}
+
+.idle-showcase__brand-name {
+    font-family: "Cormorant Garamond", serif;
+    font-size: clamp(1.5rem, 2.6vw, 2.2rem);
+    font-weight: 700;
+    line-height: 0.94;
+}
+
+.idle-showcase__copy {
+    position: absolute;
+    z-index: 3;
+    left: var(--idle-showcase-side-gap);
+    bottom: calc(var(--idle-showcase-bar-height) + env(safe-area-inset-bottom, 0px) + var(--idle-showcase-copy-bottom-gap));
+    max-width: min(36rem, calc(100vw - (var(--idle-showcase-side-gap) * 2)));
+    padding: 1rem 1.1rem 0.95rem;
+    display: grid;
+    gap: 0.42rem;
+    color: #fff9f1;
+    background: linear-gradient(180deg, rgba(10, 15, 24, 0.52), rgba(10, 15, 24, 0.76));
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 20px;
+    box-shadow:
+        0 24px 60px rgba(0, 0, 0, 0.26),
+        inset 0 1px 0 rgba(255, 255, 255, 0.08);
+    backdrop-filter: blur(12px);
+}
+
+.idle-showcase__title {
+    font-family: "Cormorant Garamond", serif;
+    font-size: clamp(2rem, 4.6vw, 3.7rem);
+    font-weight: 700;
+    line-height: 0.95;
+    letter-spacing: -0.02em;
+    text-wrap: balance;
+}
+
+.idle-showcase__note {
+    margin: 0;
+    max-width: 34rem;
+    font-size: clamp(0.94rem, 1.5vw, 1.08rem);
+    line-height: 1.5;
+    color: rgba(255, 248, 238, 0.84);
+}
+
+.idle-showcase__track {
+    display: flex;
+    gap: 0.46rem;
+    margin-top: 0.18rem;
+}
+
+.idle-showcase__dot {
+    width: 2rem;
+    height: 0.24rem;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.18);
+    overflow: hidden;
+}
+
+.idle-showcase__dot.is-active {
+    background: linear-gradient(90deg, rgba(255, 244, 222, 0.96), rgba(213, 155, 61, 0.92));
+    box-shadow: 0 0 20px rgba(213, 155, 61, 0.28);
+}
+
+@media (max-height: 760px) {
+    .idle-showcase__copy {
+        bottom: calc(var(--idle-showcase-bar-height) + env(safe-area-inset-bottom, 0px) + 0.8rem);
+        max-width: min(32rem, calc(100vw - (var(--idle-showcase-side-gap) * 2)));
+    }
+}
+
+@media (max-width: 720px) {
+    .idle-showcase {
+        --idle-showcase-copy-bottom-gap: 0.9rem;
+    }
+
+    .idle-showcase__copy {
+        padding: 0.88rem 0.94rem 0.86rem;
+        border-radius: 18px;
     }
 }
 

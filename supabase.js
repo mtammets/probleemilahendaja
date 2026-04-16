@@ -4,6 +4,8 @@ import { GENERAL_PROBLEM_CATEGORY } from "./problem-categories.mjs";
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL?.trim();
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY?.trim();
 const SESSION_STORAGE_KEY = "probleemilahendaja_session_id";
+const ENABLE_SUPABASE_REALTIME = String(import.meta.env.VITE_ENABLE_SUPABASE_REALTIME || "").trim() === "true";
+const unsupportedOptionalRpcFunctions = new Set();
 let inMemorySessionId = null;
 
 export const isSupabaseConfigured = Boolean(supabaseUrl && supabaseAnonKey);
@@ -40,6 +42,53 @@ function normalizeInteger(value) {
     }
 
     return 0;
+}
+
+function isMissingOptionalRpcError(error, rpcName) {
+    if (!error || typeof error !== "object") {
+        return false;
+    }
+
+    const errorCode = typeof error.code === "string" ? error.code : "";
+
+    if (errorCode === "PGRST202" || errorCode === "42883") {
+        return true;
+    }
+
+    const errorText = [
+        error.message,
+        error.details,
+        error.hint
+    ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+
+    return errorText.includes(rpcName.toLowerCase())
+        && (
+            errorText.includes("schema cache")
+            || errorText.includes("could not find the function")
+            || errorText.includes("does not exist")
+        );
+}
+
+async function invokeOptionalArrayRpc(rpcName, params) {
+    if (!supabase || unsupportedOptionalRpcFunctions.has(rpcName)) {
+        return [];
+    }
+
+    const { data, error } = await supabase.rpc(rpcName, params);
+
+    if (error) {
+        if (isMissingOptionalRpcError(error, rpcName)) {
+            unsupportedOptionalRpcFunctions.add(rpcName);
+            return [];
+        }
+
+        throw error;
+    }
+
+    return Array.isArray(data) ? data : [];
 }
 
 export function getOrCreateSessionId() {
@@ -112,16 +161,11 @@ export async function fetchProblemCategoryTrends(days = 30) {
         return [];
     }
 
-    const { data, error } = await supabase.rpc("get_problem_category_trends", {
+    const data = await invokeOptionalArrayRpc("get_problem_category_trends", {
         p_days: days
     });
 
-    if (error) {
-        throw error;
-    }
-
-    return Array.isArray(data)
-        ? data.map(function (row) {
+    return data.map(function (row) {
             return {
                 problemType: row.problem_type ?? GENERAL_PROBLEM_CATEGORY.label,
                 currentCount: normalizeInteger(row.current_count),
@@ -137,8 +181,7 @@ export async function fetchProblemCategoryTrends(days = 30) {
                     : Number(row.delta_share_points || 0),
                 deltaCount: normalizeInteger(row.delta_count)
             };
-        })
-        : [];
+        });
 }
 
 export async function fetchProblemTimeSegments(days = 30) {
@@ -146,16 +189,11 @@ export async function fetchProblemTimeSegments(days = 30) {
         return [];
     }
 
-    const { data, error } = await supabase.rpc("get_problem_time_segments", {
+    const data = await invokeOptionalArrayRpc("get_problem_time_segments", {
         p_days: days
     });
 
-    if (error) {
-        throw error;
-    }
-
-    return Array.isArray(data)
-        ? data.map(function (row) {
+    return data.map(function (row) {
             return {
                 segmentIndex: normalizeInteger(row.segment_index),
                 segmentLabel: row.segment_label ?? "",
@@ -166,14 +204,13 @@ export async function fetchProblemTimeSegments(days = 30) {
                     ? row.share_percent
                     : Number(row.share_percent || 0)
             };
-        })
-        : [];
+        });
 }
 
 export function subscribeToReportInserts(onInsert, channelName = "reports-insert-counter") {
-    if (!supabase || typeof onInsert !== "function") {
+    if (!supabase || !ENABLE_SUPABASE_REALTIME || typeof onInsert !== "function") {
         return function () {
-            // No-op cleanup when Supabase or callback is unavailable.
+            // No-op cleanup when Supabase, Realtime, or callback is unavailable.
         };
     }
 
