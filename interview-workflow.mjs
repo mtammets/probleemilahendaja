@@ -1,5 +1,10 @@
 import Busboy from "busboy";
 import crypto from "node:crypto";
+import {
+    OPENAI_PRICING_SNAPSHOT,
+    getFallbackCostForContentType,
+    getStoredRunBilling
+} from "./ai-costs.mjs";
 
 const ADMIN_SESSION_COOKIE = "probleemilahendaja_admin_session";
 const ADMIN_SESSION_TTL_SECONDS = 60 * 60 * 12;
@@ -19,6 +24,52 @@ const INTERVIEW_STORY_KIND = {
     cover: "cover"
 };
 const INTERVIEW_JOURNALIST_NAME = "Liisi";
+const ADMIN_METRICS_TIME_ZONE = "Europe/Tallinn";
+const AI_RUN_LABELS = {
+    problem_report: "Probleemiraport",
+    problem_public_feed: "Avaliku loendi probleem",
+    problem_public_detail: "Probleemi detailvaade",
+    problem_resolution_public: "Avalik lahenduse tekst",
+    interview_turn: "Intervjuu järelküsimus",
+    interview_story: "Persooniloo mustand",
+    interview_cover_story: "Kaaneloo mustand",
+    daily_article: "Kunstiartikkel",
+    daily_horoscope: "Horoskoop",
+    daily_weather: "Ilmatekst",
+    daily_weather_image: "Ilmapilt"
+};
+const AI_COST_CATEGORIES = [
+    {
+        id: "problem_solving",
+        label: "Probleemide lahendamine",
+        contentTypes: ["problem_report", "problem_public_feed", "problem_public_detail", "problem_resolution_public"]
+    },
+    {
+        id: "interviews",
+        label: "Intervjuud ja lood",
+        contentTypes: ["interview_turn", "interview_story", "interview_cover_story"]
+    },
+    {
+        id: "articles",
+        label: "Kunstiartiklid",
+        contentTypes: ["daily_article"]
+    },
+    {
+        id: "horoscopes",
+        label: "Horoskoobid",
+        contentTypes: ["daily_horoscope"]
+    },
+    {
+        id: "weather_copy",
+        label: "Ilmatekst",
+        contentTypes: ["daily_weather"]
+    },
+    {
+        id: "weather_images",
+        label: "Ilmapildid",
+        contentTypes: ["daily_weather_image"]
+    }
+];
 
 const INTERVIEW_TURN_JSON_SCHEMA = {
     type: "object",
@@ -214,6 +265,94 @@ function escapeHtml(value) {
 
 function compactText(value) {
     return String(value || "").replace(/\s+/g, " ").trim();
+}
+
+function normalizeMetricNumber(value, fallbackValue = 0) {
+    if (typeof value === "number" && Number.isFinite(value)) {
+        return value;
+    }
+
+    if (typeof value === "string" && value.trim() !== "") {
+        const parsedValue = Number(value);
+
+        if (Number.isFinite(parsedValue)) {
+            return parsedValue;
+        }
+    }
+
+    return fallbackValue;
+}
+
+function roundUsd(value) {
+    return Number(normalizeMetricNumber(value).toFixed(6));
+}
+
+function formatDateKeyInTimeZone(value, timeZone = ADMIN_METRICS_TIME_ZONE) {
+    if (!value) {
+        return "";
+    }
+
+    const date = new Date(value);
+
+    if (Number.isNaN(date.getTime())) {
+        return "";
+    }
+
+    const parts = new Intl.DateTimeFormat("en-CA", {
+        timeZone,
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit"
+    }).formatToParts(date);
+    const year = parts.find(function (part) {
+        return part.type === "year";
+    })?.value;
+    const month = parts.find(function (part) {
+        return part.type === "month";
+    })?.value;
+    const day = parts.find(function (part) {
+        return part.type === "day";
+    })?.value;
+
+    if (!year || !month || !day) {
+        return "";
+    }
+
+    return `${year}-${month}-${day}`;
+}
+
+function getTimeZoneOffsetLabel(value = new Date(), timeZone = ADMIN_METRICS_TIME_ZONE) {
+    const date = value instanceof Date ? value : new Date(value);
+    const parts = new Intl.DateTimeFormat("en-US", {
+        timeZone,
+        timeZoneName: "shortOffset",
+        hour: "2-digit"
+    }).formatToParts(date);
+    const rawOffset = parts.find(function (part) {
+        return part.type === "timeZoneName";
+    })?.value || "GMT+0";
+    const normalizedOffset = rawOffset.replace("GMT", "");
+
+    if (/^[+-]\d{2}:\d{2}$/u.test(normalizedOffset)) {
+        return normalizedOffset;
+    }
+
+    if (/^[+-]\d{1,2}$/u.test(normalizedOffset)) {
+        const sign = normalizedOffset[0];
+        const hours = normalizedOffset.slice(1).padStart(2, "0");
+        return `${sign}${hours}:00`;
+    }
+
+    return "+00:00";
+}
+
+function buildTodayStartIso(dateKey, timeZone = ADMIN_METRICS_TIME_ZONE) {
+    if (!dateKey) {
+        return new Date(0).toISOString();
+    }
+
+    const offset = getTimeZoneOffsetLabel(new Date(), timeZone);
+    return new Date(`${dateKey}T00:00:00${offset}`).toISOString();
 }
 
 function normalizeCaptionList(values, maxLength = 180) {
@@ -1207,6 +1346,307 @@ export function registerInterviewWorkflow(options) {
         };
     }
 
+    async function fetchExactCount(tableName, applyFilters = null) {
+        let query = supabaseAdmin
+            .from(tableName)
+            .select("*", {
+                count: "exact",
+                head: true
+            });
+
+        if (typeof applyFilters === "function") {
+            query = applyFilters(query) || query;
+        }
+
+        const { count, error } = await query;
+
+        if (error) {
+            throw error;
+        }
+
+        return normalizeMetricNumber(count);
+    }
+
+    async function fetchAiGenerationRunsForDashboard() {
+        const rows = [];
+        const pageSize = 500;
+        let fromIndex = 0;
+
+        while (true) {
+            const { data, error } = await supabaseAdmin
+                .from("ai_generation_runs")
+                .select("id, content_type, item_slug, status, model, created_at, finished_at, output_payload")
+                .order("created_at", { ascending: false })
+                .range(fromIndex, fromIndex + pageSize - 1);
+
+            if (error) {
+                throw error;
+            }
+
+            const batch = Array.isArray(data) ? data : [];
+            rows.push(...batch);
+
+            if (batch.length < pageSize) {
+                break;
+            }
+
+            fromIndex += pageSize;
+        }
+
+        return rows;
+    }
+
+    function createAiCategoryStatsMap() {
+        return new Map(AI_COST_CATEGORIES.map(function (category) {
+            return [category.id, {
+                id: category.id,
+                label: category.label,
+                totalRuns: 0,
+                todayRuns: 0,
+                totalUsd: 0,
+                todayUsd: 0,
+                last30DaysUsd: 0
+            }];
+        }));
+    }
+
+    function buildAiContentTypeCount(label, total = 0, today = 0) {
+        return {
+            label,
+            total,
+            today
+        };
+    }
+
+    async function buildAdminMetricsPayload() {
+        const todayDateKey = getLocalDateKey();
+        const todayStartIso = buildTodayStartIso(todayDateKey, ADMIN_METRICS_TIME_ZONE);
+        const last30DaysThreshold = Date.now() - (30 * 24 * 60 * 60 * 1000);
+        const [
+            reportsTotal,
+            reportsToday,
+            interviewsTotal,
+            interviewsPublished,
+            interviewsReview,
+            interviewsActive,
+            personaStoriesPublished,
+            aiRuns
+        ] = await Promise.all([
+            fetchExactCount("reports"),
+            fetchExactCount("reports", function (query) {
+                return query.gte("created_at", todayStartIso);
+            }),
+            fetchExactCount("interviews"),
+            fetchExactCount("interviews", function (query) {
+                return query.eq("status", INTERVIEW_STATUS.published);
+            }),
+            fetchExactCount("interviews", function (query) {
+                return query.eq("status", INTERVIEW_STATUS.readyForReview);
+            }),
+            fetchExactCount("interviews", function (query) {
+                return query.in("status", [
+                    INTERVIEW_STATUS.draft,
+                    INTERVIEW_STATUS.invited,
+                    INTERVIEW_STATUS.inProgress,
+                    INTERVIEW_STATUS.awaitingImages
+                ]);
+            }),
+            fetchExactCount("editorial_items", function (query) {
+                return query.eq("content_type", "daily_persona").eq("status", editorialStatusPublished);
+            }),
+            fetchAiGenerationRunsForDashboard()
+        ]);
+
+        const aiContentTypeStats = new Map();
+        const aiCategoryStats = createAiCategoryStatsMap();
+        const costTotals = {
+            totalUsd: 0,
+            todayUsd: 0,
+            last30DaysUsd: 0,
+            exactUsd: 0,
+            estimatedUsd: 0,
+            exactRunCount: 0,
+            estimatedRunCount: 0
+        };
+        const runTotals = {
+            completed: 0,
+            failed: 0,
+            started: 0
+        };
+
+        aiRuns.forEach(function (run) {
+            const contentType = compactText(run.content_type);
+            const createdAt = run.created_at || run.finished_at || null;
+            const isToday = formatDateKeyInTimeZone(createdAt, ADMIN_METRICS_TIME_ZONE) === todayDateKey;
+            const createdAtTimestamp = Date.parse(createdAt || 0) || 0;
+            const isLast30Days = createdAtTimestamp >= last30DaysThreshold;
+            const contentTypeStats = aiContentTypeStats.get(contentType) || {
+                id: contentType,
+                label: AI_RUN_LABELS[contentType] || contentType,
+                total: 0,
+                today: 0
+            };
+
+            if (run.status === "completed") {
+                runTotals.completed += 1;
+                contentTypeStats.total += 1;
+
+                if (isToday) {
+                    contentTypeStats.today += 1;
+                }
+
+                const category = AI_COST_CATEGORIES.find(function (entry) {
+                    return entry.contentTypes.includes(contentType);
+                });
+                const billing = getStoredRunBilling(run);
+                const costUsd = roundUsd(billing?.estimatedCostUsd || 0);
+
+                if (category) {
+                    const categoryStats = aiCategoryStats.get(category.id);
+
+                    categoryStats.totalRuns += 1;
+
+                    if (isToday) {
+                        categoryStats.todayRuns += 1;
+                    }
+
+                    categoryStats.totalUsd = roundUsd(categoryStats.totalUsd + costUsd);
+
+                    if (isToday) {
+                        categoryStats.todayUsd = roundUsd(categoryStats.todayUsd + costUsd);
+                    }
+
+                    if (isLast30Days) {
+                        categoryStats.last30DaysUsd = roundUsd(categoryStats.last30DaysUsd + costUsd);
+                    }
+                }
+
+                costTotals.totalUsd = roundUsd(costTotals.totalUsd + costUsd);
+
+                if (isToday) {
+                    costTotals.todayUsd = roundUsd(costTotals.todayUsd + costUsd);
+                }
+
+                if (isLast30Days) {
+                    costTotals.last30DaysUsd = roundUsd(costTotals.last30DaysUsd + costUsd);
+                }
+
+                if (billing?.source === "usage" || billing?.source === "per_image_pricing") {
+                    costTotals.exactUsd = roundUsd(costTotals.exactUsd + costUsd);
+                    costTotals.exactRunCount += 1;
+                } else {
+                    costTotals.estimatedUsd = roundUsd(costTotals.estimatedUsd + costUsd);
+                    costTotals.estimatedRunCount += 1;
+                }
+            } else if (run.status === "failed") {
+                runTotals.failed += 1;
+            } else {
+                runTotals.started += 1;
+            }
+
+            aiContentTypeStats.set(contentType, contentTypeStats);
+        });
+
+        const loggedProblemReports = aiContentTypeStats.get("problem_report")?.total || 0;
+        const missingLegacyProblemSolves = Math.max(0, reportsTotal - loggedProblemReports);
+        const legacyProblemSolveCostUsd = roundUsd(
+            missingLegacyProblemSolves
+            * (getFallbackCostForContentType("problem_report") + getFallbackCostForContentType("problem_public_feed"))
+        );
+
+        if (legacyProblemSolveCostUsd > 0) {
+            const problemCategoryStats = aiCategoryStats.get("problem_solving");
+            problemCategoryStats.totalUsd = roundUsd(problemCategoryStats.totalUsd + legacyProblemSolveCostUsd);
+            costTotals.totalUsd = roundUsd(costTotals.totalUsd + legacyProblemSolveCostUsd);
+            costTotals.estimatedUsd = roundUsd(costTotals.estimatedUsd + legacyProblemSolveCostUsd);
+        }
+
+        return {
+            generatedAt: new Date().toISOString(),
+            pricingSnapshot: OPENAI_PRICING_SNAPSHOT,
+            counts: {
+                solvedProblems: {
+                    total: reportsTotal,
+                    today: reportsToday
+                },
+                interviews: {
+                    total: interviewsTotal,
+                    active: interviewsActive,
+                    review: interviewsReview,
+                    published: interviewsPublished
+                },
+                personaStoriesPublished: {
+                    total: personaStoriesPublished
+                },
+                personaDrafts: buildAiContentTypeCount(
+                    "Persooniloo mustandid",
+                    aiContentTypeStats.get("interview_story")?.total || 0,
+                    aiContentTypeStats.get("interview_story")?.today || 0
+                ),
+                coverDrafts: buildAiContentTypeCount(
+                    "Kaaneloo mustandid",
+                    aiContentTypeStats.get("interview_cover_story")?.total || 0,
+                    aiContentTypeStats.get("interview_cover_story")?.today || 0
+                ),
+                interviewFollowUps: buildAiContentTypeCount(
+                    "Intervjuu järelküsimused",
+                    aiContentTypeStats.get("interview_turn")?.total || 0,
+                    aiContentTypeStats.get("interview_turn")?.today || 0
+                ),
+                artArticles: buildAiContentTypeCount(
+                    "Kunstiartiklid",
+                    aiContentTypeStats.get("daily_article")?.total || 0,
+                    aiContentTypeStats.get("daily_article")?.today || 0
+                ),
+                horoscopes: buildAiContentTypeCount(
+                    "Horoskoobid",
+                    aiContentTypeStats.get("daily_horoscope")?.total || 0,
+                    aiContentTypeStats.get("daily_horoscope")?.today || 0
+                ),
+                weatherTexts: buildAiContentTypeCount(
+                    "Ilmatekstid",
+                    aiContentTypeStats.get("daily_weather")?.total || 0,
+                    aiContentTypeStats.get("daily_weather")?.today || 0
+                ),
+                weatherImages: buildAiContentTypeCount(
+                    "Ilmapildid",
+                    aiContentTypeStats.get("daily_weather_image")?.total || 0,
+                    aiContentTypeStats.get("daily_weather_image")?.today || 0
+                )
+            },
+            aiRuns: {
+                totals: runTotals,
+                byType: Array.from(aiContentTypeStats.values()).sort(function (first, second) {
+                    return second.total - first.total;
+                }),
+                recent: aiRuns.slice(0, 10).map(function (run) {
+                    const billing = run.status === "completed" ? getStoredRunBilling(run) : null;
+
+                    return {
+                        id: run.id,
+                        label: AI_RUN_LABELS[run.content_type] || run.content_type,
+                        contentType: run.content_type,
+                        status: run.status,
+                        model: run.model || "",
+                        createdAt: run.created_at || null,
+                        finishedAt: run.finished_at || null,
+                        costUsd: roundUsd(billing?.estimatedCostUsd || 0),
+                        costSource: billing?.source || "",
+                        itemSlug: run.item_slug || ""
+                    };
+                })
+            },
+            costs: {
+                ...costTotals,
+                legacyProblemSolveCount: missingLegacyProblemSolves,
+                legacyProblemSolveCostUsd,
+                byCategory: Array.from(aiCategoryStats.values()).sort(function (first, second) {
+                    return second.totalUsd - first.totalUsd;
+                })
+            }
+        };
+    }
+
     app.get("/api/admin/session", async function (request, response) {
         if (!ensureAdminConfigured(response)) {
             return;
@@ -1259,6 +1699,21 @@ export function registerInterviewWorkflow(options) {
         response.json({
             authenticated: false
         });
+    });
+
+    app.get("/api/admin/metrics", async function (request, response) {
+        if (!requireAdmin(request, response)) {
+            return;
+        }
+
+        try {
+            response.json(await buildAdminMetricsPayload());
+        } catch (error) {
+            console.error("Failed to load admin metrics.", error);
+            response.status(500).json({
+                error: "Admini statistika laadimine ebaõnnestus."
+            });
+        }
     });
 
     app.get("/api/admin/interviews", async function (request, response) {

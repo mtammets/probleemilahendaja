@@ -121,6 +121,15 @@ const solutionLead = document.getElementById("solutionLead");
 const intakeStage = document.querySelector(".intake-stage");
 const intakeStageFrame = intakeStage?.querySelector(".intake-stage__frame");
 const solverSkinDots = document.getElementById("solverSkinDots");
+const problemLengthMeter = document.getElementById("problemLengthMeter");
+const premiumProblemModal = document.getElementById("premiumProblemModal");
+const premiumProblemModalDialog = premiumProblemModal?.querySelector(".premium-problem-modal__dialog");
+const premiumProblemModalBackdrop = document.getElementById("premiumProblemModalBackdrop");
+const premiumProblemModalClose = document.getElementById("premiumProblemModalClose");
+const premiumProblemModalPay = document.getElementById("premiumProblemModalPay");
+const premiumProblemModalBack = document.getElementById("premiumProblemModalBack");
+const premiumProblemModalLength = document.getElementById("premiumProblemModalLength");
+const premiumProblemModalLimit = document.getElementById("premiumProblemModalLimit");
 const urgitsBannerFrame = document.querySelector(".urgits-banner__frame");
 const urgitsBannerImageLayers = Array.from(document.querySelectorAll(".urgits-banner__image-layer"));
 const weatherStrip = document.getElementById("weatherStrip");
@@ -156,9 +165,13 @@ let loadingProgressFrame;
 let currentSolvedCount = 0;
 let currentProblemText = "";
 let currentPublicProblemText = "";
+let currentProblemLength = 0;
 let currentReportId = null;
 let pendingReportSave = null;
 let currentSolveStartedAt = 0;
+let isLargeProblemPremiumUnlocked = false;
+let shouldResumeSolveAfterPremiumUnlock = false;
+let hasShownLargeProblemPremiumModal = false;
 let recentProblemsUnlocked = false;
 let recentProblems = [];
 let recentProblemsSyncTimer;
@@ -201,7 +214,7 @@ let problemQuizAnswers = [];
 let currentProblemQuizStep = 0;
 let problemQuizAdvanceTimer = null;
 let isProblemQuizStarted = false;
-let currentSolverSkinId = "gold";
+let currentSolverSkinId = "graphite";
 let solverSkinMotionTimer = 0;
 let solverSkinTouchStartX = 0;
 let solverSkinTouchStartY = 0;
@@ -281,17 +294,14 @@ const IDLE_SCREEN_SAVER_CAMERA_READ_EXTRA = 0.132;
 const SOLVER_SKIN_STORAGE_KEY = "probleemilahendaja_solver_skin";
 const SOLVER_SKIN_SWIPE_THRESHOLD = 54;
 const SOLVER_SKIN_MOTION_DURATION = 360;
+const PROBLEM_PREMIUM_CHARACTER_LIMIT = 165;
+const PROBLEM_PREMIUM_SURCHARGE_EUR = 1;
+const PROBLEM_PREMIUM_NEAR_LIMIT_RATIO = 0.78;
 const SOLVER_SKINS = [
-    { id: "gold" },
-    { id: "rose" },
-    { id: "platinum" },
-    { id: "ocean" },
-    { id: "mint" },
-    { id: "lavender" },
-    { id: "citrus" },
-    { id: "cherry" },
-    { id: "forest" },
-    { id: "graphite" }
+    { id: "graphite", label: "Praegune skin" },
+    { id: "arcade", label: "Arcade-plakati skin" },
+    { id: "citrus", label: "Joonistusvihiku skin" },
+    { id: "rose", label: "Naiselik skin" }
 ];
 const DEFAULT_WEATHER_LOCATION = {
     label: "Tallinn",
@@ -1148,10 +1158,37 @@ function renderSolverSkinDots() {
     const fragment = document.createDocumentFragment();
     const activeIndex = getSolverSkinIndex();
 
-    SOLVER_SKINS.forEach(function (_skin, index) {
-        const dot = document.createElement("span");
+    SOLVER_SKINS.forEach(function (skin, index) {
+        const dot = document.createElement("button");
+        const label = document.createElement("span");
+
+        dot.type = "button";
         dot.className = "intake-stage__skin-dot";
+        dot.dataset.skin = skin.id;
         dot.classList.toggle("is-active", index === activeIndex);
+        dot.setAttribute("aria-pressed", index === activeIndex ? "true" : "false");
+        dot.setAttribute("aria-label", skin.label);
+        dot.title = skin.label;
+
+        label.className = "sr-only";
+        label.textContent = skin.label;
+        dot.append(label);
+
+        dot.addEventListener("click", function () {
+            const currentIndex = getSolverSkinIndex();
+
+            if (skin.id === currentSolverSkinId) {
+                return;
+            }
+
+            applySolverSkin(skin.id, {
+                motion: prefersReducedMotionQuery.matches
+                    ? ""
+                    : (index > currentIndex ? "next" : "prev")
+            });
+            persistSolverSkinPreference(skin.id);
+        });
+
         fragment.append(dot);
     });
 
@@ -1172,6 +1209,10 @@ function applySolverSkin(value, options = {}) {
 
     if (intakeStage) {
         intakeStage.dataset.solverSkin = nextSkin;
+    }
+
+    if (premiumProblemModal) {
+        premiumProblemModal.dataset.solverSkin = nextSkin;
     }
 
     if (motion) {
@@ -1268,6 +1309,236 @@ function initializeSolverSkinSwipe() {
     }, { passive: true });
 
     intakeStageFrame.dataset.solverSkinSwipeBound = "true";
+}
+
+function getProblemInputLength(value = problemInput?.value || "") {
+    return normalizeProblemInputText(value).length;
+}
+
+function isPremiumProblemLength(length) {
+    return length > PROBLEM_PREMIUM_CHARACTER_LIMIT;
+}
+
+function renderPremiumProblemModalMeta(length = currentProblemLength) {
+    if (premiumProblemModalLength) {
+        premiumProblemModalLength.textContent = numberFormatter.format(length) + " tähemärki";
+    }
+
+    if (premiumProblemModalLimit) {
+        premiumProblemModalLimit.textContent = numberFormatter.format(PROBLEM_PREMIUM_CHARACTER_LIMIT);
+    }
+}
+
+function updateProblemLengthMeter(options = {}) {
+    if (!problemLengthMeter) {
+        return;
+    }
+
+    const previousLength = currentProblemLength;
+    const length = getProblemInputLength();
+    const progress = Math.max(0, Math.min(1, length / PROBLEM_PREMIUM_CHARACTER_LIMIT));
+    const overflow = length > PROBLEM_PREMIUM_CHARACTER_LIMIT
+        ? Math.min(1, (length - PROBLEM_PREMIUM_CHARACTER_LIMIT) / PROBLEM_PREMIUM_CHARACTER_LIMIT)
+        : 0;
+    let nextState = "idle";
+
+    currentProblemLength = length;
+
+    if (length === 0) {
+        isLargeProblemPremiumUnlocked = false;
+        hasShownLargeProblemPremiumModal = false;
+    } else if (isPremiumProblemLength(length)) {
+        nextState = isLargeProblemPremiumUnlocked ? "paid" : "over";
+    } else if (progress >= PROBLEM_PREMIUM_NEAR_LIMIT_RATIO) {
+        nextState = "near";
+    } else {
+        nextState = "active";
+    }
+
+    problemLengthMeter.dataset.state = nextState;
+    problemLengthMeter.style.setProperty("--problem-length-progress", progress.toFixed(4));
+    problemLengthMeter.style.setProperty("--problem-length-overflow", overflow.toFixed(4));
+    problemLengthMeter.setAttribute("aria-valuenow", String(Math.min(length, PROBLEM_PREMIUM_CHARACTER_LIMIT)));
+    problemLengthMeter.setAttribute(
+        "aria-valuetext",
+        numberFormatter.format(length) + " / " + numberFormatter.format(PROBLEM_PREMIUM_CHARACTER_LIMIT)
+    );
+
+    renderPremiumProblemModalMeta(length);
+
+    if (!isPremiumProblemLength(length)) {
+        hasShownLargeProblemPremiumModal = false;
+    }
+
+    if (
+        options.autoOpen !== false
+        && isPremiumProblemLength(length)
+        && previousLength <= PROBLEM_PREMIUM_CHARACTER_LIMIT
+        && !isLargeProblemPremiumUnlocked
+        && !hasShownLargeProblemPremiumModal
+    ) {
+        hasShownLargeProblemPremiumModal = true;
+        openPremiumProblemModal();
+    }
+}
+
+function openPremiumProblemModal(options = {}) {
+    if (!premiumProblemModal) {
+        return;
+    }
+
+    if (options.resumeSolve === true) {
+        shouldResumeSolveAfterPremiumUnlock = true;
+    }
+
+    premiumProblemModal.dataset.solverSkin = currentSolverSkinId;
+    renderPremiumProblemModalMeta();
+    premiumProblemModal.hidden = false;
+    document.body.classList.add("premium-problem-modal-open");
+
+    window.requestAnimationFrame(function () {
+        premiumProblemModal.classList.add("is-open");
+    });
+
+    window.setTimeout(function () {
+        premiumProblemModalPay?.focus();
+    }, 80);
+}
+
+function closePremiumProblemModal(options = {}) {
+    if (!premiumProblemModal) {
+        return;
+    }
+
+    const keepPendingSolve = options.keepPendingSolve === true;
+
+    premiumProblemModal.classList.remove("is-open");
+    document.body.classList.remove("premium-problem-modal-open");
+
+    if (!keepPendingSolve) {
+        shouldResumeSolveAfterPremiumUnlock = false;
+    }
+
+    window.setTimeout(function () {
+        if (!premiumProblemModal.classList.contains("is-open")) {
+            premiumProblemModal.hidden = true;
+        }
+
+        if (options.focusInput) {
+            problemInput?.focus();
+        }
+    }, 180);
+}
+
+function initializePremiumProblemFlow() {
+    renderPremiumProblemModalMeta(0);
+    updateProblemLengthMeter({
+        autoOpen: false
+    });
+
+    premiumProblemModalClose?.addEventListener("click", function () {
+        closePremiumProblemModal({
+            focusInput: true
+        });
+    });
+
+    premiumProblemModalBackdrop?.addEventListener("click", function () {
+        closePremiumProblemModal({
+            focusInput: true
+        });
+    });
+
+    premiumProblemModalBack?.addEventListener("click", function () {
+        closePremiumProblemModal({
+            focusInput: true
+        });
+    });
+
+    premiumProblemModalPay?.addEventListener("click", function () {
+        const shouldResume = shouldResumeSolveAfterPremiumUnlock;
+
+        isLargeProblemPremiumUnlocked = true;
+        hasShownLargeProblemPremiumModal = false;
+        closePremiumProblemModal({
+            keepPendingSolve: true
+        });
+        updateProblemLengthMeter({
+            autoOpen: false
+        });
+
+        shouldResumeSolveAfterPremiumUnlock = false;
+
+        if (shouldResume) {
+            void requestProblemSolve();
+            return;
+        }
+
+        problemInput?.focus();
+    });
+
+    document.addEventListener("keydown", function (event) {
+        if (event.key === "Escape") {
+            closePremiumProblemModal();
+        }
+    });
+}
+
+async function requestProblemSolve() {
+    if (isGeneratingReport) {
+        return;
+    }
+
+    const problemText = normalizeProblemInputText(problemInput.value);
+    const problemLength = problemText.length;
+
+    if (problemText === "") {
+        setProblemFeedback("Sisesta enne probleem, mida lahendada.", "error");
+        problemInput.focus();
+        return;
+    }
+
+    if (isPremiumProblemLength(problemLength) && !isLargeProblemPremiumUnlocked) {
+        openPremiumProblemModal({
+            resumeSolve: true
+        });
+        return;
+    }
+
+    setProblemFeedback("", "");
+    isGeneratingReport = true;
+    currentSolveStartedAt = performance.now();
+    currentProblemText = problemText;
+    resetRating();
+    showPanel(loadingDiv, "loading");
+    startLoadingProgress();
+
+    try {
+        const [{ report, publicProblemText }] = await Promise.all([
+            fetchGeneratedReport(problemText),
+            new Promise(function (resolve) {
+                window.setTimeout(resolve, MIN_SOLVE_DURATION);
+            })
+        ]);
+
+        stopLoadingProgress();
+        setLoadingProgress(1);
+        currentPublicProblemText = publicProblemText;
+        populateReport(report);
+        if (solutionLead) {
+            solutionLead.textContent = formatSolveDurationLabel(performance.now() - currentSolveStartedAt);
+        }
+        setRecentProblemsUnlocked(true);
+        pushRecentProblem({
+            problemText: publicProblemText,
+            problemType: report.typeValue,
+            status: report.statusValue,
+            createdAt: new Date().toISOString()
+        });
+        showPanel(solutionDiv, "done");
+        queueReportPersistenceInBackground(report);
+    } finally {
+        isGeneratingReport = false;
+    }
 }
 
 function setUrgitsBannerLayerImage(layer, imageSrc) {
@@ -6940,7 +7211,15 @@ function resetApp() {
     currentReportId = null;
     pendingReportSave = null;
     currentSolveStartedAt = 0;
+    currentProblemLength = 0;
+    isLargeProblemPremiumUnlocked = false;
+    shouldResumeSolveAfterPremiumUnlock = false;
+    hasShownLargeProblemPremiumModal = false;
     problemInput.value = "";
+    closePremiumProblemModal();
+    updateProblemLengthMeter({
+        autoOpen: false
+    });
     resetRating();
     if (solutionLead) {
         solutionLead.textContent = "Valmis mõne sekundiga.";
@@ -7178,60 +7457,16 @@ function initializeNewsletterForm() {
     });
 }
 
-solveButton.addEventListener("click", async function () {
-    if (isGeneratingReport) {
-        return;
-    }
-
-    const problemText = normalizeProblemInputText(problemInput.value);
-
-    if (problemText === "") {
-        setProblemFeedback("Sisesta enne probleem, mida lahendada.", "error");
-        problemInput.focus();
-        return;
-    }
-
-    setProblemFeedback("", "");
-    isGeneratingReport = true;
-    currentSolveStartedAt = performance.now();
-    currentProblemText = problemText;
-    resetRating();
-    showPanel(loadingDiv, "loading");
-    startLoadingProgress();
-
-    try {
-        const [{ report, publicProblemText }] = await Promise.all([
-            fetchGeneratedReport(problemText),
-            new Promise(function (resolve) {
-                window.setTimeout(resolve, MIN_SOLVE_DURATION);
-            })
-        ]);
-
-        stopLoadingProgress();
-        setLoadingProgress(1);
-        currentPublicProblemText = publicProblemText;
-        populateReport(report);
-        if (solutionLead) {
-            solutionLead.textContent = formatSolveDurationLabel(performance.now() - currentSolveStartedAt);
-        }
-        setRecentProblemsUnlocked(true);
-        pushRecentProblem({
-            problemText: publicProblemText,
-            problemType: report.typeValue,
-            status: report.statusValue,
-            createdAt: new Date().toISOString()
-        });
-        showPanel(solutionDiv, "done");
-        queueReportPersistenceInBackground(report);
-    } finally {
-        isGeneratingReport = false;
-    }
+solveButton.addEventListener("click", function () {
+    void requestProblemSolve();
 });
 
 problemInput.addEventListener("input", function () {
     if (problemFeedback?.dataset.state) {
         setProblemFeedback("", "");
     }
+
+    updateProblemLengthMeter();
 });
 
 reportButton.addEventListener("click", function () {
@@ -7276,6 +7511,7 @@ setLoadingProgress(0);
 resetRating();
 initializeCoverIssueMeta();
 initializeSolverSkinSwipe();
+initializePremiumProblemFlow();
 initializeUrgitsBannerRotation();
 initializeDailyCoverStory();
 initializeDailyWeather();

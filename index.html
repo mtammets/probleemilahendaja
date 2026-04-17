@@ -71,12 +71,34 @@
                             </div>
                         </section>
                     </section>
-                    <div class="intake-stage" data-solver-skin="gold">
+                    <div class="intake-stage" data-solver-skin="graphite">
                         <div class="intake-stage__frame">
-                            <textarea id="problemInput" rows="2" placeholder="Kirjuta oma probleem siia..."></textarea>
+                            <div class="intake-stage__backdrop" aria-hidden="true">
+                                <span class="intake-stage__backdrop-ring intake-stage__backdrop-ring--one"></span>
+                                <span class="intake-stage__backdrop-ring intake-stage__backdrop-ring--two"></span>
+                                <span class="intake-stage__backdrop-beam intake-stage__backdrop-beam--left"></span>
+                                <span class="intake-stage__backdrop-beam intake-stage__backdrop-beam--right"></span>
+                            </div>
+                            <div class="problem-input-shell">
+                                <span class="problem-input-shell__orbit problem-input-shell__orbit--one" aria-hidden="true"></span>
+                                <span class="problem-input-shell__orbit problem-input-shell__orbit--two" aria-hidden="true"></span>
+                                <textarea id="problemInput" rows="2" placeholder="Kirjuta oma probleem siia..."></textarea>
+                            </div>
+                            <div id="problemLengthMeter" class="problem-length-meter" role="progressbar" aria-label="Probleemi pikkus" aria-valuemin="0" aria-valuemax="165" aria-valuenow="0">
+                                <div class="problem-length-meter__track" aria-hidden="true">
+                                    <span class="problem-length-meter__fill"></span>
+                                    <span class="problem-length-meter__glow"></span>
+                                    <span class="problem-length-meter__marker"></span>
+                                    <span class="problem-length-meter__orb"></span>
+                                </div>
+                            </div>
                             <p id="problemFeedback" class="intake-feedback" aria-live="polite" hidden></p>
-                            <button id="solveButton">Lahenda probleem!</button>
-                            <div id="solverSkinDots" class="intake-stage__skin-dots" aria-hidden="true"></div>
+                            <div class="problem-action-shell">
+                                <span class="problem-action-shell__spark problem-action-shell__spark--left" aria-hidden="true"></span>
+                                <button id="solveButton"><span class="solve-button__label">Lahenda probleem!</span></button>
+                                <span class="problem-action-shell__spark problem-action-shell__spark--right" aria-hidden="true"></span>
+                            </div>
+                            <div id="solverSkinDots" class="intake-stage__skin-dots" role="group" aria-label="Skini valik"></div>
                         </div>
                     </div>
                     <section class="weather-slot" aria-labelledby="weatherStripTitle">
@@ -504,6 +526,33 @@
                     <div id="weatherPlanningTips" class="weather-tips"></div>
                 </section>
                 <p class="weather-modal__footnote">Ilmaandmed: Open-Meteo. Selgitused ja taustavisuaal: OpenAI.</p>
+            </div>
+        </section>
+    </div>
+    <div id="premiumProblemModal" class="premium-problem-modal" hidden>
+        <div id="premiumProblemModalBackdrop" class="premium-problem-modal__backdrop" aria-hidden="true"></div>
+        <section class="premium-problem-modal__dialog" role="dialog" aria-modal="true" aria-labelledby="premiumProblemModalTitle">
+            <button id="premiumProblemModalClose" class="premium-problem-modal__close" type="button" aria-label="Sulge suure probleemi teade">
+                <span aria-hidden="true">×</span>
+            </button>
+            <div class="premium-problem-modal__hero" aria-hidden="true">
+                <span class="premium-problem-modal__hero-beam premium-problem-modal__hero-beam--amber"></span>
+                <span class="premium-problem-modal__hero-beam premium-problem-modal__hero-beam--cyan"></span>
+                <span class="premium-problem-modal__hero-orb premium-problem-modal__hero-orb--one"></span>
+                <span class="premium-problem-modal__hero-orb premium-problem-modal__hero-orb--two"></span>
+            </div>
+            <div class="premium-problem-modal__content">
+                <span class="premium-problem-modal__eyebrow">Suurem probleem</span>
+                <h2 id="premiumProblemModalTitle" class="premium-problem-modal__title">See probleem vajab pikemat lahendust.</h2>
+                <p class="premium-problem-modal__lead">Üle <span id="premiumProblemModalLimit">165</span> tähemärgi lahendamine on tasuline. Lisatasu on 1 €.</p>
+                <div class="premium-problem-modal__meta">
+                    <span id="premiumProblemModalLength" class="premium-problem-modal__meta-chip">0 tähemärki</span>
+                    <span class="premium-problem-modal__meta-chip premium-problem-modal__meta-chip--price">+1 €</span>
+                </div>
+                <div class="premium-problem-modal__actions">
+                    <button id="premiumProblemModalPay" class="premium-problem-modal__pay" type="button">Maksa kohe 1 €</button>
+                    <button id="premiumProblemModalBack" class="button--secondary premium-problem-modal__back" type="button">Lühendan probleemi</button>
+                </div>
             </div>
         </section>
     </div>

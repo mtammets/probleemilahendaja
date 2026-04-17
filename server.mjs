@@ -12,6 +12,7 @@ import {
     PROBLEM_CATEGORY_LABELS,
     resolveProblemCategory
 } from "./problem-categories.mjs";
+import { extractAiBillingSnapshot } from "./ai-costs.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -97,6 +98,10 @@ const PUBLIC_FEED_PROFANITY_REGEX = /\b(?:pers(?:e|se|es|et|ed|ega|ele|el|esse|e
 const DAILY_ARTICLE_SOFT_LANGUAGE_REGEX = /\b(?:teekond|hingetõmme|maagia|inspireer|sisemine|süda|hing|transform|muudab kõik|unelmate|täiuslik)\b/iu;
 const EDITORIAL_STATUS_PUBLISHED = "published";
 const EDITORIAL_PROMPT_VERSIONS = {
+    problem_report: "problem-report-v1",
+    problem_public_feed: "problem-public-feed-v1",
+    problem_public_detail: "problem-public-detail-v1",
+    problem_resolution_public: "problem-resolution-public-v1",
     daily_cover_story: "daily-cover-story-v1",
     daily_cover_story_image: "daily-cover-story-image-v1",
     daily_article: "daily-article-v1",
@@ -2280,6 +2285,17 @@ function sanitizeAiGenerationOutputPayload(value) {
     return value;
 }
 
+function buildAiGenerationOutputPayload(config, value) {
+    const payload = sanitizeAiGenerationOutputPayload(value);
+    const billing = extractAiBillingSnapshot(config, value);
+
+    if (billing) {
+        payload.billing = billing;
+    }
+
+    return payload;
+}
+
 async function runWithAiGenerationLog(config, callback) {
     if (!supabaseAdmin) {
         return callback();
@@ -2300,7 +2316,7 @@ async function runWithAiGenerationLog(config, callback) {
             try {
                 await finalizeAiGenerationRun(runId, {
                     status: "completed",
-                    outputPayload: sanitizeAiGenerationOutputPayload(result)
+                    outputPayload: buildAiGenerationOutputPayload(config, result)
                 });
             } catch (finalizeError) {
                 console.error("Failed to finalize successful AI generation run log.", finalizeError);
@@ -2969,11 +2985,15 @@ async function generateSharedDailyWeatherScene(snapshot, entry) {
         itemSlug: entry.sceneKey,
         model: imageModel,
         promptVersion: EDITORIAL_PROMPT_VERSIONS.daily_weather_image,
+        imageSize: "1536x1024",
+        imageQuality: "high",
         inputPayload: {
             dateKey: entry.dateKey,
             locationKey: entry.locationKey,
             sceneKey: entry.sceneKey,
-            signature: entry.signature
+            signature: entry.signature,
+            imageSize: "1536x1024",
+            imageQuality: "high"
         }
     }, async function () {
         return await client.images.generate({
@@ -3335,11 +3355,15 @@ async function ensureWeatherSceneForEntry(entry) {
                 itemSlug: entry.sceneKey,
                 model: imageModel,
                 promptVersion: EDITORIAL_PROMPT_VERSIONS.daily_weather_image,
+                imageSize: "1536x1024",
+                imageQuality: "high",
                 inputPayload: {
                     dateKey: entry.dateKey,
                     locationKey: entry.locationKey,
                     sceneKey: entry.sceneKey,
-                    signature: entry.signature
+                    signature: entry.signature,
+                    imageSize: "1536x1024",
+                    imageQuality: "high"
                 }
             }, async function () {
                 return await client.images.generate({
@@ -4772,6 +4796,10 @@ function buildModerationSummary(moderationResult) {
     });
 }
 
+function buildProblemRunSlug(prefix, problemText) {
+    return `${prefix}:${hashText(String(problemText || "").replace(/\s+/g, " ").trim()).slice(0, 16)}`;
+}
+
 async function createPublicFeedProblemText(problemText) {
     const fallbackPublicText = normalizePublicFeedProblemText(problemText);
 
@@ -4787,39 +4815,49 @@ async function createPublicFeedProblemText(problemText) {
 
         const moderationResult = moderationResponse.results?.[0] ?? null;
         const moderationSummary = buildModerationSummary(moderationResult);
-        const aiResponse = await client.responses.create({
+        const aiResponse = await runWithAiGenerationLog({
+            contentType: "problem_public_feed",
+            itemSlug: buildProblemRunSlug("public-feed", problemText),
             model: publicFeedModel,
-            max_output_tokens: 220,
-            reasoning: {
-                effort: "low"
-            },
-            instructions: [
-                "Sa otsustad, milline lühike tekst sobib avalikku 'viimati lahendatud probleemid' loendisse.",
-                "Eesmärk on näidata probleemi sisu lühidalt, aga turvaliselt ja viisakalt.",
-                "Kui originaalis on roppused, solvangud, labasused, ähvardused, seksuaalne otsekõne või muu avalikku loendisse sobimatu sõnastus, kirjuta see ümber pehmemaks või üldisemaks.",
-                "Ära kasuta vastuses roppusi ega solvangulist sõnastust isegi siis, kui need olid sisendis olemas.",
-                "Kui sisu saab turvaliselt lühidalt ümber sõnastada, kasuta visibility='sanitized'.",
-                "Kui tekst on juba avalikuks näitamiseks sobiv, kasuta visibility='original'.",
-                "Kui sisend on nii räige või sobimatu, et seda ei ole mõistlik isegi ümber sõnastada, kasuta visibility='hidden' ja anna neutraalne üldistus.",
-                "publicText peab olema eestikeelne, maksimaalselt umbes 18 sõna ja ühe lühikese lausena või fraasina.",
-                "Tagasta ainult puhas JSON."
-            ].join(" "),
-            input: [
-                "Originaalne probleem:",
-                problemText,
-                "",
-                "Moderatsiooni kokkuvõte:",
-                moderationSummary
-            ].join("\n"),
-            text: {
-                verbosity: "low",
-                format: {
-                    type: "json_schema",
-                    name: "public_feed_problem",
-                    strict: true,
-                    schema: PUBLIC_FEED_JSON_SCHEMA
-                }
+            promptVersion: EDITORIAL_PROMPT_VERSIONS.problem_public_feed,
+            inputPayload: {
+                problemLength: problemText.length
             }
+        }, async function () {
+            return await client.responses.create({
+                model: publicFeedModel,
+                max_output_tokens: 220,
+                reasoning: {
+                    effort: "low"
+                },
+                instructions: [
+                    "Sa otsustad, milline lühike tekst sobib avalikku 'viimati lahendatud probleemid' loendisse.",
+                    "Eesmärk on näidata probleemi sisu lühidalt, aga turvaliselt ja viisakalt.",
+                    "Kui originaalis on roppused, solvangud, labasused, ähvardused, seksuaalne otsekõne või muu avalikku loendisse sobimatu sõnastus, kirjuta see ümber pehmemaks või üldisemaks.",
+                    "Ära kasuta vastuses roppusi ega solvangulist sõnastust isegi siis, kui need olid sisendis olemas.",
+                    "Kui sisu saab turvaliselt lühidalt ümber sõnastada, kasuta visibility='sanitized'.",
+                    "Kui tekst on juba avalikuks näitamiseks sobiv, kasuta visibility='original'.",
+                    "Kui sisend on nii räige või sobimatu, et seda ei ole mõistlik isegi ümber sõnastada, kasuta visibility='hidden' ja anna neutraalne üldistus.",
+                    "publicText peab olema eestikeelne, maksimaalselt umbes 18 sõna ja ühe lühikese lausena või fraasina.",
+                    "Tagasta ainult puhas JSON."
+                ].join(" "),
+                input: [
+                    "Originaalne probleem:",
+                    problemText,
+                    "",
+                    "Moderatsiooni kokkuvõte:",
+                    moderationSummary
+                ].join("\n"),
+                text: {
+                    verbosity: "low",
+                    format: {
+                        type: "json_schema",
+                        name: "public_feed_problem",
+                        strict: true,
+                        schema: PUBLIC_FEED_JSON_SCHEMA
+                    }
+                }
+            });
         });
 
         const payload = extractJsonObject(aiResponse.output_text);
@@ -4865,38 +4903,48 @@ async function createPublicProblemDetailText(problemText) {
 
         const moderationResult = moderationResponse.results?.[0] ?? null;
         const moderationSummary = buildModerationSummary(moderationResult);
-        const aiResponse = await client.responses.create({
+        const aiResponse = await runWithAiGenerationLog({
+            contentType: "problem_public_detail",
+            itemSlug: buildProblemRunSlug("public-detail", normalizedOriginalText),
             model: publicFeedModel,
-            max_output_tokens: 1200,
-            reasoning: {
-                effort: "low"
-            },
-            instructions: [
-                "Sa otsustad, milline täispikk probleemikirjeldus sobib avalikku detailvaatesse.",
-                "Kui tekst on juba viisakas ja avalikuks näitamiseks sobiv, jäta selle sisu, järjestus, toon ja detailsus sisuliselt muutmata.",
-                "Kui tekstis on roppused, solvangud, ähvardused, alandamine, seksuaalne labasus või muu avalikku vaatesse sobimatu sõnastus, kirjuta ümber ainult need kohad.",
-                "Hoia alles kõik olulised faktid, olukorra kirjeldus, esimese isiku vaade ja konkreetne probleem.",
-                "Ära lisa uusi fakte, hinnanguid, lahendusi ega kokkuvõtteid.",
-                "Ära lühenda teksti rohkem kui hädavajalik. Eesmärk ei ole kokkuvõte, vaid avalikult sobiv täispikk kirjeldus.",
-                "Kui sisu on nii räige, et seda ei saa mõistlikult avalikult näidata isegi pärast ümber sõnastamist, kasuta visibility='hidden' ja anna neutraalne lühike üldistus.",
-                "Tagasta ainult puhas JSON."
-            ].join(" "),
-            input: [
-                "Originaalne probleemikirjeldus:",
-                normalizedOriginalText,
-                "",
-                "Moderatsiooni kokkuvõte:",
-                moderationSummary
-            ].join("\n"),
-            text: {
-                verbosity: "medium",
-                format: {
-                    type: "json_schema",
-                    name: "public_problem_detail",
-                    strict: true,
-                    schema: PUBLIC_FEED_JSON_SCHEMA
-                }
+            promptVersion: EDITORIAL_PROMPT_VERSIONS.problem_public_detail,
+            inputPayload: {
+                problemLength: normalizedOriginalText.length
             }
+        }, async function () {
+            return await client.responses.create({
+                model: publicFeedModel,
+                max_output_tokens: 1200,
+                reasoning: {
+                    effort: "low"
+                },
+                instructions: [
+                    "Sa otsustad, milline täispikk probleemikirjeldus sobib avalikku detailvaatesse.",
+                    "Kui tekst on juba viisakas ja avalikuks näitamiseks sobiv, jäta selle sisu, järjestus, toon ja detailsus sisuliselt muutmata.",
+                    "Kui tekstis on roppused, solvangud, ähvardused, alandamine, seksuaalne labasus või muu avalikku vaatesse sobimatu sõnastus, kirjuta ümber ainult need kohad.",
+                    "Hoia alles kõik olulised faktid, olukorra kirjeldus, esimese isiku vaade ja konkreetne probleem.",
+                    "Ära lisa uusi fakte, hinnanguid, lahendusi ega kokkuvõtteid.",
+                    "Ära lühenda teksti rohkem kui hädavajalik. Eesmärk ei ole kokkuvõte, vaid avalikult sobiv täispikk kirjeldus.",
+                    "Kui sisu on nii räige, et seda ei saa mõistlikult avalikult näidata isegi pärast ümber sõnastamist, kasuta visibility='hidden' ja anna neutraalne lühike üldistus.",
+                    "Tagasta ainult puhas JSON."
+                ].join(" "),
+                input: [
+                    "Originaalne probleemikirjeldus:",
+                    normalizedOriginalText,
+                    "",
+                    "Moderatsiooni kokkuvõte:",
+                    moderationSummary
+                ].join("\n"),
+                text: {
+                    verbosity: "medium",
+                    format: {
+                        type: "json_schema",
+                        name: "public_problem_detail",
+                        strict: true,
+                        schema: PUBLIC_FEED_JSON_SCHEMA
+                    }
+                }
+            });
         });
 
         const payload = extractJsonObject(aiResponse.output_text);
@@ -4950,53 +4998,63 @@ async function createRecentProblemResolutionText(record, publicDetail) {
     }
 
     try {
-        const aiResponse = await client.responses.create({
+        const aiResponse = await runWithAiGenerationLog({
+            contentType: "problem_resolution_public",
+            itemSlug: buildProblemRunSlug("public-resolution", publicProblemText || publicDetailText),
             model: publicFeedModel,
-            max_output_tokens: 420,
-            reasoning: {
-                effort: "low"
-            },
-            instructions: [
-                "Sa kirjutad avalikku lahendusteksti rubriiki 'Viimati lahendatud probleemid'.",
-                "See tekst läheb UI-s otse sildi 'Lahendus:' järele.",
-                "Eesmärk on anda tõestus, et konkreetne mure on nüüd maas ja ei vajuta enam peale.",
-                "Kirjuta ainult lõppseisust: mis enam ei sega, mis on nüüd korras ja milline tunne asemele tuli.",
-                "Kasuta konkreetselt selle probleemi enda detaile, et tõestus mõjuks päriselt veenvalt.",
-                "Kui probleemis mainiti näiteks segadust, valu, hirmu, pingeid, katkestusi, häbi või muud kindlat asja, näita just selle asja kadumist või rahunemist.",
-                "Lugejale peab jääma tunne, et ta näeb selle sama konkreetse mure lõppu, mitte üldist motivatsiooniteksti.",
-                "Ära kirjelda samme, protsessi, tööriistu, soovitusi ega seda, kuidas lahendus leiti.",
-                "Ära kasuta igal juhul samu stamp-alguseid nagu 'Probleem sai lahendatud', 'Enam ei ole', 'Nüüd on kõik hästi'.",
-                "Kasuta loomulikku eestikeelset sõnastust ja varieeri avangut.",
-                "Kirjuta pigem 2 kuni 4 lauset või kaks lühikest lõiku, umbes 45 kuni 90 sõna.",
-                "Toon peab olema helge, kindel, mõnus lugeda ja jätma päriselt kergendatud mulje.",
-                "Ära loba, ära korda probleemi ümber sõna-sõnalt, ära kasuta hüüumärke ega korporatiivseid klišeesid.",
-                "Tagasta ainult puhas JSON."
-            ].join(" "),
-            input: [
-                "Avalik probleemilühend:",
-                publicProblemText,
-                "",
-                "Avalik täispikk kirjeldus:",
-                publicDetailText,
-                "",
-                "Raporti kokkuvõte:",
-                reportSummary || "-",
-                "",
-                "Raporti analüüs:",
-                reportAnalysis || "-",
-                "",
-                "Raporti lõppseis:",
-                reportResolution || "-"
-            ].join("\n"),
-            text: {
-                verbosity: "low",
-                format: {
-                    type: "json_schema",
-                    name: "recent_problem_resolution",
-                    strict: true,
-                    schema: RECENT_PROBLEM_RESOLUTION_JSON_SCHEMA
-                }
+            promptVersion: EDITORIAL_PROMPT_VERSIONS.problem_resolution_public,
+            inputPayload: {
+                reportId: sanitizeProblemText(record?.id || "")
             }
+        }, async function () {
+            return await client.responses.create({
+                model: publicFeedModel,
+                max_output_tokens: 420,
+                reasoning: {
+                    effort: "low"
+                },
+                instructions: [
+                    "Sa kirjutad avalikku lahendusteksti rubriiki 'Viimati lahendatud probleemid'.",
+                    "See tekst läheb UI-s otse sildi 'Lahendus:' järele.",
+                    "Eesmärk on anda tõestus, et konkreetne mure on nüüd maas ja ei vajuta enam peale.",
+                    "Kirjuta ainult lõppseisust: mis enam ei sega, mis on nüüd korras ja milline tunne asemele tuli.",
+                    "Kasuta konkreetselt selle probleemi enda detaile, et tõestus mõjuks päriselt veenvalt.",
+                    "Kui probleemis mainiti näiteks segadust, valu, hirmu, pingeid, katkestusi, häbi või muud kindlat asja, näita just selle asja kadumist või rahunemist.",
+                    "Lugejale peab jääma tunne, et ta näeb selle sama konkreetse mure lõppu, mitte üldist motivatsiooniteksti.",
+                    "Ära kirjelda samme, protsessi, tööriistu, soovitusi ega seda, kuidas lahendus leiti.",
+                    "Ära kasuta igal juhul samu stamp-alguseid nagu 'Probleem sai lahendatud', 'Enam ei ole', 'Nüüd on kõik hästi'.",
+                    "Kasuta loomulikku eestikeelset sõnastust ja varieeri avangut.",
+                    "Kirjuta pigem 2 kuni 4 lauset või kaks lühikest lõiku, umbes 45 kuni 90 sõna.",
+                    "Toon peab olema helge, kindel, mõnus lugeda ja jätma päriselt kergendatud mulje.",
+                    "Ära loba, ära korda probleemi ümber sõna-sõnalt, ära kasuta hüüumärke ega korporatiivseid klišeesid.",
+                    "Tagasta ainult puhas JSON."
+                ].join(" "),
+                input: [
+                    "Avalik probleemilühend:",
+                    publicProblemText,
+                    "",
+                    "Avalik täispikk kirjeldus:",
+                    publicDetailText,
+                    "",
+                    "Raporti kokkuvõte:",
+                    reportSummary || "-",
+                    "",
+                    "Raporti analüüs:",
+                    reportAnalysis || "-",
+                    "",
+                    "Raporti lõppseis:",
+                    reportResolution || "-"
+                ].join("\n"),
+                text: {
+                    verbosity: "low",
+                    format: {
+                        type: "json_schema",
+                        name: "recent_problem_resolution",
+                        strict: true,
+                        schema: RECENT_PROBLEM_RESOLUTION_JSON_SCHEMA
+                    }
+                }
+            });
         });
 
         const payload = extractJsonObject(aiResponse.output_text);
@@ -5372,42 +5430,52 @@ app.post("/api/report", async function (request, response) {
 
     try {
         const [openAiResponse, publicProblemText] = await Promise.all([
-            client.responses.create({
+            runWithAiGenerationLog({
+                contentType: "problem_report",
+                itemSlug: buildProblemRunSlug("report", problemText),
                 model: openAiModel,
-                max_output_tokens: 1400,
-                reasoning: {
-                    effort: "low"
-                },
-                instructions: REPORT_SYSTEM_PROMPT,
-                input: [
-                    "Koosta selle sisendi põhjal üks professionaalne ja positiivne raport.",
-                    "Oluline:",
-                    "- title peab olema lühike, lööv ja 2 kuni 5 sõna pikk",
-                    "- lead peab olema üks lühike lause, umbes kuni 12 sõna",
-                    "- statusValue peab olema täpselt 'Lahendatud'",
-                    `- typeValue peab olema täpselt üks neist kategooriatest: ${PROBLEM_CATEGORY_LABELS.join(", ")}`,
-                    "- statusMeta, typeMeta ja clarityMeta peavad olema lühikesed kõrvalread, mitte pikad selgitused",
-                    "- clarityValue peab olema väga lühike, eelistatult 1 kuni 2 sõna",
-                    "- resolution peab kirjeldama ainult praegust lõppseisu, olema väga kompaktne ja umbes 6 kuni 10 sõna piires",
-                    "- analysis peab ütlema ühes lühikeses lauses, mis täpselt sai lahendatud",
-                    "- summary peab olema üks lühike lause, mis jätab mulje, et see teema enam ei ole päriselt probleem",
-                    "- originalProblem peab olema kasutaja sisendi lühike või täpne eestikeelne kuju",
-                    "- kõik väljad peavad olema eestikeelsed",
-                    "- ära kirjelda protsessi, lahenduskäiku, tegevusplaani ega seda, mida täpselt tehti",
-                    "- toon peab jääma professionaalseks, rahulikuks ja kindlaks",
-                    "",
-                    "Kasutaja probleem:",
-                    problemText
-                ].join("\n"),
-                text: {
-                    verbosity: "low",
-                    format: {
-                        type: "json_schema",
-                        name: "problem_report",
-                        strict: true,
-                        schema: REPORT_JSON_SCHEMA
-                    }
+                promptVersion: EDITORIAL_PROMPT_VERSIONS.problem_report,
+                inputPayload: {
+                    problemLength: problemText.length
                 }
+            }, async function () {
+                return await client.responses.create({
+                    model: openAiModel,
+                    max_output_tokens: 1400,
+                    reasoning: {
+                        effort: "low"
+                    },
+                    instructions: REPORT_SYSTEM_PROMPT,
+                    input: [
+                        "Koosta selle sisendi põhjal üks professionaalne ja positiivne raport.",
+                        "Oluline:",
+                        "- title peab olema lühike, lööv ja 2 kuni 5 sõna pikk",
+                        "- lead peab olema üks lühike lause, umbes kuni 12 sõna",
+                        "- statusValue peab olema täpselt 'Lahendatud'",
+                        `- typeValue peab olema täpselt üks neist kategooriatest: ${PROBLEM_CATEGORY_LABELS.join(", ")}`,
+                        "- statusMeta, typeMeta ja clarityMeta peavad olema lühikesed kõrvalread, mitte pikad selgitused",
+                        "- clarityValue peab olema väga lühike, eelistatult 1 kuni 2 sõna",
+                        "- resolution peab kirjeldama ainult praegust lõppseisu, olema väga kompaktne ja umbes 6 kuni 10 sõna piires",
+                        "- analysis peab ütlema ühes lühikeses lauses, mis täpselt sai lahendatud",
+                        "- summary peab olema üks lühike lause, mis jätab mulje, et see teema enam ei ole päriselt probleem",
+                        "- originalProblem peab olema kasutaja sisendi lühike või täpne eestikeelne kuju",
+                        "- kõik väljad peavad olema eestikeelsed",
+                        "- ära kirjelda protsessi, lahenduskäiku, tegevusplaani ega seda, mida täpselt tehti",
+                        "- toon peab jääma professionaalseks, rahulikuks ja kindlaks",
+                        "",
+                        "Kasutaja probleem:",
+                        problemText
+                    ].join("\n"),
+                    text: {
+                        verbosity: "low",
+                        format: {
+                            type: "json_schema",
+                            name: "problem_report",
+                            strict: true,
+                            schema: REPORT_JSON_SCHEMA
+                        }
+                    }
+                });
             }),
             createPublicFeedProblemText(problemText)
         ]);

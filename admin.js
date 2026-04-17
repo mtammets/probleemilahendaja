@@ -4,6 +4,11 @@ const loginInput = document.getElementById("adminAccessCode");
 const loginFeedback = document.getElementById("adminLoginFeedback");
 const adminApp = document.getElementById("adminApp");
 const logoutButton = document.getElementById("adminLogoutButton");
+const adminMetricsUpdated = document.getElementById("adminMetricsUpdated");
+const adminMetricsSummary = document.getElementById("adminMetricsSummary");
+const adminMetricsCounts = document.getElementById("adminMetricsCounts");
+const adminMetricsCostBreakdown = document.getElementById("adminMetricsCostBreakdown");
+const adminMetricsRecent = document.getElementById("adminMetricsRecent");
 
 const createInterviewForm = document.getElementById("createInterviewForm");
 const createInterviewEmail = document.getElementById("createInterviewEmail");
@@ -50,10 +55,16 @@ const editorFieldInput = document.getElementById("editorFieldInput");
 const saveFieldButton = document.getElementById("saveFieldButton");
 const cancelFieldButton = document.getElementById("cancelFieldButton");
 
-const ADMIN_REFRESH_INTERVAL = 10 * 1000;
+const ADMIN_REFRESH_INTERVAL = 5 * 1000;
 const DAILY_PERSONA_REFRESH_SIGNAL_KEY = "probleemilahendaja:daily-persona-refresh";
 const JOURNALIST_LABEL = "Ajakirjanik Liisi";
 const numberFormatter = new Intl.NumberFormat("et-EE");
+const usdFormatter = new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+});
 
 const STORY_KIND = {
     persona: "persona",
@@ -116,6 +127,7 @@ const state = {
     draftInviteLink: "",
     inviteLinks: {},
     publicSolvedCount: 0,
+    adminMetrics: null,
     editor: {
         fieldKey: "",
         value: ""
@@ -227,6 +239,231 @@ function formatDate(value) {
         month: "long",
         year: "numeric"
     }).format(new Date(value));
+}
+
+function formatUsd(value) {
+    const amount = Number(value) || 0;
+
+    if (amount > 0 && amount < 0.01) {
+        return `$${amount.toFixed(4)}`;
+    }
+
+    return usdFormatter.format(amount);
+}
+
+function formatCompactMetric(value) {
+    return numberFormatter.format(Number(value) || 0);
+}
+
+function renderAdminMetricsEmpty(message = "Statistikat ei ole veel saadaval.") {
+    if (adminMetricsUpdated) {
+        adminMetricsUpdated.textContent = message;
+    }
+
+    [adminMetricsSummary, adminMetricsCounts, adminMetricsCostBreakdown, adminMetricsRecent].forEach(function (element) {
+        if (!element) {
+            return;
+        }
+
+        element.replaceChildren();
+        const empty = document.createElement("p");
+        empty.className = "analytics-empty";
+        empty.textContent = message;
+        element.append(empty);
+    });
+}
+
+function buildAnalyticsStatCard(title, value, meta) {
+    const card = document.createElement("article");
+    const kicker = document.createElement("span");
+    const strong = document.createElement("strong");
+    const copy = document.createElement("p");
+
+    card.className = "analytics-stat";
+    kicker.className = "analytics-stat__label";
+    strong.className = "analytics-stat__value";
+    copy.className = "analytics-stat__meta";
+    kicker.textContent = title;
+    strong.textContent = value;
+    copy.textContent = meta;
+    card.append(kicker, strong, copy);
+    return card;
+}
+
+function buildAnalyticsMiniCard(title, total, today, extra = "") {
+    const card = document.createElement("article");
+    const header = document.createElement("div");
+    const titleElement = document.createElement("strong");
+    const totalElement = document.createElement("span");
+    const meta = document.createElement("p");
+
+    card.className = "analytics-mini-card";
+    header.className = "analytics-mini-card__header";
+    titleElement.textContent = title;
+    totalElement.className = "analytics-mini-card__total";
+    totalElement.textContent = formatCompactMetric(total);
+    meta.className = "analytics-mini-card__meta";
+    meta.textContent = `Täna ${formatCompactMetric(today)}`;
+    header.append(titleElement, totalElement);
+    card.append(header, meta);
+
+    if (extra) {
+        const note = document.createElement("p");
+        note.className = "analytics-mini-card__note";
+        note.textContent = extra;
+        card.append(note);
+    }
+
+    return card;
+}
+
+function renderAdminMetricsSummary(metrics) {
+    adminMetricsSummary.replaceChildren();
+
+    const cards = [
+        buildAnalyticsStatCard(
+            "OpenAI kulu kokku",
+            formatUsd(metrics.costs.totalUsd),
+            `Täna ${formatUsd(metrics.costs.todayUsd)} · 30 päeva ${formatUsd(metrics.costs.last30DaysUsd)}`
+        ),
+        buildAnalyticsStatCard(
+            "Lahendatud probleemid",
+            formatCompactMetric(metrics.counts.solvedProblems.total),
+            `Täna ${formatCompactMetric(metrics.counts.solvedProblems.today)}`
+        ),
+        buildAnalyticsStatCard(
+            "Intervjuud",
+            formatCompactMetric(metrics.counts.interviews.total),
+            `Aktiivsed ${formatCompactMetric(metrics.counts.interviews.active)} · Toimetuses ${formatCompactMetric(metrics.counts.interviews.review)} · Avaldatud ${formatCompactMetric(metrics.counts.interviews.published)}`
+        ),
+        buildAnalyticsStatCard(
+            "AI jooksud",
+            formatCompactMetric(metrics.aiRuns.totals.completed),
+            `Käib ${formatCompactMetric(metrics.aiRuns.totals.started)} · Ebaõnnestunud ${formatCompactMetric(metrics.aiRuns.totals.failed)}`
+        )
+    ];
+
+    adminMetricsSummary.append(...cards);
+}
+
+function renderAdminMetricsCounts(metrics) {
+    adminMetricsCounts.replaceChildren();
+
+    const cards = [
+        buildAnalyticsMiniCard("Persooniloo mustandid", metrics.counts.personaDrafts.total, metrics.counts.personaDrafts.today, `Avaldatud persoonilood ${formatCompactMetric(metrics.counts.personaStoriesPublished.total)}`),
+        buildAnalyticsMiniCard("Kaaneloo mustandid", metrics.counts.coverDrafts.total, metrics.counts.coverDrafts.today),
+        buildAnalyticsMiniCard("Intervjuu järelküsimused", metrics.counts.interviewFollowUps.total, metrics.counts.interviewFollowUps.today),
+        buildAnalyticsMiniCard("Kunstiartiklid", metrics.counts.artArticles.total, metrics.counts.artArticles.today),
+        buildAnalyticsMiniCard("Horoskoobid", metrics.counts.horoscopes.total, metrics.counts.horoscopes.today),
+        buildAnalyticsMiniCard("Ilmatekstid", metrics.counts.weatherTexts.total, metrics.counts.weatherTexts.today),
+        buildAnalyticsMiniCard("Ilmapildid", metrics.counts.weatherImages.total, metrics.counts.weatherImages.today),
+        buildAnalyticsMiniCard("Lahendatud probleemid", metrics.counts.solvedProblems.total, metrics.counts.solvedProblems.today)
+    ];
+
+    adminMetricsCounts.append(...cards);
+}
+
+function renderAdminMetricsCosts(metrics) {
+    adminMetricsCostBreakdown.replaceChildren();
+
+    const maxCategoryCost = Math.max(1, ...metrics.costs.byCategory.map(function (item) {
+        return Number(item.totalUsd) || 0;
+    }));
+    const topSummary = buildAnalyticsStatCard(
+        "Kulu täpsus",
+        formatUsd(metrics.costs.exactUsd),
+        `Hinnanguline osa ${formatUsd(metrics.costs.estimatedUsd)}`
+    );
+    topSummary.classList.add("analytics-stat--compact");
+    adminMetricsCostBreakdown.append(topSummary);
+
+    metrics.costs.byCategory.forEach(function (item) {
+        const row = document.createElement("article");
+        const header = document.createElement("div");
+        const title = document.createElement("strong");
+        const total = document.createElement("span");
+        const bar = document.createElement("span");
+        const barFill = document.createElement("span");
+        const meta = document.createElement("p");
+
+        row.className = "analytics-list-row";
+        header.className = "analytics-list-row__header";
+        title.textContent = item.label;
+        total.textContent = formatUsd(item.totalUsd);
+        bar.className = "analytics-bar";
+        barFill.className = "analytics-bar__fill";
+        barFill.style.width = `${Math.max(6, ((Number(item.totalUsd) || 0) / maxCategoryCost) * 100)}%`;
+        meta.className = "analytics-list-row__meta";
+        meta.textContent = `Täna ${formatUsd(item.todayUsd)} · 30 päeva ${formatUsd(item.last30DaysUsd)} · Jookse ${formatCompactMetric(item.totalRuns)}`;
+        bar.append(barFill);
+        header.append(title, total);
+        row.append(header, bar, meta);
+        adminMetricsCostBreakdown.append(row);
+    });
+
+    if (metrics.costs.legacyProblemSolveCount > 0) {
+        const note = document.createElement("p");
+        note.className = "analytics-footnote";
+        note.textContent = `Vanemate probleemilahenduste jaoks lisati hinnanguline kulu ${formatUsd(metrics.costs.legacyProblemSolveCostUsd)} ${formatCompactMetric(metrics.costs.legacyProblemSolveCount)} logita lahenduse põhjal.`;
+        adminMetricsCostBreakdown.append(note);
+    }
+}
+
+function renderAdminMetricsRecent(metrics) {
+    adminMetricsRecent.replaceChildren();
+
+    if (!Array.isArray(metrics.aiRuns.recent) || metrics.aiRuns.recent.length === 0) {
+        const empty = document.createElement("p");
+        empty.className = "analytics-empty";
+        empty.textContent = "Hiljutisi AI jookse veel ei ole.";
+        adminMetricsRecent.append(empty);
+        return;
+    }
+
+    metrics.aiRuns.recent.forEach(function (run) {
+        const row = document.createElement("article");
+        const header = document.createElement("div");
+        const title = document.createElement("strong");
+        const status = document.createElement("span");
+        const meta = document.createElement("p");
+
+        row.className = "analytics-list-row";
+        header.className = "analytics-list-row__header";
+        title.textContent = run.label;
+        status.className = "analytics-pill";
+        status.classList.toggle("is-success", run.status === "completed");
+        status.classList.toggle("is-danger", run.status === "failed");
+        status.textContent = run.status === "completed" ? formatUsd(run.costUsd) : (run.status === "failed" ? "Viga" : "Käib");
+        meta.className = "analytics-list-row__meta";
+        meta.textContent = [formatDateTime(run.createdAt), run.model, run.costSource === "fallback" ? "hinnanguline" : "täpne"]
+            .filter(Boolean)
+            .join(" · ");
+        header.append(title, status);
+        row.append(header, meta);
+        adminMetricsRecent.append(row);
+    });
+}
+
+function renderAdminMetrics() {
+    if (!state.adminMetrics) {
+        renderAdminMetricsEmpty();
+        return;
+    }
+
+    renderAdminMetricsSummary(state.adminMetrics);
+    renderAdminMetricsCounts(state.adminMetrics);
+    renderAdminMetricsCosts(state.adminMetrics);
+    renderAdminMetricsRecent(state.adminMetrics);
+
+    if (adminMetricsUpdated) {
+        const pricingDate = state.adminMetrics.pricingSnapshot?.checkedAt
+            ? formatDate(state.adminMetrics.pricingSnapshot.checkedAt)
+            : "";
+        adminMetricsUpdated.textContent = [
+            state.adminMetrics.generatedAt ? `Uuendatud ${formatDateTime(state.adminMetrics.generatedAt)}` : "",
+            pricingDate ? `OpenAI hinnad kontrollitud ${pricingDate}` : ""
+        ].filter(Boolean).join(" · ");
+    }
 }
 
 function translateStatus(status) {
@@ -1070,6 +1307,9 @@ async function publishSelectedInterview() {
     setFeedback(adminDetailFeedback, "Lugu avaldati.", false);
     renderInterviewFilters();
     await loadInterviewList();
+    void loadAdminMetrics().catch(function () {
+        // Ignore non-blocking metrics refresh errors after publish.
+    });
 }
 
 async function sendInvite(interviewId) {
@@ -1116,6 +1356,9 @@ async function deleteSelectedInterview() {
     closeFieldEditor();
     setFeedback(adminDetailFeedback, "Intervjuu kustutati.", false);
     await loadInterviewList();
+    void loadAdminMetrics().catch(function () {
+        // Ignore non-blocking metrics refresh errors after delete.
+    });
 }
 
 function isEditingDetailForm() {
@@ -1138,7 +1381,15 @@ function stopAdminRefresh() {
 function startAdminRefresh() {
     stopAdminRefresh();
     adminRefreshTimer = window.setInterval(function () {
-        if (adminApp.hidden || document.hidden || isEditingDetailForm()) {
+        if (adminApp.hidden || document.hidden) {
+            return;
+        }
+
+        void loadAdminMetrics().catch(function () {
+            // Ignore background refresh errors.
+        });
+
+        if (isEditingDetailForm()) {
             return;
         }
 
@@ -1166,6 +1417,12 @@ async function refreshPublicSolvedCount() {
     }
 }
 
+async function loadAdminMetrics() {
+    const payload = await api("/api/admin/metrics");
+    state.adminMetrics = payload || null;
+    renderAdminMetrics();
+}
+
 async function checkSession() {
     try {
         const payload = await api("/api/admin/session", {
@@ -1180,15 +1437,22 @@ async function checkSession() {
             setEditorAuthState("unlocked");
             void refreshPublicSolvedCount();
             await loadInterviewList();
+            void loadAdminMetrics().catch(function () {
+                renderAdminMetricsEmpty("Statistika laadimine ebaõnnestus.");
+            });
             startAdminRefresh();
         } else {
             setEditorAuthState("locked");
             stopAdminRefresh();
+            state.adminMetrics = null;
+            renderAdminMetricsEmpty("Logi sisse, et näha live statistikat.");
         }
     } catch (error) {
         setEditorAuthState("locked");
         loginCard.hidden = false;
         adminApp.hidden = true;
+        state.adminMetrics = null;
+        renderAdminMetricsEmpty("Admini statistika laadimine ebaõnnestus.");
         setFeedback(loginFeedback, error.message);
     }
 }
@@ -1221,7 +1485,9 @@ logoutButton?.addEventListener("click", async function () {
     setEditorAuthState("locked");
     state.selectedInterviewId = "";
     state.selectedInterview = null;
+    state.adminMetrics = null;
     closeFieldEditor();
+    renderAdminMetricsEmpty();
     loginCard.hidden = false;
     adminApp.hidden = true;
 });
@@ -1276,6 +1542,9 @@ createInterviewForm?.addEventListener("submit", async function (event) {
         setFeedback(createInterviewFeedback, "Link on valmis ja saadetud.", false);
         renderInterviewFilters();
         await loadInterviewList();
+        void loadAdminMetrics().catch(function () {
+            // Ignore non-blocking metrics refresh errors after invite creation.
+        });
         await loadInterviewDetail(interviewId);
     } catch (error) {
         setFeedback(createInterviewFeedback, error.message);
@@ -1344,6 +1613,9 @@ cancelFieldButton?.addEventListener("click", function () {
 
 document.addEventListener("visibilitychange", function () {
     if (!adminApp.hidden && !document.hidden) {
+        void loadAdminMetrics().catch(function () {
+            // Ignore passive refresh errors.
+        });
         void loadInterviewList().catch(function () {
             // Ignore passive refresh errors.
         });
@@ -1351,4 +1623,5 @@ document.addEventListener("visibilitychange", function () {
 });
 
 renderStoryKindPicker();
+renderAdminMetricsEmpty("Logi sisse, et näha live statistikat.");
 void checkSession();

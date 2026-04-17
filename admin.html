@@ -35,13 +35,58 @@
         </section>
 
         <section id="adminApp" class="editor-app" hidden>
-            <header class="editor-topbar">
-                <div>
+            <header class="editor-topbar admin-topbar">
+                <div class="admin-topbar__copy">
                     <span class="eyebrow">Toimetus</span>
                     <h1>Intervjuud ja lood</h1>
                 </div>
                 <button id="adminLogoutButton" class="ghost-button" type="button">Logi välja</button>
             </header>
+
+            <section class="admin-analytics" aria-label="Admini statistika">
+                <div class="editor-card analytics-shell">
+                    <div class="section-head analytics-shell__head">
+                        <div>
+                            <span class="section-kicker">Live statistika</span>
+                            <h2>AI maht ja OpenAI kulu</h2>
+                        </div>
+                        <p id="adminMetricsUpdated" class="muted-copy analytics-shell__updated">Uuendan…</p>
+                    </div>
+                    <div id="adminMetricsSummary" class="analytics-summary-grid"></div>
+                </div>
+
+                <div class="analytics-panels">
+                    <section class="editor-card analytics-panel">
+                        <div class="section-head">
+                            <div>
+                                <span class="section-kicker">Loendurid</span>
+                                <h3>Genereerimised ja mahuvaade</h3>
+                            </div>
+                        </div>
+                        <div id="adminMetricsCounts" class="analytics-metric-grid"></div>
+                    </section>
+
+                    <section class="editor-card analytics-panel">
+                        <div class="section-head">
+                            <div>
+                                <span class="section-kicker">Kulujaotus</span>
+                                <h3>OpenAI kulu kokku</h3>
+                            </div>
+                        </div>
+                        <div id="adminMetricsCostBreakdown" class="analytics-list"></div>
+                    </section>
+
+                    <section class="editor-card analytics-panel">
+                        <div class="section-head">
+                            <div>
+                                <span class="section-kicker">Viimased jooksud</span>
+                                <h3>Reaalaja aktiivsus</h3>
+                            </div>
+                        </div>
+                        <div id="adminMetricsRecent" class="analytics-list"></div>
+                    </section>
+                </div>
+            </section>
 
             <div class="editor-grid">
                 <aside class="editor-sidebar">
