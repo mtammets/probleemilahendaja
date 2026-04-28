@@ -255,6 +255,9 @@ let idleShowcaseNote = null;
 let idleShowcaseTrack = null;
 let isIdleScreensaverActive = false;
 let lastTouchEndAt = 0;
+let lastTouchEndX = 0;
+let lastTouchEndY = 0;
+let didTouchGestureMove = false;
 
 const MIN_SOLVE_DURATION = 3200;
 const LOADING_PROGRESS_IDLE_CAP = 0.994;
@@ -463,6 +466,16 @@ function syncMobilePerformanceMode() {
     body.classList.toggle("is-mobile-performance-mode", isPerformanceConstrainedDevice());
 }
 
+function isInteractiveTouchTarget(target) {
+    if (!(target instanceof Element)) {
+        return false;
+    }
+
+    return Boolean(target.closest(
+        "a, button, input, textarea, select, option, label, summary, details, [role='button'], [role='link'], [contenteditable='true']"
+    ));
+}
+
 function disableMobileBrowserZoom() {
     if (!isPhoneOrTabletDevice() && !coarsePointerQuery.matches) {
         return;
@@ -480,20 +493,37 @@ function disableMobileBrowserZoom() {
         event.preventDefault();
     });
 
+    document.addEventListener("touchstart", function () {
+        didTouchGestureMove = false;
+    }, { passive: true });
+
     document.addEventListener("touchmove", function (event) {
         if (event.touches.length > 1) {
             event.preventDefault();
         }
+
+        didTouchGestureMove = true;
     }, { passive: false });
 
     document.addEventListener("touchend", function (event) {
-        const now = Date.now();
+        if (didTouchGestureMove || event.changedTouches.length !== 1 || isInteractiveTouchTarget(event.target)) {
+            lastTouchEndAt = 0;
+            return;
+        }
 
-        if (now - lastTouchEndAt < 320) {
+        const touch = event.changedTouches[0];
+        const now = Date.now();
+        const isRepeatedTap = now - lastTouchEndAt < 320
+            && Math.abs(touch.clientX - lastTouchEndX) < 24
+            && Math.abs(touch.clientY - lastTouchEndY) < 24;
+
+        if (isRepeatedTap && event.cancelable) {
             event.preventDefault();
         }
 
         lastTouchEndAt = now;
+        lastTouchEndX = touch.clientX;
+        lastTouchEndY = touch.clientY;
     }, { passive: false });
 }
 
