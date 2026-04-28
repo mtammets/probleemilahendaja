@@ -5325,14 +5325,21 @@ app.get("/api/weather", async function (request, response) {
         };
         const forecastSnapshot = await fetchWeatherForecastSnapshot(location);
         const weatherEntry = await ensureDailyWeatherEntry(forecastSnapshot);
-        const weatherSceneAsset = await ensureWeatherSceneForEntry(weatherEntry).catch(function (error) {
-            console.error("Failed to pre-generate weather scene.", error);
-            return null;
-        });
+        const cachedSceneAsset = weatherEntry.coverMediaUrl
+            || weatherScenePublicUrlCache.get(weatherEntry.sceneKey)
+            || "";
 
-        if (typeof weatherSceneAsset === "string" && /^https?:\/\//iu.test(weatherSceneAsset)) {
-            weatherEntry.coverMediaUrl = weatherSceneAsset;
+        if (typeof cachedSceneAsset === "string" && /^https?:\/\//iu.test(cachedSceneAsset)) {
+            weatherEntry.coverMediaUrl = cachedSceneAsset;
         }
+
+        void ensureWeatherSceneForEntry(weatherEntry).then(function (weatherSceneAsset) {
+            if (typeof weatherSceneAsset === "string" && /^https?:\/\//iu.test(weatherSceneAsset)) {
+                weatherEntry.coverMediaUrl = weatherSceneAsset;
+            }
+        }).catch(function (error) {
+            console.error("Failed to pre-generate weather scene.", error);
+        });
 
         response.json(buildWeatherResponsePayload(forecastSnapshot, weatherEntry));
     } catch (error) {
