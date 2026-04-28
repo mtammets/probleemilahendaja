@@ -3,7 +3,7 @@
 
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <meta name="theme-color" content="#0d1826">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <title>Probleemilahendaja</title>
@@ -84,15 +84,6 @@
                                 <span class="problem-input-shell__orbit problem-input-shell__orbit--two" aria-hidden="true"></span>
                                 <textarea id="problemInput" rows="2" placeholder="Kirjuta oma probleem siia..."></textarea>
                             </div>
-                            <div id="problemLengthMeter" class="problem-length-meter" role="progressbar" aria-label="Probleemi pikkus" aria-valuemin="0" aria-valuemax="86" aria-valuenow="0">
-                                <div class="problem-length-meter__track" aria-hidden="true">
-                                    <span class="problem-length-meter__fill"></span>
-                                    <span class="problem-length-meter__glow"></span>
-                                    <span class="problem-length-meter__marker"></span>
-                                    <span class="problem-length-meter__orb"></span>
-                                </div>
-                            </div>
-                            <p id="problemFeedback" class="intake-feedback" aria-live="polite" hidden></p>
                             <div class="problem-action-shell">
                                 <span class="problem-action-shell__spark problem-action-shell__spark--left" aria-hidden="true"></span>
                                 <button id="solveButton"><span class="solve-button__label">Lahenda probleem!</span></button>
@@ -143,16 +134,16 @@
                 <div class="solution__ornament" aria-hidden="true">
                     <span class="solution__badge">
                         <span class="solution__badge-ring"></span>
-                        <span class="solution__badge-icon"></span>
+                        <svg class="solution__badge-icon" viewBox="0 0 64 64" aria-hidden="true" focusable="false">
+                            <path d="M16 34L28 46L49 19"></path>
+                        </svg>
                     </span>
                 </div>
                 <div class="solution__copy">
-                    <span class="solution__eyebrow">Tehtud!</span>
                     <h2 class="solution__title">Probleem lahendatud!</h2>
-                    <p id="solutionLead" class="solution__lead">Valmis mõne sekundiga.</p>
                 </div>
                 <div class="solution-actions">
-                    <button id="reportButton">Vaata raportit</button>
+                    <button id="reportButton">Vaata kokkuvõtet</button>
                     <button id="resetButton" class="button--secondary">Lahenda veel probleeme</button>
                 </div>
             </div>
@@ -375,10 +366,10 @@
                     </div>
                 </div>
                 <div class="horoscope-feed__layout">
-                    <article id="horoscopeFeatured" class="horoscope-card" aria-live="polite"></article>
-                    <div class="horoscope-feed__rail">
+                    <div id="horoscopeFeatured" class="horoscope-featured" aria-live="polite"></div>
+                    <aside class="horoscope-feed__rail" aria-label="Tähemärkide register">
                         <div id="horoscopeSignGrid" class="horoscope-feed__signs" role="listbox" aria-label="Tähemärgid"></div>
-                    </div>
+                    </aside>
                 </div>
             </div>
         </section>
@@ -396,7 +387,7 @@
                 </div>
             </div>
         </section>
-        <section class="minefield-banner panel" aria-label="Minefield Drift">
+        <section id="minefieldBanner" class="minefield-banner panel" aria-label="Minefield Drift" hidden>
             <a class="panel__frame minefield-banner__frame" href="https://minefield.games" aria-label="Ava Minefield Drift koduleht">
                 <div class="minefield-banner__info">
                     <span class="minefield-banner__eyebrow">Quick start</span>
@@ -532,26 +523,20 @@
     <div id="premiumProblemModal" class="premium-problem-modal" hidden>
         <div id="premiumProblemModalBackdrop" class="premium-problem-modal__backdrop" aria-hidden="true"></div>
         <section class="premium-problem-modal__dialog" role="dialog" aria-modal="true" aria-labelledby="premiumProblemModalTitle">
-            <button id="premiumProblemModalClose" class="premium-problem-modal__close" type="button" aria-label="Sulge suure probleemi teade">
+            <button id="premiumProblemModalClose" class="premium-problem-modal__close" type="button" aria-label="Sulge täispika lahenduse aken">
                 <span aria-hidden="true">×</span>
             </button>
-            <div class="premium-problem-modal__hero" aria-hidden="true">
-                <span class="premium-problem-modal__hero-beam premium-problem-modal__hero-beam--amber"></span>
-                <span class="premium-problem-modal__hero-beam premium-problem-modal__hero-beam--cyan"></span>
-                <span class="premium-problem-modal__hero-orb premium-problem-modal__hero-orb--one"></span>
-                <span class="premium-problem-modal__hero-orb premium-problem-modal__hero-orb--two"></span>
-            </div>
-            <div class="premium-problem-modal__content">
-                <span class="premium-problem-modal__eyebrow">Suurem probleem</span>
-                <h2 id="premiumProblemModalTitle" class="premium-problem-modal__title">See probleem vajab pikemat lahendust.</h2>
-                <p class="premium-problem-modal__lead">Üle <span id="premiumProblemModalLimit">86</span> tähemärgi lahendamine on tasuline. Lisatasu on 1 €.</p>
-                <div class="premium-problem-modal__meta">
-                    <span id="premiumProblemModalLength" class="premium-problem-modal__meta-chip">0 tähemärki</span>
-                    <span class="premium-problem-modal__meta-chip premium-problem-modal__meta-chip--price">+1 €</span>
+            <div class="premium-problem-modal__frame">
+                <div class="premium-problem-modal__masthead">
+                    <span class="premium-problem-modal__eyebrow">Suurem probleem</span>
+                </div>
+                <div class="premium-problem-modal__hero">
+                    <h2 id="premiumProblemModalTitle" class="premium-problem-modal__title">See probleem vajab pikemat lahendust.</h2>
+                    <p class="premium-problem-modal__lead">Üle <span id="premiumProblemModalLimit">86</span> tähemärgi lahendamine on tasuline.</p>
                 </div>
                 <div class="premium-problem-modal__actions">
                     <button id="premiumProblemModalPay" class="premium-problem-modal__pay" type="button">Maksa kohe 1 €</button>
-                    <button id="premiumProblemModalBack" class="button--secondary premium-problem-modal__back" type="button">Lühendan probleemi</button>
+                    <button id="premiumProblemModalBack" class="premium-problem-modal__back" type="button">Lühendan probleemi</button>
                 </div>
             </div>
         </section>

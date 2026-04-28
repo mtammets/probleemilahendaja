@@ -55,6 +55,7 @@ const problemFeedback = document.getElementById("problemFeedback");
 const solveButton = document.getElementById("solveButton");
 const loadingProgressBar = document.getElementById("loadingProgressBar");
 const loadingProgressValue = document.getElementById("loadingProgressValue");
+const loadingStageLabel = document.getElementById("loadingStageLabel");
 const reportButton = document.getElementById("reportButton");
 const resetButton = document.getElementById("resetButton");
 const reportBackButton = document.getElementById("reportBackButton");
@@ -94,6 +95,7 @@ const personaStoryMoreButton = document.getElementById("personaStoryMoreButton")
 const dailyHoroscopeSection = document.getElementById("dailyHoroscope");
 const horoscopeFeatured = document.getElementById("horoscopeFeatured");
 const horoscopeSignGrid = document.getElementById("horoscopeSignGrid");
+const minefieldBanner = document.getElementById("minefieldBanner");
 const problemQuizSection = document.getElementById("problemQuiz");
 const problemQuizCard = document.getElementById("problemQuizCard");
 const problemQuizSnapshot = document.getElementById("problemQuizSnapshot");
@@ -128,7 +130,6 @@ const premiumProblemModalBackdrop = document.getElementById("premiumProblemModal
 const premiumProblemModalClose = document.getElementById("premiumProblemModalClose");
 const premiumProblemModalPay = document.getElementById("premiumProblemModalPay");
 const premiumProblemModalBack = document.getElementById("premiumProblemModalBack");
-const premiumProblemModalLength = document.getElementById("premiumProblemModalLength");
 const premiumProblemModalLimit = document.getElementById("premiumProblemModalLimit");
 const urgitsBannerFrame = document.querySelector(".urgits-banner__frame");
 const urgitsBannerImageLayers = Array.from(document.querySelectorAll(".urgits-banner__image-layer"));
@@ -162,10 +163,13 @@ const weatherPlanningTips = document.getElementById("weatherPlanningTips");
 let solvedCountSyncTimer;
 let solvedCountRealtimeCleanup = null;
 let loadingProgressFrame;
+let currentLoadingProgress = 0;
 let currentSolvedCount = 0;
 let currentProblemText = "";
 let currentPublicProblemText = "";
 let currentProblemLength = 0;
+let premiumProblemModalScrollLockY = 0;
+let premiumProblemSolveDelayTimer = 0;
 let currentReportId = null;
 let pendingReportSave = null;
 let currentSolveStartedAt = 0;
@@ -182,6 +186,7 @@ let problemTimeSegments = [];
 let problemCategoryStatsSyncTimer;
 let problemCategoryStatsRealtimeCleanup = null;
 let problemStatsStoryCleanup = null;
+let problemStatsStorySignature = "";
 let selectedRecentProblemReportId = "";
 let selectedRecentProblemPreview = null;
 let selectedRecentProblemDetail = null;
@@ -190,20 +195,25 @@ let recentProblemDetailError = "";
 let isRecentProblemDetailLoading = false;
 let likedRecentProblemIds = new Set();
 let dailyCoverStory = null;
+let dailyCoverStorySignature = "";
 let dailyCoverStorySyncTimer;
 let isDailyCoverStoryOpen = false;
 let dailyArticles = [];
+let dailyArticlesSignature = "";
 let dailyArticlesSyncTimer;
 let selectedDailyArticleId = "";
 let expandedDailyArticleId = "";
 let visibleDailyArticleCount = 0;
 let dailyPersonaStories = [];
+let dailyPersonaStoriesSignature = "";
 let dailyPersonaStoriesSyncTimer;
 let selectedDailyPersonaStoryId = "";
 let expandedDailyPersonaStoryId = "";
 let visiblePersonaStoryCount = 0;
 let dailyHoroscopeSigns = [];
+let dailyHoroscopeSignature = "";
 let dailyHoroscopeSyncTimer;
+let horoscopeStoryCleanup = null;
 let selectedHoroscopeSignId = "";
 let dailyHoroscopePublishedAt = "";
 let isSubmittingNewsletter = false;
@@ -216,9 +226,6 @@ let problemQuizAdvanceTimer = null;
 let isProblemQuizStarted = false;
 let currentSolverSkinId = "graphite";
 let solverSkinMotionTimer = 0;
-let solverSkinTouchStartX = 0;
-let solverSkinTouchStartY = 0;
-let solverSkinTouchActive = false;
 let dailyWeather = null;
 let dailyWeatherSyncTimer;
 let activeWeatherLocation = null;
@@ -247,9 +254,24 @@ let idleShowcaseTitle = null;
 let idleShowcaseNote = null;
 let idleShowcaseTrack = null;
 let isIdleScreensaverActive = false;
+let lastTouchEndAt = 0;
 
 const MIN_SOLVE_DURATION = 3200;
-const LOADING_PROGRESS_CAP = 0.92;
+const LOADING_PROGRESS_IDLE_CAP = 0.994;
+const LOADING_PROGRESS_FINALIZE_DURATION_MS = 420;
+const LOADING_PROGRESS_TAIL_LABEL_ROTATION_MS = 1350;
+const LOADING_PROGRESS_STAGES = [
+    { duration: 720, progress: 0.14, label: "Loen probleemi sisse" },
+    { duration: 1160, progress: 0.34, label: "Leian põhipunkti" },
+    { duration: 1540, progress: 0.57, label: "Valin lahenduskäiku" },
+    { duration: 1880, progress: 0.78, label: "Viimistlen vastust" },
+    { duration: 2200, progress: 0.91, label: "Kontrollin lõpptulemust" }
+];
+const LOADING_PROGRESS_TAIL_LABELS = [
+    "Panen viimast detaili paika",
+    "Silun sõnastust",
+    "Hoian lahendust fookuses"
+];
 const REMOTE_METRICS_REFRESH_INTERVAL = 15000;
 const REPORT_REQUEST_TIMEOUT = 18000;
 const RECENT_PROBLEMS_LIMIT = 6;
@@ -279,6 +301,7 @@ const DAILY_PERSONA_STORIES_REFRESH_INTERVAL = 60 * 60 * 1000;
 const DAILY_PERSONA_REFRESH_SIGNAL_KEY = "probleemilahendaja:daily-persona-refresh";
 const DAILY_HOROSCOPE_REFRESH_INTERVAL = 60 * 60 * 1000;
 const DAILY_WEATHER_REFRESH_INTERVAL = 20 * 60 * 1000;
+const DAILY_WEATHER_STORAGE_KEY = "probleemilahendaja_daily_weather";
 const WEATHER_LOCATION_TIMEOUT = 6500;
 const IDLE_SCREEN_SAVER_DELAY_MS = 60 * 1000;
 const IDLE_SCREEN_SAVER_TRAVEL_SPEED_PX_PER_SECOND = 980;
@@ -292,11 +315,11 @@ const IDLE_SCREEN_SAVER_CAMERA_MAX_SCALE = 1.62;
 const IDLE_SCREEN_SAVER_CAMERA_TRAVEL_EXTRA = 0.026;
 const IDLE_SCREEN_SAVER_CAMERA_READ_EXTRA = 0.132;
 const SOLVER_SKIN_STORAGE_KEY = "probleemilahendaja_solver_skin";
-const SOLVER_SKIN_SWIPE_THRESHOLD = 54;
-const SOLVER_SKIN_MOTION_DURATION = 360;
+const SOLVER_SKIN_MOTION_DURATION = 220;
 const PROBLEM_PREMIUM_CHARACTER_LIMIT = 86;
 const PROBLEM_PREMIUM_SURCHARGE_EUR = 1;
 const PROBLEM_PREMIUM_NEAR_LIMIT_RATIO = 0.78;
+const PROBLEM_PREMIUM_MODAL_SOLVE_DELAY_MS = 1350;
 const SOLVER_SKINS = [
     { id: "graphite", label: "Praegune skin" },
     { id: "arcade", label: "Arcade-plakati skin" },
@@ -385,6 +408,9 @@ const weatherFullDateFormatter = new Intl.DateTimeFormat("et-EE", {
     month: "long"
 });
 const recentProblemsViewportQuery = window.matchMedia("(max-width: 640px)");
+const horoscopeStoryViewportQuery = window.matchMedia("(max-width: 767px)");
+const desktopPointerQuery = window.matchMedia("(hover: hover) and (pointer: fine)");
+const coarsePointerQuery = window.matchMedia("(pointer: coarse)");
 let lastRecentProblemsInitialCount = recentProblemsViewportQuery.matches
     ? RECENT_PROBLEMS_MOBILE_INITIAL_COUNT
     : RECENT_PROBLEMS_DESKTOP_INITIAL_COUNT;
@@ -417,6 +443,86 @@ function initializeCoverIssueMeta() {
     if (coverIssueNumber) {
         coverIssueNumber.textContent = "Nr " + numberFormatter.format(getISOWeekNumber(today));
     }
+}
+
+function isPhoneOrTabletDevice() {
+    const userAgent = navigator.userAgent || "";
+    const userAgentDataMobile = navigator.userAgentData?.mobile === true;
+    const isTouchMac = navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1;
+
+    return userAgentDataMobile
+        || /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(userAgent)
+        || isTouchMac;
+}
+
+function isPerformanceConstrainedDevice() {
+    return coarsePointerQuery.matches || isPhoneOrTabletDevice();
+}
+
+function syncMobilePerformanceMode() {
+    body.classList.toggle("is-mobile-performance-mode", isPerformanceConstrainedDevice());
+}
+
+function disableMobileBrowserZoom() {
+    if (!isPhoneOrTabletDevice() && !coarsePointerQuery.matches) {
+        return;
+    }
+
+    document.addEventListener("gesturestart", function (event) {
+        event.preventDefault();
+    });
+
+    document.addEventListener("gesturechange", function (event) {
+        event.preventDefault();
+    });
+
+    document.addEventListener("gestureend", function (event) {
+        event.preventDefault();
+    });
+
+    document.addEventListener("touchmove", function (event) {
+        if (event.touches.length > 1) {
+            event.preventDefault();
+        }
+    }, { passive: false });
+
+    document.addEventListener("touchend", function (event) {
+        const now = Date.now();
+
+        if (now - lastTouchEndAt < 320) {
+            event.preventDefault();
+        }
+
+        lastTouchEndAt = now;
+    }, { passive: false });
+}
+
+function getRenderSignature(value) {
+    try {
+        return JSON.stringify(value ?? null);
+    } catch (_error) {
+        return "";
+    }
+}
+
+function shouldShowMinefieldBanner() {
+    if (isPhoneOrTabletDevice()) {
+        return false;
+    }
+
+    if (desktopPointerQuery.matches) {
+        return true;
+    }
+
+    return !coarsePointerQuery.matches && navigator.maxTouchPoints === 0;
+}
+
+function initializeMinefieldBannerVisibility() {
+    if (!minefieldBanner) {
+        return;
+    }
+
+    minefieldBanner.hidden = !shouldShowMinefieldBanner();
 }
 
 function loadCoverStoryHeroImage() {
@@ -1007,11 +1113,11 @@ const PROBLEM_QUIZ_INPUT_FRAGMENTS = {
 const sections = [container, loadingDiv, solutionDiv, reportDiv];
 
 const RATING_MESSAGES = {
-    1: "Tagasiside salvestatud. Tulemus ei olnud seekord sinu jaoks piisav.",
-    2: "Tagasiside salvestatud. Tulemus jäi pigem nõrgaks.",
-    3: "Tagasiside salvestatud. Tulemus oli täiesti okei.",
-    4: "Tagasiside salvestatud. Tulemus jättis tugeva mulje.",
-    5: "Tagasiside salvestatud. Tulemus tabas väga hästi märki."
+    1: "Tagasiside salvestatud.",
+    2: "Tagasiside salvestatud.",
+    3: "Tagasiside salvestatud.",
+    4: "Tagasiside salvestatud.",
+    5: "Tagasiside salvestatud."
 };
 
 const REPORT_FIELD_LIMITS = {
@@ -1099,6 +1205,11 @@ function animateValue(element, start, end, duration) {
     const safeStart = Number.isFinite(start) ? start : 0;
     const safeEnd = Number.isFinite(end) ? end : 0;
 
+    if (isPerformanceConstrainedDevice() || duration <= 0) {
+        element.textContent = numberFormatter.format(safeEnd);
+        return;
+    }
+
     if (element._counterFrame) {
         window.cancelAnimationFrame(element._counterFrame);
     }
@@ -1150,49 +1261,73 @@ function getSolverSkinIndex(value = currentSolverSkinId) {
     return index >= 0 ? index : 0;
 }
 
+function getSolverSkinIdByIndex(index) {
+    const normalizedIndex = ((index % SOLVER_SKINS.length) + SOLVER_SKINS.length) % SOLVER_SKINS.length;
+    return SOLVER_SKINS[normalizedIndex]?.id || SOLVER_SKINS[0].id;
+}
+
+function createSolverSkinDot(skin, index) {
+    const dot = document.createElement("button");
+    const label = document.createElement("span");
+
+    dot.type = "button";
+    dot.className = "intake-stage__skin-dot";
+    dot.dataset.skin = skin.id;
+    dot.setAttribute("aria-label", skin.label);
+    dot.title = skin.label;
+
+    label.className = "sr-only";
+    label.textContent = skin.label;
+    dot.append(label);
+
+    dot.addEventListener("click", function () {
+        const currentIndex = getSolverSkinIndex();
+
+        if (skin.id === currentSolverSkinId) {
+            return;
+        }
+
+        applySolverSkin(skin.id, {
+            motion: prefersReducedMotionQuery.matches
+                ? ""
+                : (index > currentIndex ? "next" : "prev")
+        });
+        persistSolverSkinPreference(skin.id);
+    });
+
+    return dot;
+}
+
 function renderSolverSkinDots() {
     if (!solverSkinDots) {
         return;
     }
 
-    const fragment = document.createDocumentFragment();
-    const activeIndex = getSolverSkinIndex();
-
-    SOLVER_SKINS.forEach(function (skin, index) {
-        const dot = document.createElement("button");
-        const label = document.createElement("span");
-
-        dot.type = "button";
-        dot.className = "intake-stage__skin-dot";
-        dot.dataset.skin = skin.id;
-        dot.classList.toggle("is-active", index === activeIndex);
-        dot.setAttribute("aria-pressed", index === activeIndex ? "true" : "false");
-        dot.setAttribute("aria-label", skin.label);
-        dot.title = skin.label;
-
-        label.className = "sr-only";
-        label.textContent = skin.label;
-        dot.append(label);
-
-        dot.addEventListener("click", function () {
-            const currentIndex = getSolverSkinIndex();
-
-            if (skin.id === currentSolverSkinId) {
-                return;
-            }
-
-            applySolverSkin(skin.id, {
-                motion: prefersReducedMotionQuery.matches
-                    ? ""
-                    : (index > currentIndex ? "next" : "prev")
-            });
-            persistSolverSkinPreference(skin.id);
-        });
-
-        fragment.append(dot);
+    const existingDots = Array.from(solverSkinDots.children);
+    const needsRebuild = existingDots.length !== SOLVER_SKINS.length || SOLVER_SKINS.some(function (skin, index) {
+        return existingDots[index]?.dataset.skin !== skin.id;
     });
 
-    solverSkinDots.replaceChildren(fragment);
+    if (needsRebuild) {
+        const fragment = document.createDocumentFragment();
+
+        SOLVER_SKINS.forEach(function (skin, index) {
+            fragment.append(createSolverSkinDot(skin, index));
+        });
+
+        solverSkinDots.replaceChildren(fragment);
+    }
+
+    const activeIndex = getSolverSkinIndex();
+
+    Array.from(solverSkinDots.children).forEach(function (dot, index) {
+        const isActive = index === activeIndex;
+
+        dot.classList.toggle("is-active", isActive);
+        dot.setAttribute("aria-pressed", isActive ? "true" : "false");
+    });
+
+    syncSolverSkinDotsPreview();
 }
 
 function applySolverSkin(value, options = {}) {
@@ -1239,6 +1374,25 @@ function applySolverSkin(value, options = {}) {
     renderSolverSkinDots();
 }
 
+function syncSolverSkinDotsPreview(progress = 0) {
+    if (!solverSkinDots) {
+        return;
+    }
+
+    const dots = Array.from(solverSkinDots.querySelectorAll(".intake-stage__skin-dot"));
+    const activeIndex = getSolverSkinIndex();
+    const virtualCenter = activeIndex + Math.max(-1, Math.min(1, progress));
+
+    dots.forEach(function (dot, index) {
+        const distance = index - virtualCenter;
+        const clampedShift = Math.max(-1.2, Math.min(1.2, distance));
+        const focus = Math.max(0, 1 - Math.abs(distance));
+
+        dot.style.setProperty("--solver-skin-dot-shift", clampedShift.toFixed(3));
+        dot.style.setProperty("--solver-skin-dot-focus", focus.toFixed(3));
+    });
+}
+
 function loadSolverSkinPreference() {
     try {
         return normalizeSolverSkin(window.localStorage.getItem(SOLVER_SKIN_STORAGE_KEY) || "");
@@ -1255,60 +1409,8 @@ function persistSolverSkinPreference(value) {
     }
 }
 
-function cycleSolverSkin(step, motion) {
-    const currentIndex = getSolverSkinIndex();
-    const nextIndex = (currentIndex + step + SOLVER_SKINS.length) % SOLVER_SKINS.length;
-    const nextSkinId = SOLVER_SKINS[nextIndex].id;
-
-    applySolverSkin(nextSkinId, {
-        motion: prefersReducedMotionQuery.matches ? "" : motion
-    });
-    persistSolverSkinPreference(nextSkinId);
-}
-
-function initializeSolverSkinSwipe() {
+function initializeSolverSkin() {
     applySolverSkin(loadSolverSkinPreference());
-
-    if (!intakeStageFrame || intakeStageFrame.dataset.solverSkinSwipeBound === "true") {
-        return;
-    }
-
-    intakeStageFrame.addEventListener("touchstart", function (event) {
-        if (event.touches.length !== 1) {
-            solverSkinTouchActive = false;
-            return;
-        }
-
-        const touch = event.touches[0];
-        solverSkinTouchStartX = touch.clientX;
-        solverSkinTouchStartY = touch.clientY;
-        solverSkinTouchActive = true;
-    }, { passive: true });
-
-    intakeStageFrame.addEventListener("touchend", function (event) {
-        if (!solverSkinTouchActive || event.changedTouches.length !== 1) {
-            solverSkinTouchActive = false;
-            return;
-        }
-
-        const touch = event.changedTouches[0];
-        const deltaX = touch.clientX - solverSkinTouchStartX;
-        const deltaY = touch.clientY - solverSkinTouchStartY;
-
-        solverSkinTouchActive = false;
-
-        if (Math.abs(deltaX) < SOLVER_SKIN_SWIPE_THRESHOLD || Math.abs(deltaX) <= Math.abs(deltaY) * 1.2) {
-            return;
-        }
-
-        cycleSolverSkin(deltaX < 0 ? 1 : -1, deltaX < 0 ? "next" : "prev");
-    }, { passive: true });
-
-    intakeStageFrame.addEventListener("touchcancel", function () {
-        solverSkinTouchActive = false;
-    }, { passive: true });
-
-    intakeStageFrame.dataset.solverSkinSwipeBound = "true";
 }
 
 function getProblemInputLength(value = problemInput?.value || "") {
@@ -1320,21 +1422,61 @@ function isPremiumProblemLength(length) {
 }
 
 function renderPremiumProblemModalMeta(length = currentProblemLength) {
-    if (premiumProblemModalLength) {
-        premiumProblemModalLength.textContent = numberFormatter.format(length) + " tähemärki";
-    }
-
     if (premiumProblemModalLimit) {
         premiumProblemModalLimit.textContent = numberFormatter.format(PROBLEM_PREMIUM_CHARACTER_LIMIT);
     }
 }
 
-function updateProblemLengthMeter(options = {}) {
-    if (!problemLengthMeter) {
-        return;
-    }
+function lockPremiumProblemModalPageScroll() {
+    premiumProblemModalScrollLockY = window.scrollY || window.pageYOffset || 0;
+    body.style.position = "fixed";
+    body.style.top = "-" + premiumProblemModalScrollLockY + "px";
+    body.style.left = "0";
+    body.style.right = "0";
+    body.style.width = "100%";
+}
 
-    const previousLength = currentProblemLength;
+function unlockPremiumProblemModalPageScroll() {
+    const lockedOffset = Number.parseFloat(body.style.top || "0") || 0;
+    const restoreY = Math.abs(lockedOffset) || premiumProblemModalScrollLockY || 0;
+
+    body.style.position = "";
+    body.style.top = "";
+    body.style.left = "";
+    body.style.right = "";
+    body.style.width = "";
+    window.scrollTo(0, restoreY);
+    premiumProblemModalScrollLockY = 0;
+}
+
+function clearPremiumProblemSolveDelayTimer() {
+    if (premiumProblemSolveDelayTimer) {
+        window.clearTimeout(premiumProblemSolveDelayTimer);
+        premiumProblemSolveDelayTimer = 0;
+    }
+}
+
+function schedulePremiumProblemModalDuringSolve() {
+    clearPremiumProblemSolveDelayTimer();
+
+    premiumProblemSolveDelayTimer = window.setTimeout(function () {
+        premiumProblemSolveDelayTimer = 0;
+
+        if (!isGeneratingReport || isLargeProblemPremiumUnlocked) {
+            return;
+        }
+
+        stopLoadingProgress();
+        setLoadingProgress(0.48);
+        isGeneratingReport = false;
+        hasShownLargeProblemPremiumModal = true;
+        openPremiumProblemModal({
+            resumeSolve: true
+        });
+    }, PROBLEM_PREMIUM_MODAL_SOLVE_DELAY_MS);
+}
+
+function updateProblemLengthMeter(options = {}) {
     const length = getProblemInputLength();
     const progress = Math.max(0, Math.min(1, length / PROBLEM_PREMIUM_CHARACTER_LIMIT));
     const overflow = length > PROBLEM_PREMIUM_CHARACTER_LIMIT
@@ -1355,6 +1497,16 @@ function updateProblemLengthMeter(options = {}) {
         nextState = "active";
     }
 
+    renderPremiumProblemModalMeta(length);
+
+    if (!isPremiumProblemLength(length)) {
+        hasShownLargeProblemPremiumModal = false;
+    }
+
+    if (!problemLengthMeter) {
+        return;
+    }
+
     problemLengthMeter.dataset.state = nextState;
     problemLengthMeter.style.setProperty("--problem-length-progress", progress.toFixed(4));
     problemLengthMeter.style.setProperty("--problem-length-overflow", overflow.toFixed(4));
@@ -1363,27 +1515,10 @@ function updateProblemLengthMeter(options = {}) {
         "aria-valuetext",
         numberFormatter.format(length) + " / " + numberFormatter.format(PROBLEM_PREMIUM_CHARACTER_LIMIT)
     );
-
-    renderPremiumProblemModalMeta(length);
-
-    if (!isPremiumProblemLength(length)) {
-        hasShownLargeProblemPremiumModal = false;
-    }
-
-    if (
-        options.autoOpen !== false
-        && isPremiumProblemLength(length)
-        && previousLength <= PROBLEM_PREMIUM_CHARACTER_LIMIT
-        && !isLargeProblemPremiumUnlocked
-        && !hasShownLargeProblemPremiumModal
-    ) {
-        hasShownLargeProblemPremiumModal = true;
-        openPremiumProblemModal();
-    }
 }
 
 function openPremiumProblemModal(options = {}) {
-    if (!premiumProblemModal) {
+    if (!premiumProblemModal || !body) {
         return;
     }
 
@@ -1395,6 +1530,7 @@ function openPremiumProblemModal(options = {}) {
     renderPremiumProblemModalMeta();
     premiumProblemModal.hidden = false;
     document.body.classList.add("premium-problem-modal-open");
+    lockPremiumProblemModalPageScroll();
 
     window.requestAnimationFrame(function () {
         premiumProblemModal.classList.add("is-open");
@@ -1406,11 +1542,12 @@ function openPremiumProblemModal(options = {}) {
 }
 
 function closePremiumProblemModal(options = {}) {
-    if (!premiumProblemModal) {
+    if (!premiumProblemModal || premiumProblemModal.hidden || !body) {
         return;
     }
 
     const keepPendingSolve = options.keepPendingSolve === true;
+    const shouldReturnToInput = shouldResumeSolveAfterPremiumUnlock && !keepPendingSolve;
 
     premiumProblemModal.classList.remove("is-open");
     document.body.classList.remove("premium-problem-modal-open");
@@ -1422,6 +1559,16 @@ function closePremiumProblemModal(options = {}) {
     window.setTimeout(function () {
         if (!premiumProblemModal.classList.contains("is-open")) {
             premiumProblemModal.hidden = true;
+        }
+
+        unlockPremiumProblemModalPageScroll();
+
+        if (shouldReturnToInput) {
+            clearPremiumProblemSolveDelayTimer();
+            resetLoadingProgressPresentation();
+            isGeneratingReport = false;
+            currentSolveStartedAt = 0;
+            showPanel(container, "idle");
         }
 
         if (options.focusInput) {
@@ -1457,6 +1604,7 @@ function initializePremiumProblemFlow() {
     premiumProblemModalPay?.addEventListener("click", function () {
         const shouldResume = shouldResumeSolveAfterPremiumUnlock;
 
+        clearPremiumProblemSolveDelayTimer();
         isLargeProblemPremiumUnlocked = true;
         hasShownLargeProblemPremiumModal = false;
         closePremiumProblemModal({
@@ -1483,24 +1631,18 @@ function initializePremiumProblemFlow() {
     });
 }
 
-async function requestProblemSolve() {
+async function requestProblemSolve(options = {}) {
     if (isGeneratingReport) {
         return;
     }
 
     const problemText = normalizeProblemInputText(problemInput.value);
     const problemLength = problemText.length;
+    const bypassPremiumLimit = options.bypassPremiumLimit === true;
 
     if (problemText === "") {
         setProblemFeedback("Sisesta enne probleem, mida lahendada.", "error");
         problemInput.focus();
-        return;
-    }
-
-    if (isPremiumProblemLength(problemLength) && !isLargeProblemPremiumUnlocked) {
-        openPremiumProblemModal({
-            resumeSolve: true
-        });
         return;
     }
 
@@ -1512,6 +1654,13 @@ async function requestProblemSolve() {
     showPanel(loadingDiv, "loading");
     startLoadingProgress();
 
+    if (!bypassPremiumLimit && isPremiumProblemLength(problemLength) && !isLargeProblemPremiumUnlocked) {
+        schedulePremiumProblemModalDuringSolve();
+        return;
+    }
+
+    clearPremiumProblemSolveDelayTimer();
+
     try {
         const [{ report, publicProblemText }] = await Promise.all([
             fetchGeneratedReport(problemText),
@@ -1520,13 +1669,9 @@ async function requestProblemSolve() {
             })
         ]);
 
-        stopLoadingProgress();
-        setLoadingProgress(1);
+        await finishLoadingProgress();
         currentPublicProblemText = publicProblemText;
         populateReport(report);
-        if (solutionLead) {
-            solutionLead.textContent = formatSolveDurationLabel(performance.now() - currentSolveStartedAt);
-        }
         setRecentProblemsUnlocked(true);
         pushRecentProblem({
             problemText: publicProblemText,
@@ -1586,7 +1731,7 @@ function initializeUrgitsBannerRotation() {
         window.clearInterval(urgitsBannerImageTimer);
     }
 
-    if (prefersReducedMotionQuery.matches || URGITS_BANNER_IMAGES.length < 2) {
+    if (prefersReducedMotionQuery.matches || isPerformanceConstrainedDevice() || URGITS_BANNER_IMAGES.length < 2) {
         return;
     }
 
@@ -1637,24 +1782,30 @@ function setNewsletterSubmitting(isSubmitting) {
 
 function setRemoteSolvedCount(total) {
     if (typeof total === "number" && Number.isFinite(total)) {
+        if (remoteSolvedCount === total) {
+            return;
+        }
+
         remoteSolvedCount = total;
         renderSolvedCount();
     }
 }
 
 function setProblemFeedback(message, state = "") {
-    if (!problemFeedback) {
-        return;
+    if (problemFeedback) {
+        problemFeedback.hidden = !message;
+        problemFeedback.textContent = message || "";
+
+        if (state) {
+            problemFeedback.dataset.state = state;
+        } else {
+            delete problemFeedback.dataset.state;
+        }
     }
 
-    problemFeedback.hidden = !message;
-    problemFeedback.textContent = message || "";
-
     if (state) {
-        problemFeedback.dataset.state = state;
         intakeStage?.setAttribute("data-state", state);
     } else {
-        delete problemFeedback.dataset.state;
         intakeStage?.removeAttribute("data-state");
     }
 
@@ -1685,31 +1836,89 @@ function startSolvedCountSync() {
     renderSolvedCount();
 
     if (isSupabaseConfigured) {
+        const shouldUseRealtimeSync = !isPerformanceConstrainedDevice();
+
         if (solvedCountSyncTimer) {
             window.clearInterval(solvedCountSyncTimer);
         }
 
         if (typeof solvedCountRealtimeCleanup === "function") {
             solvedCountRealtimeCleanup();
+            solvedCountRealtimeCleanup = null;
         }
 
         void refreshSolvedCountFromSupabase();
         solvedCountSyncTimer = window.setInterval(
             refreshSolvedCountFromSupabase,
-            REMOTE_METRICS_REFRESH_INTERVAL
+            isPerformanceConstrainedDevice() ? Math.max(REMOTE_METRICS_REFRESH_INTERVAL, 60000) : REMOTE_METRICS_REFRESH_INTERVAL
         );
-        solvedCountRealtimeCleanup = subscribeToReportInserts(function () {
-            void refreshSolvedCountFromSupabase();
-        });
+
+        if (shouldUseRealtimeSync) {
+            solvedCountRealtimeCleanup = subscribeToReportInserts(function () {
+                void refreshSolvedCountFromSupabase();
+            });
+        }
     }
+}
+
+function easeOutCubic(value) {
+    const clampedValue = Math.max(0, Math.min(1, value));
+
+    return 1 - Math.pow(1 - clampedValue, 3);
+}
+
+function interpolateNumber(start, end, progress) {
+    return start + ((end - start) * progress);
+}
+
+function setLoadingStage(label) {
+    if (loadingStageLabel) {
+        loadingStageLabel.textContent = label || "";
+    }
+}
+
+function getLoadingProgressSnapshot(elapsed) {
+    let elapsedWithinTimeline = Math.max(0, elapsed);
+    let previousProgress = 0;
+
+    for (const stage of LOADING_PROGRESS_STAGES) {
+        if (elapsedWithinTimeline <= stage.duration) {
+            const stageProgress = stage.duration > 0
+                ? easeOutCubic(elapsedWithinTimeline / stage.duration)
+                : 1;
+
+            return {
+                progress: interpolateNumber(previousProgress, stage.progress, stageProgress),
+                label: stage.label
+            };
+        }
+
+        elapsedWithinTimeline -= stage.duration;
+        previousProgress = stage.progress;
+    }
+
+    const tailProgress = 1 - Math.exp(-elapsedWithinTimeline / 3200);
+    const labelIndex = Math.floor(elapsedWithinTimeline / LOADING_PROGRESS_TAIL_LABEL_ROTATION_MS) % LOADING_PROGRESS_TAIL_LABELS.length;
+
+    return {
+        progress: interpolateNumber(previousProgress, LOADING_PROGRESS_IDLE_CAP, tailProgress),
+        label: LOADING_PROGRESS_TAIL_LABELS[labelIndex]
+    };
 }
 
 function setLoadingProgress(progress) {
     const clampedProgress = Math.max(0, Math.min(1, progress));
     const percentage = Math.round(clampedProgress * 100);
 
-    loadingProgressBar.style.width = percentage + "%";
-    loadingProgressValue.textContent = percentage + "%";
+    currentLoadingProgress = clampedProgress;
+
+    if (loadingProgressBar) {
+        loadingProgressBar.style.width = percentage + "%";
+    }
+
+    if (loadingProgressValue) {
+        loadingProgressValue.textContent = percentage + "%";
+    }
 }
 
 function stopLoadingProgress() {
@@ -1724,19 +1933,50 @@ function startLoadingProgress() {
 
     stopLoadingProgress();
     setLoadingProgress(0);
+    setLoadingStage(LOADING_PROGRESS_STAGES[0]?.label || "");
 
     function frame(now) {
-        const elapsed = now - startTime;
-        const progress = Math.min(LOADING_PROGRESS_CAP, (elapsed / MIN_SOLVE_DURATION) * LOADING_PROGRESS_CAP);
+        const snapshot = getLoadingProgressSnapshot(now - startTime);
 
-        setLoadingProgress(progress);
-
-        if (progress < LOADING_PROGRESS_CAP) {
-            loadingProgressFrame = window.requestAnimationFrame(frame);
-        }
+        setLoadingProgress(snapshot.progress);
+        setLoadingStage(snapshot.label);
+        loadingProgressFrame = window.requestAnimationFrame(frame);
     }
 
     loadingProgressFrame = window.requestAnimationFrame(frame);
+}
+
+function finishLoadingProgress() {
+    const startProgress = currentLoadingProgress;
+    const startTime = performance.now();
+
+    stopLoadingProgress();
+    setLoadingStage("Panen viimast detaili paika");
+
+    return new Promise(function (resolve) {
+        function frame(now) {
+            const progress = Math.min(1, (now - startTime) / LOADING_PROGRESS_FINALIZE_DURATION_MS);
+            const easedProgress = easeOutCubic(progress);
+
+            setLoadingProgress(interpolateNumber(startProgress, 1, easedProgress));
+
+            if (progress < 1) {
+                loadingProgressFrame = window.requestAnimationFrame(frame);
+                return;
+            }
+
+            loadingProgressFrame = null;
+            resolve();
+        }
+
+        loadingProgressFrame = window.requestAnimationFrame(frame);
+    });
+}
+
+function resetLoadingProgressPresentation() {
+    stopLoadingProgress();
+    setLoadingProgress(0);
+    setLoadingStage(LOADING_PROGRESS_STAGES[0]?.label || "");
 }
 
 function showPanel(panel, state) {
@@ -1869,6 +2109,14 @@ function parseDateToTimestamp(value) {
     const timestamp = new Date(value || "").getTime();
 
     return Number.isFinite(timestamp) ? timestamp : Date.now();
+}
+
+function getLocalDateKey(date = new Date()) {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, "0");
+    const day = String(date.getDate()).padStart(2, "0");
+
+    return `${year}-${month}-${day}`;
 }
 
 function getRecordDateValue(record) {
@@ -2177,47 +2425,50 @@ function getSelectedHoroscopeSign() {
     }) || dailyHoroscopeSigns[0];
 }
 
-function createHoroscopePlaceholder() {
-    const fragment = document.createDocumentFragment();
-    const title = document.createElement("h3");
-
-    title.className = "horoscope-card__title";
-    title.textContent = "Laadimine";
-    fragment.append(title);
-
-    return fragment;
+function isHoroscopeStoryViewport() {
+    return horoscopeStoryViewportQuery.matches;
 }
 
-function renderFeaturedHoroscope(sign) {
-    if (!horoscopeFeatured) {
+function applySelectedHoroscopeAccent(sign) {
+    if (!dailyHoroscopeSection) {
         return;
     }
 
+    dailyHoroscopeSection.style.setProperty("--horoscope-section-accent", sign?.accent || "#caa06a");
+    dailyHoroscopeSection.style.setProperty("--horoscope-section-glow", sign?.accentSoft || "rgba(202, 160, 106, 0.18)");
+}
+
+function createHoroscopePlaceholder() {
+    const card = document.createElement("article");
+    const title = document.createElement("h3");
+
+    card.className = "horoscope-card horoscope-card--empty";
+    title.className = "horoscope-card__title";
+    title.textContent = "Laadimine";
+    card.append(title);
+
+    return card;
+}
+
+function createHoroscopeCard(sign) {
     if (!sign) {
-        horoscopeFeatured.classList.add("horoscope-card--empty");
-        horoscopeFeatured.replaceChildren(createHoroscopePlaceholder());
-        return;
+        return createHoroscopePlaceholder();
     }
 
-    horoscopeFeatured.classList.remove("horoscope-card--empty");
-    horoscopeFeatured.style.setProperty("--horoscope-accent", sign.accent);
-    horoscopeFeatured.style.setProperty("--horoscope-glow", sign.accentSoft);
-    if (dailyHoroscopeSection) {
-        dailyHoroscopeSection.style.setProperty("--horoscope-section-accent", sign.accent);
-        dailyHoroscopeSection.style.setProperty("--horoscope-section-glow", sign.accentSoft);
-    }
-
-    const fragment = document.createDocumentFragment();
+    const card = document.createElement("article");
     const hero = document.createElement("div");
     const meta = document.createElement("div");
     const visual = document.createElement("div");
     const visualSymbol = document.createElement("span");
-    const signLabel = document.createElement("span");
+    const signLabel = document.createElement("h3");
     const title = document.createElement("p");
     const date = document.createElement("span");
     const body = document.createElement("div");
     const indicators = document.createElement("div");
 
+    card.className = "horoscope-card";
+    card.style.setProperty("--horoscope-accent", sign.accent);
+    card.style.setProperty("--horoscope-glow", sign.accentSoft);
     hero.className = "horoscope-card__hero";
     meta.className = "horoscope-card__meta";
     visual.className = "horoscope-card__visual";
@@ -2236,7 +2487,7 @@ function renderFeaturedHoroscope(sign) {
     meta.append(signLabel, title, date);
     visual.append(visualSymbol);
     hero.append(meta, visual);
-    fragment.append(hero);
+    card.append(hero);
 
     sign.paragraphs.forEach(function (paragraphText, index) {
         const paragraph = document.createElement("p");
@@ -2275,8 +2526,137 @@ function renderFeaturedHoroscope(sign) {
         indicators.append(block);
     });
 
-    fragment.append(body, indicators);
-    horoscopeFeatured.replaceChildren(fragment);
+    card.append(body, indicators);
+
+    return card;
+}
+
+function createHoroscopeFeaturedDesktop(sign) {
+    const desktop = document.createElement("div");
+
+    desktop.className = "horoscope-featured__desktop";
+    desktop.append(createHoroscopeCard(sign));
+
+    return desktop;
+}
+
+function getHoroscopeStorySlides(signs) {
+    const slides = signs.map(function (sign, index) {
+        return {
+            sign,
+            storyIndex: index,
+            isClone: false,
+            clonePosition: ""
+        };
+    });
+
+    if (signs.length <= 1) {
+        return slides;
+    }
+
+    return [
+        {
+            sign: signs[signs.length - 1],
+            storyIndex: signs.length - 1,
+            isClone: true,
+            clonePosition: "leading"
+        },
+        ...slides,
+        {
+            sign: signs[0],
+            storyIndex: 0,
+            isClone: true,
+            clonePosition: "trailing"
+        }
+    ];
+}
+
+function createHoroscopeStory(signs) {
+    const story = document.createElement("div");
+    const viewport = document.createElement("div");
+    const track = document.createElement("div");
+    const pager = document.createElement("div");
+    const slides = getHoroscopeStorySlides(signs);
+
+    story.className = "horoscope-story";
+    viewport.className = "horoscope-story__viewport";
+    track.className = "horoscope-story__track";
+    pager.className = "horoscope-story__pager";
+    story.dataset.loopEnabled = String(signs.length > 1);
+    story.dataset.realCount = String(signs.length);
+
+    slides.forEach(function (slide, index) {
+        const panel = document.createElement("div");
+        const frame = document.createElement("div");
+        const sign = slide.sign;
+
+        panel.className = "horoscope-story__panel";
+        panel.dataset.panelIndex = String(index);
+        panel.dataset.signId = sign.id;
+        panel.dataset.storyIndex = String(slide.storyIndex);
+        panel.dataset.isClone = String(slide.isClone);
+        panel.dataset.clonePosition = slide.clonePosition;
+        panel.setAttribute("role", "group");
+        panel.setAttribute("aria-label", sign.label);
+        if (slide.isClone) {
+            panel.setAttribute("aria-hidden", "true");
+        }
+
+        frame.className = "horoscope-story__panel-frame";
+        frame.append(createHoroscopeCard(sign));
+        panel.append(frame);
+        track.append(panel);
+    });
+
+    signs.forEach(function (sign, index) {
+        const dot = document.createElement("button");
+
+        dot.className = "horoscope-story__pager-dot";
+        dot.type = "button";
+        dot.dataset.panelIndex = String(index);
+        dot.dataset.signId = sign.id;
+        dot.setAttribute("aria-label", `Ava ${sign.label} horoskoop`);
+        pager.append(dot);
+    });
+
+    pager.hidden = signs.length < 2;
+
+    viewport.append(track);
+    story.append(viewport, pager);
+
+    return story;
+}
+
+function renderHoroscopeFeaturedCard(sign) {
+    const desktop = horoscopeFeatured?.querySelector(".horoscope-featured__desktop");
+
+    if (!desktop) {
+        return;
+    }
+
+    desktop.replaceChildren(createHoroscopeCard(sign));
+}
+
+function syncHoroscopeSignGridSelection(options = {}) {
+    if (!horoscopeSignGrid) {
+        return;
+    }
+
+    let activeButton = null;
+
+    Array.from(horoscopeSignGrid.querySelectorAll(".horoscope-sign")).forEach(function (button) {
+        const isActive = button.dataset.signId === selectedHoroscopeSignId;
+        button.classList.toggle("is-selected", isActive);
+        button.setAttribute("aria-selected", String(isActive));
+
+        if (isActive) {
+            activeButton = button;
+        }
+    });
+
+    if (activeButton && options.scroll !== false) {
+        scrollHoroscopeSignGridToActiveButton(activeButton);
+    }
 }
 
 function createHoroscopeSignButton(sign) {
@@ -2289,7 +2669,9 @@ function createHoroscopeSignButton(sign) {
     button.className = "horoscope-sign";
     button.setAttribute("role", "option");
     button.setAttribute("aria-selected", String(isSelected));
+    button.setAttribute("aria-label", sign.label + ": " + (sign.title || "Päeva horoskoop"));
     button.classList.toggle("is-selected", isSelected);
+    button.dataset.signId = sign.id;
     button.style.setProperty("--sign-accent", sign.accent);
     button.style.setProperty("--sign-glow", sign.accentSoft);
 
@@ -2301,11 +2683,300 @@ function createHoroscopeSignButton(sign) {
     button.append(glyph, name);
 
     button.addEventListener("click", function () {
-        selectedHoroscopeSignId = sign.id;
-        renderDailyHoroscope();
+        updateHoroscopeSelection(sign.id, {
+            behavior: "smooth",
+            scrollSignGrid: true
+        });
     });
 
     return button;
+}
+
+function scrollHoroscopeSignGridToActiveButton(activeButton) {
+    if (!horoscopeSignGrid || !activeButton || !isHoroscopeStoryViewport()) {
+        return;
+    }
+
+    if (horoscopeSignGrid.clientWidth === 0 || horoscopeSignGrid.scrollWidth <= horoscopeSignGrid.clientWidth) {
+        return;
+    }
+
+    const gridRect = horoscopeSignGrid.getBoundingClientRect();
+    const buttonRect = activeButton.getBoundingClientRect();
+    const nextScrollLeft = horoscopeSignGrid.scrollLeft
+        + (buttonRect.left - gridRect.left)
+        - ((gridRect.width - buttonRect.width) / 2);
+
+    horoscopeSignGrid.scrollTo({
+        left: Math.max(0, nextScrollLeft),
+        behavior: prefersReducedMotionQuery.matches ? "auto" : "smooth"
+    });
+}
+
+function getHoroscopeStoryState() {
+    const storyElement = horoscopeFeatured?.querySelector(".horoscope-story");
+
+    if (!storyElement) {
+        return null;
+    }
+
+    const viewport = storyElement.querySelector(".horoscope-story__viewport");
+    const panels = Array.from(storyElement.querySelectorAll(".horoscope-story__panel"));
+    const realPanels = panels.filter(function (panel) {
+        return panel.dataset.isClone !== "true";
+    });
+    const dots = Array.from(storyElement.querySelectorAll(".horoscope-story__pager-dot"));
+
+    if (!viewport || panels.length === 0) {
+        return null;
+    }
+
+    return {
+        storyElement,
+        viewport,
+        panels,
+        realPanels,
+        loopEnabled: storyElement.dataset.loopEnabled === "true",
+        dots
+    };
+}
+
+function getHoroscopeStoryPanelTargetLeft(viewport, panel) {
+    if (!viewport || !panel) {
+        return 0;
+    }
+
+    return Math.max(0, panel.offsetLeft - ((viewport.clientWidth - panel.clientWidth) / 2));
+}
+
+function scrollHoroscopeStoryToSign(signId, behavior = "smooth", options = {}) {
+    const storyState = getHoroscopeStoryState();
+
+    if (!storyState) {
+        return false;
+    }
+
+    let candidatePanels = storyState.panels.filter(function (panel) {
+        return panel.dataset.signId === signId;
+    });
+
+    if (options.preferReal) {
+        const realCandidates = candidatePanels.filter(function (panel) {
+            return panel.dataset.isClone !== "true";
+        });
+
+        if (realCandidates.length) {
+            candidatePanels = realCandidates;
+        }
+    }
+
+    const nextPanel = candidatePanels.reduce(function (bestMatch, panel) {
+        const targetLeft = getHoroscopeStoryPanelTargetLeft(storyState.viewport, panel);
+        const distance = Math.abs(targetLeft - storyState.viewport.scrollLeft);
+
+        if (!bestMatch || distance < bestMatch.distance) {
+            return {
+                panel,
+                distance
+            };
+        }
+
+        return bestMatch;
+    }, null);
+
+    if (!nextPanel?.panel) {
+        return false;
+    }
+
+    storyState.viewport.scrollTo({
+        left: getHoroscopeStoryPanelTargetLeft(storyState.viewport, nextPanel.panel),
+        behavior: behavior === "smooth" && !prefersReducedMotionQuery.matches ? "smooth" : "auto"
+    });
+
+    return true;
+}
+
+function updateHoroscopeSelection(nextSignId, options = {}) {
+    if (!nextSignId || !dailyHoroscopeSigns.some(function (sign) {
+        return sign.id === nextSignId;
+    })) {
+        return;
+    }
+
+    selectedHoroscopeSignId = nextSignId;
+
+    const selectedSign = getSelectedHoroscopeSign();
+    applySelectedHoroscopeAccent(selectedSign);
+    syncHoroscopeSignGridSelection({
+        scroll: options.scrollSignGrid !== false
+    });
+    renderHoroscopeFeaturedCard(selectedSign);
+
+    if (options.syncStory !== false && options.source !== "story" && isHoroscopeStoryViewport()) {
+        scrollHoroscopeStoryToSign(nextSignId, options.behavior || "smooth");
+    }
+}
+
+function enhanceHoroscopeStory(featuredElement) {
+    const storyState = getHoroscopeStoryState();
+    let frameId = 0;
+
+    if (!featuredElement || !storyState) {
+        return function () {
+            // No-op cleanup when the horoscope story is not rendered.
+        };
+    }
+
+    const { storyElement, viewport, panels, realPanels, dots, loopEnabled } = storyState;
+
+    function setActivePanel(nextSignId) {
+        if (!nextSignId) {
+            return;
+        }
+
+        const nextIndex = dailyHoroscopeSigns.findIndex(function (sign) {
+            return sign.id === nextSignId;
+        });
+
+        storyElement.dataset.activeIndex = String(Math.max(0, nextIndex));
+        storyElement.dataset.activeSignId = nextSignId;
+
+        dots.forEach(function (dot) {
+            const isActive = dot.dataset.signId === nextSignId;
+            dot.classList.toggle("is-active", isActive);
+            dot.setAttribute("aria-pressed", String(isActive));
+        });
+
+        if (nextSignId && nextSignId !== selectedHoroscopeSignId) {
+            updateHoroscopeSelection(nextSignId, {
+                source: "story",
+                scrollSignGrid: true,
+                syncStory: false
+            });
+        }
+    }
+
+    function normalizeLoopPosition(activePanel) {
+        if (!loopEnabled || !activePanel || activePanel.dataset.isClone !== "true") {
+            return false;
+        }
+
+        const nextSignId = activePanel.dataset.signId || "";
+        const realPanel = realPanels.find(function (panel) {
+            return panel.dataset.signId === nextSignId;
+        });
+
+        if (!realPanel) {
+            return false;
+        }
+
+        viewport.scrollTo({
+            left: getHoroscopeStoryPanelTargetLeft(viewport, realPanel),
+            behavior: "auto"
+        });
+
+        return true;
+    }
+
+    function syncPanelProgress() {
+        if (viewport.scrollWidth <= viewport.clientWidth + 8) {
+            const nextSignId = selectedHoroscopeSignId || realPanels[0]?.dataset.signId || panels[0]?.dataset.signId || "";
+
+            panels.forEach(function (panel) {
+                panel.style.setProperty("--horoscope-story-shift", "0");
+                panel.style.setProperty("--horoscope-story-focus", "1");
+            });
+
+            setActivePanel(nextSignId);
+            frameId = 0;
+            return;
+        }
+
+        const viewportRect = viewport.getBoundingClientRect();
+        const viewportCenter = viewportRect.left + (viewportRect.width / 2);
+        let activeIndex = 0;
+        let shortestDistance = Number.POSITIVE_INFINITY;
+
+        panels.forEach(function (panel, index) {
+            const panelRect = panel.getBoundingClientRect();
+            const panelCenter = panelRect.left + (panelRect.width / 2);
+            const shift = (panelCenter - viewportCenter) / Math.max(viewportRect.width, 1);
+            const clampedShift = Math.max(-1.2, Math.min(1.2, shift));
+            const focus = Math.max(0, 1 - (Math.abs(clampedShift) * 1.18));
+
+            panel.style.setProperty("--horoscope-story-shift", clampedShift.toFixed(3));
+            panel.style.setProperty("--horoscope-story-focus", focus.toFixed(3));
+
+            if (Math.abs(clampedShift) < shortestDistance) {
+                shortestDistance = Math.abs(clampedShift);
+                activeIndex = index;
+            }
+        });
+
+        const activePanel = panels[activeIndex];
+        const activeSignId = activePanel?.dataset.signId || panels[0]?.dataset.signId || "";
+
+        setActivePanel(activeSignId);
+
+        if (normalizeLoopPosition(activePanel)) {
+            frameId = 0;
+            requestSync();
+            return;
+        }
+
+        frameId = 0;
+    }
+
+    function requestSync() {
+        if (frameId) {
+            return;
+        }
+
+        frameId = window.requestAnimationFrame(syncPanelProgress);
+    }
+
+    const dotHandlers = dots.map(function (dot) {
+        const handler = function () {
+            const nextSignId = dot.dataset.signId || "";
+
+            if (nextSignId) {
+                updateHoroscopeSelection(nextSignId, {
+                    behavior: "smooth",
+                    scrollSignGrid: true,
+                    syncStory: false
+                });
+
+                scrollHoroscopeStoryToSign(nextSignId, "smooth");
+            }
+        };
+
+        dot.addEventListener("click", handler);
+        return handler;
+    });
+
+    viewport.addEventListener("scroll", requestSync, { passive: true });
+    window.addEventListener("resize", requestSync);
+
+    window.requestAnimationFrame(function () {
+        const initialSignId = selectedHoroscopeSignId || realPanels[0]?.dataset.signId || panels[0]?.dataset.signId || "";
+        scrollHoroscopeStoryToSign(initialSignId, "auto", {
+            preferReal: true
+        });
+        requestSync();
+    });
+
+    return function cleanupHoroscopeStory() {
+        if (frameId) {
+            window.cancelAnimationFrame(frameId);
+            frameId = 0;
+        }
+
+        viewport.removeEventListener("scroll", requestSync);
+        window.removeEventListener("resize", requestSync);
+        dots.forEach(function (dot, index) {
+            dot.removeEventListener("click", dotHandlers[index]);
+        });
+    };
 }
 
 function renderDailyHoroscope() {
@@ -2313,40 +2984,49 @@ function renderDailyHoroscope() {
         return;
     }
 
-    const selectedSign = getSelectedHoroscopeSign();
-    const fragment = document.createDocumentFragment();
+    if (typeof horoscopeStoryCleanup === "function") {
+        horoscopeStoryCleanup();
+        horoscopeStoryCleanup = null;
+    }
 
-    renderFeaturedHoroscope(selectedSign);
+    const selectedSign = getSelectedHoroscopeSign();
+    const featureFragment = document.createDocumentFragment();
+    const signFragment = document.createDocumentFragment();
+
+    applySelectedHoroscopeAccent(selectedSign);
 
     if (dailyHoroscopeSigns.length === 0) {
         const emptyItem = document.createElement("div");
         emptyItem.className = "horoscope-sign horoscope-sign--empty";
         emptyItem.textContent = "Laadimine";
+        horoscopeFeatured.replaceChildren(createHoroscopePlaceholder());
         horoscopeSignGrid.replaceChildren(emptyItem);
         return;
     }
 
+    featureFragment.append(
+        createHoroscopeFeaturedDesktop(selectedSign),
+        createHoroscopeStory(dailyHoroscopeSigns)
+    );
+    horoscopeFeatured.replaceChildren(featureFragment);
+
     dailyHoroscopeSigns.forEach(function (sign) {
-        fragment.append(createHoroscopeSignButton(sign));
+        signFragment.append(createHoroscopeSignButton(sign));
     });
 
-    horoscopeSignGrid.replaceChildren(fragment);
+    horoscopeSignGrid.replaceChildren(signFragment);
+    syncHoroscopeSignGridSelection({
+        scroll: isHoroscopeStoryViewport()
+    });
 
-    const activeButton = horoscopeSignGrid.querySelector(".horoscope-sign.is-selected");
-    if (activeButton && window.matchMedia("(max-width: 767px)").matches) {
-        activeButton.scrollIntoView({
-            block: "nearest",
-            inline: "center",
-            behavior: "smooth"
-        });
+    if (isHoroscopeStoryViewport()) {
+        horoscopeStoryCleanup = enhanceHoroscopeStory(horoscopeFeatured);
     }
 }
 
 function setDailyHoroscope(payload) {
     const publishedAt = new Date(parseDateToTimestamp(payload?.publishedAt || payload?.published_at)).toISOString();
-
-    dailyHoroscopePublishedAt = publishedAt;
-    dailyHoroscopeSigns = HOROSCOPE_SIGNS.map(function (meta) {
+    const nextSigns = HOROSCOPE_SIGNS.map(function (meta) {
         const entry = Array.isArray(payload?.signs)
             ? payload.signs.find(function (item) {
                 return item?.sign === meta.id;
@@ -2355,6 +3035,23 @@ function setDailyHoroscope(payload) {
 
         return normalizeHoroscopeEntry(entry, publishedAt);
     }).filter(Boolean);
+    const nextSignature = getRenderSignature({
+        publishedAt,
+        signs: nextSigns
+    });
+
+    if (
+        nextSignature === dailyHoroscopeSignature
+        && nextSigns.some(function (sign) {
+            return sign.id === selectedHoroscopeSignId;
+        })
+    ) {
+        return;
+    }
+
+    dailyHoroscopePublishedAt = publishedAt;
+    dailyHoroscopeSigns = nextSigns;
+    dailyHoroscopeSignature = nextSignature;
 
     if (!dailyHoroscopeSigns.some(function (sign) {
         return sign.id === selectedHoroscopeSignId;
@@ -2731,6 +3428,61 @@ function normalizeDailyWeatherPayload(payload, location) {
     };
 }
 
+function clearPersistedDailyWeather() {
+    try {
+        window.localStorage.removeItem(DAILY_WEATHER_STORAGE_KEY);
+    } catch (_error) {
+        // Ignore storage failures and keep the in-memory weather state.
+    }
+}
+
+function persistDailyWeather() {
+    if (!dailyWeather) {
+        return;
+    }
+
+    try {
+        window.localStorage.setItem(DAILY_WEATHER_STORAGE_KEY, JSON.stringify({
+            savedAt: new Date().toISOString(),
+            payload: dailyWeather
+        }));
+    } catch (_error) {
+        // Ignore storage failures and keep the in-memory weather state.
+    }
+}
+
+function loadPersistedDailyWeather() {
+    try {
+        const raw = window.localStorage.getItem(DAILY_WEATHER_STORAGE_KEY);
+
+        if (!raw) {
+            return null;
+        }
+
+        const parsed = JSON.parse(raw);
+        const payload = parsed?.payload && typeof parsed.payload === "object"
+            ? parsed.payload
+            : null;
+
+        if (!payload) {
+            clearPersistedDailyWeather();
+            return null;
+        }
+
+        const normalizedWeather = normalizeDailyWeatherPayload(payload, payload.location || DEFAULT_WEATHER_LOCATION);
+
+        if (!normalizedWeather || normalizedWeather.date !== getLocalDateKey()) {
+            clearPersistedDailyWeather();
+            return null;
+        }
+
+        return normalizedWeather;
+    } catch (_error) {
+        clearPersistedDailyWeather();
+        return null;
+    }
+}
+
 function renderWeatherPeekDays(forecastDays) {
     if (!weatherStripPeek) {
         return;
@@ -2969,6 +3721,8 @@ function loadWeatherSceneImage() {
     }
 
     const nextUrl = dailyWeather?.backgroundImageUrl || "";
+    const shouldDecorateWeatherStrip = Boolean(weatherStrip);
+    const shouldDecorateWeatherModal = Boolean(weatherModalScene);
 
     if (!nextUrl) {
         if (weatherModalScene) {
@@ -2985,11 +3739,26 @@ function loadWeatherSceneImage() {
         return;
     }
 
+    if (!shouldDecorateWeatherModal && !shouldDecorateWeatherStrip) {
+        weatherStrip?.style.removeProperty("--weather-strip-photo");
+
+        if (weatherStrip) {
+            weatherStrip.dataset.sceneState = "idle";
+            weatherStrip.dataset.sceneUrl = "";
+        }
+
+        return;
+    }
+
     if (
-        weatherModalScene?.dataset.url === nextUrl
-        && weatherModalScene?.dataset.state === "ready"
-        && weatherStrip?.dataset.sceneUrl === nextUrl
-        && weatherStrip?.dataset.sceneState === "ready"
+        (!shouldDecorateWeatherModal || (
+            weatherModalScene?.dataset.url === nextUrl
+            && weatherModalScene?.dataset.state === "ready"
+        ))
+        && (!shouldDecorateWeatherStrip || (
+            weatherStrip?.dataset.sceneUrl === nextUrl
+            && weatherStrip?.dataset.sceneState === "ready"
+        ))
     ) {
         return;
     }
@@ -2997,14 +3766,18 @@ function loadWeatherSceneImage() {
     const currentToken = ++weatherSceneLoadToken;
     const image = new Image();
 
-    if (weatherModalScene) {
+    if (shouldDecorateWeatherModal) {
         weatherModalScene.dataset.state = "loading";
         weatherModalScene.dataset.url = nextUrl;
     }
 
-    if (weatherStrip) {
+    if (shouldDecorateWeatherStrip) {
         weatherStrip.dataset.sceneState = "loading";
         weatherStrip.dataset.sceneUrl = nextUrl;
+    } else if (weatherStrip) {
+        weatherStrip.style.removeProperty("--weather-strip-photo");
+        weatherStrip.dataset.sceneState = "idle";
+        weatherStrip.dataset.sceneUrl = "";
     }
 
     image.onload = function () {
@@ -3012,12 +3785,12 @@ function loadWeatherSceneImage() {
             return;
         }
 
-        if (weatherModalScene) {
+        if (shouldDecorateWeatherModal) {
             weatherModalScene.style.backgroundImage = `url("${nextUrl}")`;
             weatherModalScene.dataset.state = "ready";
         }
 
-        if (weatherStrip) {
+        if (shouldDecorateWeatherStrip) {
             weatherStrip.style.setProperty("--weather-strip-photo", `url("${nextUrl}")`);
             weatherStrip.dataset.sceneState = "ready";
         }
@@ -3028,14 +3801,14 @@ function loadWeatherSceneImage() {
             return;
         }
 
-        if (weatherModalScene) {
+        if (shouldDecorateWeatherModal) {
             weatherModalScene.style.backgroundImage = "";
             weatherModalScene.dataset.state = "error";
         }
 
         if (weatherStrip) {
             weatherStrip.style.removeProperty("--weather-strip-photo");
-            weatherStrip.dataset.sceneState = "error";
+            weatherStrip.dataset.sceneState = shouldDecorateWeatherStrip ? "error" : "idle";
         }
     };
 
@@ -3111,7 +3884,9 @@ function setDailyWeather(payload, location) {
     const normalizedWeather = normalizeDailyWeatherPayload(payload, location);
 
     if (!normalizedWeather) {
-        renderWeatherUnavailable(location);
+        if (!dailyWeather) {
+            renderWeatherUnavailable(location);
+        }
         return;
     }
 
@@ -3120,6 +3895,7 @@ function setDailyWeather(payload, location) {
         ...location,
         label: normalizedWeather.location.label
     };
+    persistDailyWeather();
     renderWeatherStrip();
 
     if (!weatherModal?.hidden) {
@@ -3194,6 +3970,15 @@ function initializeDailyWeather() {
         return;
     }
 
+    const persistedWeather = loadPersistedDailyWeather();
+
+    if (persistedWeather) {
+        dailyWeather = persistedWeather;
+        activeWeatherLocation = {
+            ...persistedWeather.location
+        };
+    }
+
     renderWeatherStrip();
 
     weatherStrip.addEventListener("click", function () {
@@ -3215,7 +4000,14 @@ function initializeDailyWeather() {
         window.clearInterval(dailyWeatherSyncTimer);
     }
 
-    void refreshDailyWeather({ refreshLocation: true });
+    void (async function bootstrapDailyWeather() {
+        await refreshDailyWeather();
+
+        if (ENABLE_BROWSER_GEOLOCATION) {
+            void refreshDailyWeather({ refreshLocation: true });
+        }
+    }());
+
     dailyWeatherSyncTimer = window.setInterval(function () {
         void refreshDailyWeather();
     }, DAILY_WEATHER_REFRESH_INTERVAL);
@@ -3574,7 +4366,21 @@ function advanceIdleScreensaverStory(now) {
     beginIdleScreensaverTravel(now);
 }
 
+function hasIdleScreensaverStateToReset() {
+    return isIdleScreensaverActive
+        || idleScreensaverFrame !== 0
+        || idleScreensaverTargets.length > 0
+        || idleScreensaverFocusedElement !== null
+        || idleScreensaverPhase !== "idle"
+        || idleScreensaverCurrentScale !== 1
+        || body.classList.contains("is-idle-reading-screensaver");
+}
+
 function stopIdleScreensaver() {
+    if (!hasIdleScreensaverStateToReset()) {
+        return;
+    }
+
     if (idleScreensaverFrame) {
         window.cancelAnimationFrame(idleScreensaverFrame);
         idleScreensaverFrame = 0;
@@ -3690,24 +4496,35 @@ function startIdleScreensaver() {
 }
 
 function resetIdleScreensaverActivity() {
-    stopIdleScreensaver();
+    if (hasIdleScreensaverStateToReset()) {
+        stopIdleScreensaver();
+    }
+
     scheduleIdleScreensaver();
 }
 
 function initializeIdleScreensaver() {
+    if (isPerformanceConstrainedDevice()) {
+        stopIdleScreensaver();
+        return;
+    }
+
     ensureIdleShowcaseOverlay();
 
     [
-        "mousemove",
-        "mousedown",
-        "wheel",
-        "keydown",
-        "touchstart",
-        "touchmove",
-        "pointerdown",
-        "focusin"
-    ].forEach(function (eventName) {
-        document.addEventListener(eventName, resetIdleScreensaverActivity);
+        { name: "mousemove" },
+        { name: "mousedown" },
+        { name: "wheel", options: { passive: true } },
+        { name: "keydown" },
+        { name: "touchstart", options: { passive: true } },
+        { name: "pointerdown" },
+        { name: "focusin" }
+    ].forEach(function (eventConfig) {
+        document.addEventListener(
+            eventConfig.name,
+            resetIdleScreensaverActivity,
+            eventConfig.options
+        );
     });
 
     document.addEventListener("visibilitychange", function () {
@@ -3852,6 +4669,22 @@ function focusProblemQuizPrimaryAction() {
     window.setTimeout(function () {
         focusTarget.focus();
     }, 80);
+}
+
+function scrollProblemQuizResultIntoView() {
+    if (!problemQuizCard) {
+        return;
+    }
+
+    window.requestAnimationFrame(function () {
+        const bodyPaddingTop = parseFloat(window.getComputedStyle(body).paddingTop) || 0;
+        const targetTop = Math.max(0, window.scrollY + problemQuizCard.getBoundingClientRect().top - bodyPaddingTop);
+
+        window.scrollTo({
+            top: targetTop,
+            behavior: prefersReducedMotionQuery.matches ? "auto" : "smooth"
+        });
+    });
 }
 
 function getProblemQuizSnapshotState() {
@@ -4049,20 +4882,12 @@ function moveProblemQuizBack() {
     renderProblemQuiz();
 }
 
-function focusProblemInputFromQuiz(prefill) {
-    showPanel(container, "idle");
-
+function startProblemSolveFromQuiz(prefill) {
     problemInput.value = sanitizeProblemText(prefill);
     problemInput.dispatchEvent(new Event("input"));
-    setProblemFeedback("Sõnastasin testi põhjal su probleemi valmis. Kui sobib, vajuta Lahenda probleem!", "success");
-    container.scrollIntoView({
-        behavior: "smooth",
-        block: "start"
+    void requestProblemSolve({
+        bypassPremiumLimit: true
     });
-
-    window.setTimeout(function () {
-        solveButton.focus();
-    }, 320);
 }
 
 function selectProblemQuizAnswer(questionIndex, answerIndex, button) {
@@ -4216,7 +5041,7 @@ function renderProblemQuizResult() {
     primary.className = "problem-quiz__action problem-quiz__action--primary";
     secondary.className = "problem-quiz__action problem-quiz__action--secondary";
 
-    scoreLabel.textContent = "Probleemirõhk";
+    scoreLabel.textContent = "Rõhk";
     scoreValue.textContent = String(result.scorePercent);
     scoreUnit.textContent = "/100";
     tag.textContent = "Tulemus";
@@ -4230,12 +5055,12 @@ function renderProblemQuizResult() {
     focusMeta.textContent = result.focusArea.recommendation;
     nudge.textContent = result.level.nudge;
     primary.type = "button";
-    primary.textContent = "Lahenda probleemilahendajaga";
+    primary.textContent = "Lahenda kohe";
     secondary.type = "button";
     secondary.textContent = "Tee test uuesti";
 
     primary.addEventListener("click", function () {
-        focusProblemInputFromQuiz(result.generatedProblemText);
+        startProblemSolveFromQuiz(result.generatedProblemText);
     });
 
     secondary.addEventListener("click", function () {
@@ -4253,6 +5078,7 @@ function renderProblemQuizResult() {
     fragment.append(top, stats, nudge, actions);
 
     problemQuizCard.replaceChildren(fragment);
+    scrollProblemQuizResultIntoView();
 }
 
 function renderProblemQuiz() {
@@ -5254,9 +6080,23 @@ function normalizeProblemTimeSegmentRows(rows) {
 }
 
 function setProblemStatsStoryData(nextData) {
-    problemCategoryStats = normalizeProblemCategoryStatsRows(nextData?.stats);
-    problemCategoryTrends = normalizeProblemCategoryTrendRows(nextData?.trends);
-    problemTimeSegments = normalizeProblemTimeSegmentRows(nextData?.timeSegments);
+    const nextStats = normalizeProblemCategoryStatsRows(nextData?.stats);
+    const nextTrends = normalizeProblemCategoryTrendRows(nextData?.trends);
+    const nextTimeSegments = normalizeProblemTimeSegmentRows(nextData?.timeSegments);
+    const nextSignature = getRenderSignature({
+        stats: nextStats,
+        trends: nextTrends,
+        timeSegments: nextTimeSegments
+    });
+
+    if (nextSignature === problemStatsStorySignature) {
+        return;
+    }
+
+    problemCategoryStats = nextStats;
+    problemCategoryTrends = nextTrends;
+    problemTimeSegments = nextTimeSegments;
+    problemStatsStorySignature = nextSignature;
     renderProblemCategoryStats();
 }
 
@@ -6659,54 +7499,86 @@ function renderDailyPersonaStories() {
 }
 
 function setDailyCoverStory(nextStory) {
-    dailyCoverStory = normalizeDailyCoverStory(nextStory);
+    const normalizedStory = normalizeDailyCoverStory(nextStory);
+    const nextSignature = getRenderSignature(normalizedStory);
+
+    if (nextSignature === dailyCoverStorySignature) {
+        return;
+    }
+
+    dailyCoverStory = normalizedStory;
+    dailyCoverStorySignature = nextSignature;
     renderDailyCoverStory();
 }
 
 function setDailyArticles(nextArticles) {
-    dailyArticles = nextArticles
+    const nextNormalizedArticles = nextArticles
         .map(normalizeDailyArticle)
         .filter(Boolean)
         .sort(function (firstArticle, secondArticle) {
             return getRecordDateTimestamp(secondArticle) - getRecordDateTimestamp(firstArticle);
         })
         .slice(0, DAILY_ARTICLES_LIMIT);
-
-    if (!dailyArticles.some(function (article) {
+    const nextSignature = getRenderSignature(nextNormalizedArticles);
+    const nextSelectedArticleId = nextNormalizedArticles.some(function (article) {
         return article.id === selectedDailyArticleId;
-    })) {
-        selectedDailyArticleId = dailyArticles[0]?.id || "";
+    })
+        ? selectedDailyArticleId
+        : (nextNormalizedArticles[0]?.id || "");
+    const nextExpandedArticleId = nextNormalizedArticles.some(function (article) {
+        return article.id === expandedDailyArticleId;
+    })
+        ? expandedDailyArticleId
+        : "";
+
+    if (
+        nextSignature === dailyArticlesSignature
+        && nextSelectedArticleId === selectedDailyArticleId
+        && nextExpandedArticleId === expandedDailyArticleId
+    ) {
+        return;
     }
 
-    if (!dailyArticles.some(function (article) {
-        return article.id === expandedDailyArticleId;
-    })) {
-        expandedDailyArticleId = "";
-    }
+    dailyArticles = nextNormalizedArticles;
+    dailyArticlesSignature = nextSignature;
+    selectedDailyArticleId = nextSelectedArticleId;
+    expandedDailyArticleId = nextExpandedArticleId;
 
     renderDailyArticles();
 }
 
 function setDailyPersonaStories(nextStories) {
-    dailyPersonaStories = nextStories
+    const nextNormalizedStories = nextStories
         .map(normalizeDailyPersonaStory)
         .filter(Boolean)
         .sort(function (firstStory, secondStory) {
             return getRecordDateTimestamp(secondStory) - getRecordDateTimestamp(firstStory);
         })
         .slice(0, DAILY_PERSONA_STORIES_LIMIT);
-
-    if (!dailyPersonaStories.some(function (story) {
+    const nextSignature = getRenderSignature(nextNormalizedStories);
+    const nextSelectedStoryId = nextNormalizedStories.some(function (story) {
         return story.id === selectedDailyPersonaStoryId;
-    })) {
-        selectedDailyPersonaStoryId = dailyPersonaStories[0]?.id || "";
+    })
+        ? selectedDailyPersonaStoryId
+        : (nextNormalizedStories[0]?.id || "");
+    const nextExpandedStoryId = nextNormalizedStories.some(function (story) {
+        return story.id === expandedDailyPersonaStoryId;
+    })
+        ? expandedDailyPersonaStoryId
+        : "";
+
+    if (
+        nextSignature === dailyPersonaStoriesSignature
+        && nextSelectedStoryId === selectedDailyPersonaStoryId
+        && nextExpandedStoryId === expandedDailyPersonaStoryId
+    ) {
+        return;
     }
 
-    if (!dailyPersonaStories.some(function (story) {
-        return story.id === expandedDailyPersonaStoryId;
-    })) {
-        expandedDailyPersonaStoryId = "";
-    }
+    dailyPersonaStories = nextNormalizedStories;
+    dailyPersonaStoriesSignature = nextSignature;
+    selectedDailyPersonaStoryId = nextSelectedStoryId;
+    expandedDailyPersonaStoryId = nextExpandedStoryId;
 
     renderDailyPersonaStories();
 }
@@ -7203,8 +8075,8 @@ async function persistRatingSelection(rating) {
 }
 
 function resetApp() {
-    stopLoadingProgress();
-    setLoadingProgress(0);
+    clearPremiumProblemSolveDelayTimer();
+    resetLoadingProgressPresentation();
     isGeneratingReport = false;
     currentProblemText = "";
     currentPublicProblemText = "";
@@ -7221,9 +8093,6 @@ function resetApp() {
         autoOpen: false
     });
     resetRating();
-    if (solutionLead) {
-        solutionLead.textContent = "Valmis mõne sekundiga.";
-    }
     showPanel(container, "idle");
     problemInput.focus();
 }
@@ -7247,11 +8116,12 @@ function initializeRecentProblems() {
     void refreshRecentProblems();
     recentProblemsSyncTimer = window.setInterval(function () {
         void refreshRecentProblems();
-    }, RECENT_PROBLEMS_REFRESH_INTERVAL);
+    }, isPerformanceConstrainedDevice() ? Math.max(RECENT_PROBLEMS_REFRESH_INTERVAL, 60000) : RECENT_PROBLEMS_REFRESH_INTERVAL);
 }
 
 function initializeProblemCategoryStats() {
     renderProblemCategoryStats();
+    const shouldUseRealtimeSync = isSupabaseConfigured && !isPerformanceConstrainedDevice();
 
     if (problemCategoryStatsSyncTimer) {
         window.clearInterval(problemCategoryStatsSyncTimer);
@@ -7259,14 +8129,15 @@ function initializeProblemCategoryStats() {
 
     if (typeof problemCategoryStatsRealtimeCleanup === "function") {
         problemCategoryStatsRealtimeCleanup();
+        problemCategoryStatsRealtimeCleanup = null;
     }
 
     void refreshProblemCategoryStats();
     problemCategoryStatsSyncTimer = window.setInterval(function () {
         void refreshProblemCategoryStats();
-    }, PROBLEM_CATEGORY_STATS_REFRESH_INTERVAL);
+    }, isPerformanceConstrainedDevice() ? Math.max(PROBLEM_CATEGORY_STATS_REFRESH_INTERVAL, 5 * 60 * 1000) : PROBLEM_CATEGORY_STATS_REFRESH_INTERVAL);
 
-    if (isSupabaseConfigured) {
+    if (shouldUseRealtimeSync) {
         problemCategoryStatsRealtimeCleanup = subscribeToReportInserts(
             function () {
                 void refreshProblemCategoryStats();
@@ -7361,16 +8232,24 @@ personaStoryMoreButton?.addEventListener("click", function () {
 
 if (typeof recentProblemsViewportQuery.addEventListener === "function") {
     recentProblemsViewportQuery.addEventListener("change", function () {
+        syncMobilePerformanceMode();
         renderRecentProblems();
         renderDailyArticles();
         renderDailyPersonaStories();
     });
 } else if (typeof recentProblemsViewportQuery.addListener === "function") {
     recentProblemsViewportQuery.addListener(function () {
+        syncMobilePerformanceMode();
         renderRecentProblems();
         renderDailyArticles();
         renderDailyPersonaStories();
     });
+}
+
+if (typeof coarsePointerQuery.addEventListener === "function") {
+    coarsePointerQuery.addEventListener("change", syncMobilePerformanceMode);
+} else if (typeof coarsePointerQuery.addListener === "function") {
+    coarsePointerQuery.addListener(syncMobilePerformanceMode);
 }
 
 function initializeDailyArticles() {
@@ -7401,6 +8280,12 @@ function initializeDailyPersonaStories() {
 
 function initializeDailyHoroscope() {
     renderDailyHoroscope();
+
+    if (typeof horoscopeStoryViewportQuery.addEventListener === "function") {
+        horoscopeStoryViewportQuery.addEventListener("change", renderDailyHoroscope);
+    } else if (typeof horoscopeStoryViewportQuery.addListener === "function") {
+        horoscopeStoryViewportQuery.addListener(renderDailyHoroscope);
+    }
 
     if (dailyHoroscopeSyncTimer) {
         window.clearInterval(dailyHoroscopeSyncTimer);
@@ -7462,7 +8347,7 @@ solveButton.addEventListener("click", function () {
 });
 
 problemInput.addEventListener("input", function () {
-    if (problemFeedback?.dataset.state) {
+    if (problemFeedback?.dataset.state || intakeStage?.dataset.state) {
         setProblemFeedback("", "");
     }
 
@@ -7507,10 +8392,13 @@ window.addEventListener("storage", function (event) {
     }
 });
 
-setLoadingProgress(0);
+resetLoadingProgressPresentation();
 resetRating();
+syncMobilePerformanceMode();
+disableMobileBrowserZoom();
+initializeMinefieldBannerVisibility();
 initializeCoverIssueMeta();
-initializeSolverSkinSwipe();
+initializeSolverSkin();
 initializePremiumProblemFlow();
 initializeUrgitsBannerRotation();
 initializeDailyCoverStory();
