@@ -13439,6 +13439,130 @@ body.premium-problem-modal-open {
     height: 100%;
     display: grid;
     gap: 1rem;
+    align-content: stretch;
+}
+
+.problem-trend {
+    grid-template-rows: auto minmax(0, 1fr) auto;
+}
+
+.problem-clock {
+    grid-template-rows: auto minmax(0, 1fr) auto auto;
+}
+
+.problem-detail__header {
+    display: grid;
+    gap: 0.2rem;
+}
+
+.problem-detail__eyebrow {
+    color: rgba(20, 32, 48, 0.48);
+    font-family: "Manrope", sans-serif;
+    font-size: 0.69rem;
+    font-weight: 800;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+}
+
+.problem-detail__title {
+    color: #132031;
+    font-family: "Space Grotesk", sans-serif;
+    font-size: clamp(1.08rem, 1.8vw, 1.32rem);
+    font-weight: 700;
+    letter-spacing: -0.04em;
+}
+
+.problem-detail__context {
+    color: rgba(20, 32, 48, 0.58);
+    font-family: "Manrope", sans-serif;
+    font-size: 0.82rem;
+    font-weight: 600;
+    line-height: 1.4;
+    text-wrap: balance;
+}
+
+.problem-insight-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+    gap: 0.78rem;
+}
+
+.problem-insight-card {
+    --problem-insight-color: #de6f56;
+    --problem-insight-glow: rgba(222, 111, 86, 0.24);
+    --problem-insight-fill: 40%;
+    position: relative;
+    display: grid;
+    gap: 0.48rem;
+    align-content: start;
+    padding: 0.84rem 0.88rem 0.8rem;
+    border-radius: 22px;
+    border: 1px solid rgba(255, 255, 255, 0.72);
+    background:
+        linear-gradient(145deg, rgba(255, 255, 255, 0.84), rgba(247, 240, 232, 0.7));
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.84),
+        0 16px 32px rgba(20, 32, 48, 0.08);
+    overflow: hidden;
+}
+
+.problem-insight-card::before {
+    content: "";
+    position: absolute;
+    inset: auto -12% -38% 10%;
+    height: 78%;
+    border-radius: 50%;
+    background: color-mix(in srgb, var(--problem-insight-color) 26%, transparent);
+    filter: blur(22px);
+    opacity: 0.72;
+    pointer-events: none;
+}
+
+.problem-insight-label,
+.problem-insight-meta {
+    position: relative;
+    z-index: 1;
+    color: rgba(20, 32, 48, 0.48);
+    font-family: "Manrope", sans-serif;
+    font-size: 0.68rem;
+    font-weight: 800;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+}
+
+.problem-insight-value {
+    position: relative;
+    z-index: 1;
+    color: #132031;
+    font-family: "Space Grotesk", sans-serif;
+    font-size: clamp(1.05rem, 1.8vw, 1.44rem);
+    line-height: 0.95;
+    font-weight: 700;
+    letter-spacing: -0.06em;
+}
+
+.problem-insight-rail {
+    position: relative;
+    z-index: 1;
+    display: block;
+    height: 0.38rem;
+    border-radius: 999px;
+    overflow: hidden;
+    background: rgba(20, 32, 48, 0.08);
+}
+
+.problem-insight-fill {
+    display: block;
+    width: var(--problem-insight-fill);
+    height: 100%;
+    border-radius: inherit;
+    background:
+        linear-gradient(90deg, color-mix(in srgb, var(--problem-insight-color) 68%, white), var(--problem-insight-color));
+    box-shadow: 0 10px 18px var(--problem-insight-glow);
+}
+
+.problem-insight-meta {
+    letter-spacing: 0.1em;
 }
 
 .problem-trend__header,
@@ -13584,6 +13708,206 @@ body.premium-problem-modal-open {
     color: rgba(20, 32, 48, 0.52);
     font-family: "Manrope", sans-serif;
     font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+.problem-trend__glance {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.82rem;
+    align-items: stretch;
+}
+
+.problem-trend__glance-card {
+    --problem-trend-glance-color: #de6f56;
+    --problem-trend-glance-glow: rgba(222, 111, 86, 0.24);
+    --problem-trend-glance-fill: 40%;
+    position: relative;
+    display: grid;
+    gap: 0.55rem;
+    align-content: start;
+    padding: 0.88rem 0.9rem 0.84rem;
+    border-radius: 22px;
+    border: 1px solid rgba(255, 255, 255, 0.72);
+    background:
+        linear-gradient(145deg, rgba(255, 255, 255, 0.84), rgba(247, 240, 232, 0.68));
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.84),
+        0 16px 32px rgba(20, 32, 48, 0.08);
+    overflow: hidden;
+}
+
+.problem-trend__glance-card::before {
+    content: "";
+    position: absolute;
+    inset: auto -12% -38% 10%;
+    height: 78%;
+    border-radius: 50%;
+    background: color-mix(in srgb, var(--problem-trend-glance-color) 28%, transparent);
+    filter: blur(22px);
+    opacity: 0.72;
+    pointer-events: none;
+}
+
+.problem-trend__glance-label,
+.problem-trend__glance-meta {
+    position: relative;
+    z-index: 1;
+    color: rgba(20, 32, 48, 0.48);
+    font-family: "Manrope", sans-serif;
+    font-size: 0.69rem;
+    font-weight: 800;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+}
+
+.problem-trend__glance-value {
+    position: relative;
+    z-index: 1;
+    color: #132031;
+    font-family: "Space Grotesk", sans-serif;
+    font-size: clamp(1.18rem, 1.8vw, 1.56rem);
+    line-height: 0.94;
+    font-weight: 700;
+    letter-spacing: -0.06em;
+}
+
+.problem-trend__glance-rail {
+    position: relative;
+    z-index: 1;
+    display: block;
+    height: 0.42rem;
+    border-radius: 999px;
+    overflow: hidden;
+    background: rgba(20, 32, 48, 0.08);
+}
+
+.problem-trend__glance-fill {
+    display: block;
+    width: var(--problem-trend-glance-fill);
+    height: 100%;
+    border-radius: inherit;
+    background:
+        linear-gradient(90deg, color-mix(in srgb, var(--problem-trend-glance-color) 68%, white), var(--problem-trend-glance-color));
+    box-shadow: 0 10px 18px var(--problem-trend-glance-glow);
+}
+
+.problem-trend__glance-meta {
+    letter-spacing: 0.1em;
+}
+
+.problem-trend__pulse,
+.problem-clock__details {
+    display: grid;
+    gap: 0.82rem;
+    align-content: start;
+}
+
+.problem-trend__momentum,
+.problem-clock__ranking {
+    display: grid;
+    gap: 0.72rem;
+    padding: 0.92rem;
+    border-radius: 24px;
+    border: 1px solid rgba(255, 255, 255, 0.72);
+    background:
+        linear-gradient(145deg, rgba(255, 255, 255, 0.82), rgba(247, 240, 232, 0.64));
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.84),
+        0 16px 32px rgba(20, 32, 48, 0.08);
+}
+
+.problem-trend__momentum-label,
+.problem-clock__ranking-label {
+    color: rgba(20, 32, 48, 0.48);
+    font-family: "Manrope", sans-serif;
+    font-size: 0.69rem;
+    font-weight: 800;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+}
+
+.problem-trend__momentum-list,
+.problem-clock__ranking-list {
+    display: grid;
+    gap: 0.68rem;
+}
+
+.problem-trend__momentum-item,
+.problem-clock__ranking-item {
+    position: relative;
+    display: grid;
+    gap: 0.44rem;
+}
+
+.problem-trend__momentum-head,
+.problem-clock__ranking-head {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 0.62rem;
+    align-items: center;
+}
+
+.problem-trend__momentum-name,
+.problem-clock__ranking-name {
+    color: #132031;
+    font-family: "Space Grotesk", sans-serif;
+    font-size: 0.96rem;
+    font-weight: 700;
+    letter-spacing: -0.03em;
+}
+
+.problem-trend__momentum-delta,
+.problem-clock__ranking-share {
+    color: color-mix(in srgb, var(--problem-trend-momentum-color, #de6f56) 82%, #132031);
+    font-family: "Manrope", sans-serif;
+    font-size: 0.8rem;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+.problem-clock__ranking-share {
+    color: color-mix(in srgb, var(--problem-clock-ranking-color, #62bedb) 74%, #132031);
+}
+
+.problem-trend__momentum-rail,
+.problem-clock__ranking-rail {
+    position: relative;
+    height: 0.56rem;
+    border-radius: 999px;
+    overflow: hidden;
+    background: rgba(20, 32, 48, 0.08);
+}
+
+.problem-trend__momentum-fill,
+.problem-clock__ranking-fill {
+    display: block;
+    height: 100%;
+    border-radius: inherit;
+}
+
+.problem-trend__momentum-fill {
+    width: var(--problem-trend-momentum-width, 60%);
+    background:
+        linear-gradient(90deg, color-mix(in srgb, var(--problem-trend-momentum-color, #de6f56) 72%, white), var(--problem-trend-momentum-color, #de6f56));
+    box-shadow: 0 10px 18px var(--problem-trend-momentum-glow, rgba(222, 111, 86, 0.24));
+}
+
+.problem-clock__ranking-fill {
+    width: var(--problem-clock-ranking-width, 60%);
+    background:
+        linear-gradient(90deg, color-mix(in srgb, var(--problem-clock-ranking-color, #62bedb) 68%, white), var(--problem-clock-ranking-color, #62bedb));
+    box-shadow: 0 10px 18px color-mix(in srgb, var(--problem-clock-ranking-color, #62bedb) 24%, transparent);
+}
+
+.problem-trend__momentum-meta,
+.problem-clock__ranking-meta {
+    color: rgba(20, 32, 48, 0.5);
+    font-family: "Manrope", sans-serif;
+    font-size: 0.7rem;
     font-weight: 700;
     letter-spacing: 0.08em;
     text-transform: uppercase;
@@ -13778,6 +14102,7 @@ body.premium-problem-modal-open {
     .problem-story__track {
         grid-auto-columns: minmax(0, 1fr);
         padding-inline: 0;
+        align-items: stretch;
     }
 
     .problem-story__panel {
@@ -13828,6 +14153,10 @@ body.premium-problem-modal-open {
     .problem-trend__title,
     .problem-clock__title {
         font-size: 1.7rem;
+    }
+
+    .problem-insight-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 
     .problem-clock__stage {
@@ -13977,12 +14306,69 @@ body.premium-problem-modal-open {
         border-radius: 20px;
     }
 
+    .problem-trend__glance {
+        grid-template-columns: 1fr;
+        gap: 0.68rem;
+    }
+
+    .problem-insight-grid {
+        grid-template-columns: 1fr;
+        gap: 0.68rem;
+    }
+
+    .problem-trend__glance-card {
+        padding: 0.8rem 0.78rem 0.76rem;
+        border-radius: 18px;
+    }
+
+    .problem-insight-card,
+    .problem-trend__momentum,
+    .problem-clock__ranking {
+        padding: 0.8rem 0.78rem 0.76rem;
+        border-radius: 18px;
+    }
+
     .problem-trend__item-name {
         font-size: 0.95rem;
     }
 
+    .problem-detail__eyebrow,
+    .problem-trend__glance-label,
+    .problem-trend__glance-meta,
+    .problem-insight-label,
+    .problem-insight-meta,
+    .problem-trend__momentum-label,
+    .problem-clock__ranking-label {
+        letter-spacing: 0.12em;
+    }
+
+    .problem-detail__title {
+        font-size: 1rem;
+    }
+
+    .problem-detail__context {
+        font-size: 0.76rem;
+    }
+
+    .problem-trend__glance-value {
+        font-size: 1.18rem;
+    }
+
+    .problem-insight-value {
+        font-size: 1.1rem;
+    }
+
+    .problem-trend__momentum-name,
+    .problem-clock__ranking-name {
+        font-size: 0.92rem;
+    }
+
     .problem-trend__item-delta,
     .problem-trend__item-meta,
+    .problem-trend__momentum-delta,
+    .problem-trend__momentum-meta,
+    .problem-clock__ranking-share,
+    .problem-clock__ranking-meta,
     .problem-clock__core-eyebrow,
     .problem-clock__footer {
         letter-spacing: 0.12em;

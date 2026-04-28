@@ -6744,14 +6744,36 @@ function getProblemTimeSegmentDisplayRows(segments) {
     });
 }
 
-function formatProblemTrendDelta(value) {
+function formatProblemStatShare(value, minimumFractionDigits = 0, maximumFractionDigits = 1) {
+    const safeValue = Number.isFinite(value) ? Math.max(0, value) : 0;
+    const roundedValue = Math.round(safeValue * 10) / 10;
+
+    if (maximumFractionDigits === 0 || Math.abs(roundedValue - Math.round(roundedValue)) < 0.05) {
+        return `${numberFormatter.format(Math.round(roundedValue))}%`;
+    }
+
+    return `${roundedValue.toLocaleString("et-EE", {
+        minimumFractionDigits,
+        maximumFractionDigits
+    })}%`;
+}
+
+function formatProblemPoints(value, { signed = true } = {}) {
     const normalizedValue = Number.isFinite(value) ? value : 0;
     const roundedValue = Math.round(normalizedValue * 10) / 10;
-    const valueText = Number.isInteger(roundedValue)
-        ? String(roundedValue)
-        : roundedValue.toFixed(1).replace(".", ",");
+    const absoluteValue = Math.abs(roundedValue);
+    const sign = roundedValue < 0
+        ? "-"
+        : (signed && roundedValue > 0 ? "+" : "");
+    const valueText = Number.isInteger(absoluteValue)
+        ? numberFormatter.format(absoluteValue)
+        : absoluteValue.toFixed(1).replace(".", ",");
 
-    return `${roundedValue > 0 ? "+" : ""}${valueText}p`;
+    return `${sign}${valueText}p`;
+}
+
+function formatProblemTrendDelta(value) {
+    return formatProblemPoints(value);
 }
 
 function createProblemTrendItem(entry, direction, index, maxDelta) {
@@ -6788,7 +6810,166 @@ function createProblemTrendItem(entry, direction, index, maxDelta) {
     return item;
 }
 
-function createProblemTrendShowcase(stats, trends) {
+function createProblemSectionHeading(eyebrowText, titleText, contextText) {
+    const header = document.createElement("div");
+    const eyebrow = document.createElement("span");
+    const title = document.createElement("strong");
+    const context = document.createElement("span");
+
+    header.className = "problem-detail__header";
+    eyebrow.className = "problem-detail__eyebrow";
+    title.className = "problem-detail__title";
+    context.className = "problem-detail__context";
+
+    eyebrow.textContent = eyebrowText;
+    title.textContent = titleText;
+    context.textContent = contextText;
+
+    header.append(eyebrow, title, context);
+
+    return header;
+}
+
+function createProblemInsightCard(label, value, meta, palette, fillRatio) {
+    const card = document.createElement("article");
+    const kicker = document.createElement("span");
+    const statValue = document.createElement("strong");
+    const rail = document.createElement("span");
+    const fill = document.createElement("span");
+    const detail = document.createElement("span");
+
+    card.className = "problem-insight-card";
+    card.style.setProperty("--problem-insight-color", palette.color);
+    card.style.setProperty("--problem-insight-glow", palette.glow);
+    card.style.setProperty("--problem-insight-fill", `${(Math.max(0.12, Math.min(1, fillRatio)) * 100).toFixed(2)}%`);
+
+    kicker.className = "problem-insight-label";
+    statValue.className = "problem-insight-value";
+    rail.className = "problem-insight-rail";
+    fill.className = "problem-insight-fill";
+    detail.className = "problem-insight-meta";
+
+    kicker.textContent = label;
+    statValue.textContent = value;
+    detail.textContent = meta;
+
+    rail.append(fill);
+    card.append(kicker, statValue, rail, detail);
+
+    return card;
+}
+
+function createProblemTrendGlanceCard(label, value, meta, palette, fillRatio) {
+    const card = document.createElement("article");
+    const kicker = document.createElement("span");
+    const statValue = document.createElement("strong");
+    const rail = document.createElement("span");
+    const fill = document.createElement("span");
+    const detail = document.createElement("span");
+
+    card.className = "problem-trend__glance-card";
+    card.style.setProperty("--problem-trend-glance-color", palette.color);
+    card.style.setProperty("--problem-trend-glance-glow", palette.glow);
+    card.style.setProperty("--problem-trend-glance-fill", `${(Math.max(0.14, Math.min(1, fillRatio)) * 100).toFixed(2)}%`);
+
+    kicker.className = "problem-trend__glance-label";
+    statValue.className = "problem-trend__glance-value";
+    rail.className = "problem-trend__glance-rail";
+    fill.className = "problem-trend__glance-fill";
+    detail.className = "problem-trend__glance-meta";
+
+    kicker.textContent = label;
+    statValue.textContent = value;
+    detail.textContent = meta;
+
+    rail.append(fill);
+    card.append(kicker, statValue, rail, detail);
+
+    return card;
+}
+
+function createProblemTrendMomentumItem(entry, index, maxDelta) {
+    const item = document.createElement("article");
+    const head = document.createElement("div");
+    const name = document.createElement("strong");
+    const delta = document.createElement("span");
+    const rail = document.createElement("div");
+    const fill = document.createElement("span");
+    const meta = document.createElement("span");
+    const palette = PROBLEM_STATS_EDITORIAL_PALETTE[index % PROBLEM_STATS_EDITORIAL_PALETTE.length];
+    const ratio = maxDelta > 0 ? Math.abs(entry.deltaSharePoints) / maxDelta : 0;
+    const direction = entry.deltaSharePoints > 0 ? "rising" : (entry.deltaSharePoints < 0 ? "falling" : "steady");
+
+    item.className = "problem-trend__momentum-item";
+    item.dataset.direction = direction;
+    item.style.setProperty("--problem-trend-momentum-color", palette.color);
+    item.style.setProperty("--problem-trend-momentum-glow", palette.glow);
+    item.style.setProperty("--problem-trend-momentum-width", `${(Math.max(0.14, Math.min(1, ratio)) * 100).toFixed(2)}%`);
+
+    head.className = "problem-trend__momentum-head";
+    name.className = "problem-trend__momentum-name";
+    delta.className = "problem-trend__momentum-delta";
+    rail.className = "problem-trend__momentum-rail";
+    fill.className = "problem-trend__momentum-fill";
+    meta.className = "problem-trend__momentum-meta";
+
+    name.textContent = entry.category.label;
+    delta.textContent = formatProblemTrendDelta(entry.deltaSharePoints);
+    meta.textContent = `${formatProblemStatShare(entry.currentSharePercent)} praegu`;
+
+    rail.append(fill);
+    head.append(name, delta);
+    item.append(head, rail, meta);
+
+    return item;
+}
+
+function createProblemTrendPulseSection(_stats, rows) {
+    const activeRows = rows.filter(function (entry) {
+        return entry.currentCount > 0 || entry.previousCount > 0;
+    });
+    const strongestShift = activeRows.slice().sort(function (firstEntry, secondEntry) {
+        return Math.abs(secondEntry.deltaSharePoints) - Math.abs(firstEntry.deltaSharePoints);
+    })[0];
+    const strongestDelta = activeRows.reduce(function (largestValue, entry) {
+        return Math.max(largestValue, Math.abs(entry.deltaSharePoints));
+    }, 0);
+    const visibleMomentum = activeRows.slice().sort(function (firstEntry, secondEntry) {
+        const deltaDifference = Math.abs(secondEntry.deltaSharePoints) - Math.abs(firstEntry.deltaSharePoints);
+
+        if (deltaDifference !== 0) {
+            return deltaDifference;
+        }
+
+        return secondEntry.currentCount - firstEntry.currentCount;
+    }).slice(0, 5);
+    const section = document.createElement("section");
+    const spectrum = document.createElement("div");
+    const spectrumList = document.createElement("div");
+
+    section.className = "problem-trend__pulse";
+    spectrum.className = "problem-trend__momentum";
+    spectrumList.className = "problem-trend__momentum-list";
+
+    section.append(createProblemSectionHeading(
+        "Liikumine",
+        "Kõige tugevamad nihked",
+        strongestShift
+            ? `${strongestShift.category.label} liigub praegu kõige rohkem.`
+            : "Teemade jaotus püsib praegu üsna stabiilne."
+    ));
+
+    visibleMomentum.forEach(function (entry, index) {
+        spectrumList.append(createProblemTrendMomentumItem(entry, index, strongestDelta));
+    });
+
+    spectrum.append(spectrumList);
+    section.append(spectrum);
+
+    return section;
+}
+
+function createProblemTrendShowcase(stats, trends, timeSegments) {
     const rows = getProblemCategoryTrendDisplayRows(trends, stats);
     const sortedDescending = rows.slice().sort(function (firstEntry, secondEntry) {
         return secondEntry.deltaSharePoints - firstEntry.deltaSharePoints;
@@ -6810,7 +6991,7 @@ function createProblemTrendShowcase(stats, trends) {
         ? falling
         : sortedAscending.filter(function (entry) {
             return !usedLabels.has(entry.category.label);
-        }).slice(0, 3);
+    }).slice(0, 3);
     const strongestDelta = rows.reduce(function (largestValue, entry) {
         return Math.max(largestValue, Math.abs(entry.deltaSharePoints));
     }, 0);
@@ -6858,7 +7039,7 @@ function createProblemTrendShowcase(stats, trends) {
     fallingLane.prepend(fallingLabel);
     lanes.append(risingLane, fallingLane);
     header.append(eyebrow, title, context);
-    showcase.append(header, lanes);
+    showcase.append(header, lanes, createProblemTrendPulseSection(stats, rows));
 
     return showcase;
 }
@@ -6937,6 +7118,81 @@ function createProblemTimeSpark(segment, largestCount) {
     return spark;
 }
 
+function sumProblemTimeShare(rows, predicate) {
+    return rows.reduce(function (sum, row) {
+        return predicate(row) ? sum + Math.max(0, row.sharePercent) : sum;
+    }, 0);
+}
+
+function createProblemTimeRankingItem(segment, largestCount) {
+    const item = document.createElement("article");
+    const head = document.createElement("div");
+    const label = document.createElement("strong");
+    const share = document.createElement("span");
+    const rail = document.createElement("div");
+    const fill = document.createElement("span");
+    const meta = document.createElement("span");
+    const intensity = largestCount > 0 ? segment.problemCount / largestCount : 0;
+    const segmentColor = getProblemTimeSegmentColor(segment, intensity);
+
+    item.className = "problem-clock__ranking-item";
+    item.style.setProperty("--problem-clock-ranking-color", segmentColor);
+    item.style.setProperty("--problem-clock-ranking-width", `${(Math.max(0.14, Math.min(1, intensity)) * 100).toFixed(2)}%`);
+
+    head.className = "problem-clock__ranking-head";
+    label.className = "problem-clock__ranking-name";
+    share.className = "problem-clock__ranking-share";
+    rail.className = "problem-clock__ranking-rail";
+    fill.className = "problem-clock__ranking-fill";
+    meta.className = "problem-clock__ranking-meta";
+
+    label.textContent = segment.segmentLabel;
+    share.textContent = formatProblemStatShare(segment.sharePercent);
+    meta.textContent = `${numberFormatter.format(segment.problemCount)} lahendust`;
+
+    rail.append(fill);
+    head.append(label, share);
+    item.append(head, rail, meta);
+
+    return item;
+}
+
+function createProblemTimeDetailsSection(segments) {
+    const rows = getProblemTimeSegmentDisplayRows(segments);
+    const sortedRows = rows.slice().sort(function (firstRow, secondRow) {
+        if (secondRow.problemCount !== firstRow.problemCount) {
+            return secondRow.problemCount - firstRow.problemCount;
+        }
+
+        return firstRow.segmentIndex - secondRow.segmentIndex;
+    });
+    const largestCount = sortedRows[0]?.problemCount || 0;
+    const section = document.createElement("section");
+    const ranking = document.createElement("div");
+    const rankingList = document.createElement("div");
+
+    section.className = "problem-clock__details";
+    ranking.className = "problem-clock__ranking";
+    rankingList.className = "problem-clock__ranking-list";
+
+    section.append(createProblemSectionHeading(
+        "Ajajaotus",
+        "Tugevamad aknad",
+        sortedRows[0]
+            ? `${sortedRows[0].segmentLabel} on praegu kõige aktiivsem aeg.`
+            : "Päeva jooksul tekib oma selge rütm."
+    ));
+
+    sortedRows.slice(0, 4).forEach(function (segment) {
+        rankingList.append(createProblemTimeRankingItem(segment, largestCount));
+    });
+
+    ranking.append(rankingList);
+    section.append(ranking);
+
+    return section;
+}
+
 function createProblemTimeShowcase(segments) {
     const rows = getProblemTimeSegmentDisplayRows(segments);
     const largestCount = rows.reduce(function (largestValue, row) {
@@ -7004,7 +7260,7 @@ function createProblemTimeShowcase(segments) {
     dial.append(ring, sparks, core);
     stage.append(halo, dial);
     header.append(eyebrow, title, context);
-    showcase.append(header, stage, footer);
+    showcase.append(header, stage, createProblemTimeDetailsSection(rows), footer);
 
     return showcase;
 }
@@ -7039,7 +7295,7 @@ function getProblemStatsStoryPanels(stats, trends, timeSegments) {
             summary: strongestRise && strongestFall
                 ? `${strongestRise.category.label} on tõusul ja ${strongestFall.category.label} liigub rahulikumas suunas.`
                 : "Teemade liikumine täitub automaatselt värskete andmetega.",
-            content: createProblemTrendShowcase(stats, trends)
+            content: createProblemTrendShowcase(stats, trends, timeSegments)
         },
         {
             label: "Murekell",
