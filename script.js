@@ -108,6 +108,7 @@ const pastLifeStatsBarMan = document.getElementById("pastLifeStatsBarMan");
 const pastLifeStatsBarWoman = document.getElementById("pastLifeStatsBarWoman");
 const pastLifeManShare = document.getElementById("pastLifeManShare");
 const pastLifeWomanShare = document.getElementById("pastLifeWomanShare");
+const pastLifeCloseButton = document.getElementById("pastLifeCloseButton");
 const minefieldBanner = document.getElementById("minefieldBanner");
 const problemQuizSection = document.getElementById("problemQuiz");
 const problemQuizCard = document.getElementById("problemQuizCard");
@@ -233,6 +234,7 @@ let isSubmittingNewsletter = false;
 let isSubmittingPastLifeReading = false;
 let pastLifeReadingResponse = null;
 let pastLifeReadingError = "";
+let hasDismissedPastLifeReveal = false;
 let selectedRating = 0;
 let remoteSolvedCount = null;
 let isGeneratingReport = false;
@@ -1946,7 +1948,8 @@ function renderPastLifeReading() {
     }
 
     const resultKey = normalizePastLifeResultKey(pastLifeReadingResponse?.sessionResult);
-    const isRevealed = Boolean(resultKey);
+    const hasViewed = Boolean(resultKey);
+    const isRevealed = hasViewed && !hasDismissedPastLifeReveal;
     const totalResponses = Number.isFinite(pastLifeReadingResponse?.totalResponses)
         ? Math.max(0, pastLifeReadingResponse.totalResponses)
         : 0;
@@ -1967,9 +1970,11 @@ function renderPastLifeReading() {
         ? "loading"
         : isRevealed
             ? "revealed"
-            : "idle";
+            : hasViewed
+                ? "dismissed"
+                : "idle";
 
-    if (isRevealed) {
+    if (hasViewed) {
         pastLifeSection.dataset.result = resultKey;
     } else {
         delete pastLifeSection.dataset.result;
@@ -1981,6 +1986,10 @@ function renderPastLifeReading() {
     pastLifeButton.textContent = isSubmittingPastLifeReading ? "Loen randmelt..." : "Vajuta siia";
 
     pastLifeResult.replaceChildren(createPastLifeResultFragment());
+
+    if (pastLifeCloseButton) {
+        pastLifeCloseButton.hidden = !isRevealed;
+    }
 
     if (!pastLifeStats) {
         return;
@@ -2053,6 +2062,7 @@ async function revealPastLifeReading() {
 
     const sessionId = getOrCreateSessionId();
 
+    hasDismissedPastLifeReveal = false;
     isSubmittingPastLifeReading = true;
     pastLifeReadingError = "";
     renderPastLifeReading();
@@ -2078,6 +2088,15 @@ async function revealPastLifeReading() {
     }
 }
 
+function dismissPastLifeReading() {
+    if (!normalizePastLifeResultKey(pastLifeReadingResponse?.sessionResult)) {
+        return;
+    }
+
+    hasDismissedPastLifeReveal = true;
+    renderPastLifeReading();
+}
+
 function initializePastLifeReading() {
     if (!pastLifeSection || !pastLifeButton || !pastLifeResult) {
         return;
@@ -2085,8 +2104,15 @@ function initializePastLifeReading() {
 
     renderPastLifeReading();
     pastLifeButton.addEventListener("click", function () {
+        if (normalizePastLifeResultKey(pastLifeReadingResponse?.sessionResult)) {
+            hasDismissedPastLifeReveal = false;
+            renderPastLifeReading();
+            return;
+        }
+
         void revealPastLifeReading();
     });
+    pastLifeCloseButton?.addEventListener("click", dismissPastLifeReading);
 
     void refreshPastLifeReading();
 }
