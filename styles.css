@@ -194,20 +194,34 @@ body {
     --idle-reading-shell-scale: 1;
     --idle-reading-shell-origin-x: 50%;
     --idle-reading-shell-origin-y: 0px;
+    --page-backdrop-image: url("./assets/sunset-background.jpg");
+    --page-backdrop-overlay: linear-gradient(180deg, rgba(7, 16, 26, 0.42) 0%, rgba(7, 16, 26, 0.18) 24%, rgba(7, 16, 26, 0.78) 100%);
     min-height: 100vh;
     margin: 0;
     padding: calc(env(safe-area-inset-top, 0px) + clamp(1rem, 3vw, 2rem)) clamp(1rem, 3vw, 2rem) clamp(1rem, 3vw, 2rem);
+    position: relative;
+    isolation: isolate;
     display: grid;
     place-items: center;
     font-family: "Manrope", sans-serif;
     color: var(--ink);
-    background:
-        linear-gradient(180deg, rgba(7, 16, 26, 0.42) 0%, rgba(7, 16, 26, 0.18) 24%, rgba(7, 16, 26, 0.78) 100%),
-        url("./assets/sunset-background.jpg") center center / cover no-repeat;
+    background: var(--navy-950);
     max-width: 100%;
     overflow-x: hidden;
     overflow-x: clip;
     overscroll-behavior-x: none;
+}
+
+.page-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: -3;
+    pointer-events: none;
+    background-color: var(--navy-950);
+    background-image: var(--page-backdrop-overlay), var(--page-backdrop-image);
+    background-position: center center, center center;
+    background-size: auto, cover;
+    background-repeat: no-repeat, no-repeat;
 }
 
 body::before,
@@ -215,6 +229,7 @@ body::after {
     content: "";
     position: fixed;
     inset: 0;
+    z-index: -2;
     pointer-events: none;
 }
 
@@ -228,6 +243,7 @@ body::before {
 }
 
 body::after {
+    z-index: -1;
     background:
         linear-gradient(180deg, rgba(7, 16, 26, 0.16) 0%, rgba(7, 16, 26, 0) 24%, rgba(7, 16, 26, 0.58) 100%),
         radial-gradient(circle at 50% 0%, rgba(255, 255, 255, 0.06), transparent 38%);
@@ -235,22 +251,16 @@ body::after {
 }
 
 body[data-state="loading"] {
-    background:
-        linear-gradient(180deg, rgba(7, 16, 26, 0.56) 0%, rgba(7, 16, 26, 0.28) 26%, rgba(7, 16, 26, 0.84) 100%),
-        url("./assets/sunset-background.jpg") center center / cover no-repeat;
+    --page-backdrop-overlay: linear-gradient(180deg, rgba(7, 16, 26, 0.56) 0%, rgba(7, 16, 26, 0.28) 26%, rgba(7, 16, 26, 0.84) 100%);
 }
 
 body[data-state="done"] {
-    background:
-        linear-gradient(180deg, rgba(7, 16, 26, 0.48) 0%, rgba(12, 28, 24, 0.24) 28%, rgba(7, 16, 26, 0.8) 100%),
-        url("./assets/sunset-background.jpg") center center / cover no-repeat;
+    --page-backdrop-overlay: linear-gradient(180deg, rgba(7, 16, 26, 0.48) 0%, rgba(12, 28, 24, 0.24) 28%, rgba(7, 16, 26, 0.8) 100%);
 }
 
 body[data-state="report"] {
     place-items: start center;
-    background:
-        linear-gradient(180deg, rgba(7, 16, 26, 0.52) 0%, rgba(7, 16, 26, 0.18) 22%, rgba(7, 16, 26, 0.82) 100%),
-        url("./assets/sunset-background.jpg") center center / cover no-repeat;
+    --page-backdrop-overlay: linear-gradient(180deg, rgba(7, 16, 26, 0.52) 0%, rgba(7, 16, 26, 0.18) 22%, rgba(7, 16, 26, 0.82) 100%);
 }
 
 body[data-solver-skin="rose"] {
@@ -1083,25 +1093,19 @@ body[data-solver-skin="arcade"] {
         0 0 0 1px rgba(255, 255, 255, 0.1);
 }
 
-body,
-body[data-state="loading"],
-body[data-state="done"],
-body[data-state="report"] {
-    background-attachment: fixed, fixed;
-}
-
 .app-shell {
     position: relative;
+    z-index: 0;
     width: min(100%, 1080px);
     max-width: 100%;
     display: grid;
     gap: 1.15rem;
     overflow-x: clip;
-    transform: translateZ(0) scale(var(--idle-reading-shell-scale));
-    transform-origin: var(--idle-reading-shell-origin-x) var(--idle-reading-shell-origin-y);
 }
 
 body.is-idle-reading-screensaver .app-shell {
+    transform: translate3d(0, 0, 0) scale(var(--idle-reading-shell-scale));
+    transform-origin: var(--idle-reading-shell-origin-x) var(--idle-reading-shell-origin-y);
     will-change: transform;
     filter: saturate(1.08) contrast(1.05) brightness(1.03);
 }
@@ -9704,7 +9708,10 @@ button:disabled {
     body[data-state="report"] {
         place-items: start center;
         background: #08111a;
-        background-attachment: scroll;
+    }
+
+    .page-backdrop {
+        display: none;
     }
 
     body::before {
@@ -14974,7 +14981,11 @@ body.is-mobile-performance-mode,
 body.is-mobile-performance-mode[data-state="loading"],
 body.is-mobile-performance-mode[data-state="done"],
 body.is-mobile-performance-mode[data-state="report"] {
-    background-attachment: scroll !important;
+    background: #08111a !important;
+}
+
+body.is-mobile-performance-mode .page-backdrop {
+    display: none !important;
 }
 
 body.is-mobile-performance-mode *,
