@@ -44,6 +44,18 @@ function normalizeInteger(value) {
     return 0;
 }
 
+function normalizePastLifeResult(value) {
+    const normalizedValue = typeof value === "string"
+        ? value.trim().toLowerCase()
+        : "";
+
+    if (normalizedValue === "man" || normalizedValue === "woman") {
+        return normalizedValue;
+    }
+
+    return "";
+}
+
 function isMissingOptionalRpcError(error, rpcName) {
     if (!error || typeof error !== "object") {
         return false;
@@ -316,4 +328,62 @@ export async function submitProblemRating(input) {
     }
 
     return true;
+}
+
+function normalizePastLifeReadingRow(row) {
+    if (!row || typeof row !== "object") {
+        return {
+            sessionResult: "",
+            totalResponses: 0,
+            manCount: 0,
+            womanCount: 0,
+            manShare: 0,
+            womanShare: 0
+        };
+    }
+
+    return {
+        sessionResult: normalizePastLifeResult(row.session_result),
+        totalResponses: normalizeInteger(row.total_responses),
+        manCount: normalizeInteger(row.man_count),
+        womanCount: normalizeInteger(row.woman_count),
+        manShare: typeof row.man_share === "number"
+            ? row.man_share
+            : Number(row.man_share || 0),
+        womanShare: typeof row.woman_share === "number"
+            ? row.woman_share
+            : Number(row.woman_share || 0)
+    };
+}
+
+export async function fetchPastLifeReadingStats(sessionId) {
+    if (!supabase) {
+        return null;
+    }
+
+    const { data, error } = await supabase.rpc("get_past_life_reading_stats", {
+        p_session_id: sessionId
+    });
+
+    if (error) {
+        throw error;
+    }
+
+    return normalizePastLifeReadingRow(normalizeRpcSingleResult(data));
+}
+
+export async function submitPastLifeReading(sessionId) {
+    if (!supabase) {
+        return null;
+    }
+
+    const { data, error } = await supabase.rpc("submit_past_life_reading", {
+        p_session_id: sessionId
+    });
+
+    if (error) {
+        throw error;
+    }
+
+    return normalizePastLifeReadingRow(normalizeRpcSingleResult(data));
 }

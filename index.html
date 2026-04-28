@@ -374,6 +374,38 @@
                 </div>
             </div>
         </section>
+        <section id="pastLife" class="past-life panel" aria-labelledby="pastLifeTitle">
+            <div class="panel__frame past-life__frame">
+                <div class="past-life__layout">
+                    <div id="pastLifePrompt" class="past-life__prompt">
+                        <h2 id="pastLifeTitle" class="past-life__title">
+                            <span class="past-life__title-line">Vaata, kas olid</span>
+                            <span class="past-life__title-line past-life__title-line--accent">eelmises elus mees või naine</span>
+                        </h2>
+                        <button id="pastLifeButton" class="past-life__button" type="button">Vajuta siia</button>
+                    </div>
+                    <div id="pastLifeReveal" class="past-life__reveal" aria-live="polite" hidden>
+                        <div id="pastLifeResult" class="past-life__result"></div>
+                        <div id="pastLifeStats" class="past-life__stats" aria-live="polite" hidden>
+                            <div class="past-life__stats-track" aria-hidden="true">
+                                <span id="pastLifeStatsBarMan" class="past-life__stats-fill past-life__stats-fill--man"></span>
+                                <span id="pastLifeStatsBarWoman" class="past-life__stats-fill past-life__stats-fill--woman"></span>
+                            </div>
+                            <div class="past-life__stats-grid">
+                                <div class="past-life__stat">
+                                    <span class="past-life__stat-label">Mees</span>
+                                    <strong id="pastLifeManShare" class="past-life__stat-value">50%</strong>
+                                </div>
+                                <div class="past-life__stat">
+                                    <span class="past-life__stat-label">Naine</span>
+                                    <strong id="pastLifeWomanShare" class="past-life__stat-value">50%</strong>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
         <section id="problemStats" class="problem-stats panel" aria-label="Murebaromeeter">
             <div class="panel__frame problem-stats__frame">
                 <div class="problem-stats__header">

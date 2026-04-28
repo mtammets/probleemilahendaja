@@ -2819,7 +2819,7 @@ button:not(.intake-stage__skin-dot)::before {
     pointer-events: none;
 }
 
-button:not(.rating-panel__button):not(.button--secondary):not(.button--ghost):not(.science-feed__list-item):not(.persona-feed__list-item):not(.horoscope-sign):not(.problem-quiz__action):not(.problem-quiz__answer):not(.problem-quiz__start):not(.weather-strip):not(.intake-stage__skin-dot):hover {
+button:not(.rating-panel__button):not(.button--secondary):not(.button--ghost):not(.science-feed__list-item):not(.persona-feed__list-item):not(.horoscope-sign):not(.problem-quiz__action):not(.problem-quiz__answer):not(.problem-quiz__start):not(.weather-strip):not(.intake-stage__skin-dot):not(.past-life__button):hover {
     transform: translateY(-2px);
     background: linear-gradient(135deg, #132033 0%, #20324b 64%, #355172 100%);
     box-shadow:
@@ -14780,6 +14780,344 @@ body.premium-problem-modal-open {
 
 }
 
+/* Past Life Reading */
+.past-life {
+    --past-life-accent: #e9c396;
+    --past-life-man: #7bcfff;
+    --past-life-woman: #ffb287;
+    --past-life-glow: rgba(233, 195, 150, 0.18);
+    color-scheme: dark;
+}
+
+.past-life[data-result="man"] {
+    --past-life-accent: #7bcfff;
+    --past-life-glow: rgba(123, 207, 255, 0.26);
+}
+
+.past-life[data-result="woman"] {
+    --past-life-accent: #ffb287;
+    --past-life-glow: rgba(255, 178, 135, 0.28);
+}
+
+@keyframes past-life-glow-pulse {
+    0%,
+    100% {
+        transform: scale(0.98);
+        opacity: 0.62;
+    }
+
+    50% {
+        transform: scale(1.03);
+        opacity: 0.94;
+    }
+}
+
+@keyframes past-life-reveal-in {
+    from {
+        opacity: 0;
+        transform: translateY(16px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+@keyframes past-life-button-wait {
+    0%,
+    50% {
+        transform: translateY(0) scale(1);
+    }
+
+    100% {
+        transform: translateY(-1px) scale(1.01);
+    }
+}
+
+.past-life__frame {
+    position: relative;
+    isolation: isolate;
+    overflow: hidden;
+    gap: clamp(1.2rem, 2.8vw, 1.9rem);
+    background:
+        radial-gradient(circle at 50% 42%, rgba(11, 15, 23, 0.52), rgba(11, 15, 23, 0.24) 34%, rgba(11, 15, 23, 0.12) 60%, rgba(11, 15, 23, 0.28)),
+        linear-gradient(180deg, rgba(255, 246, 234, 0.15), rgba(11, 15, 23, 0.18) 48%, rgba(11, 15, 23, 0.34)),
+        radial-gradient(circle at 16% 18%, rgba(255, 212, 168, 0.32), transparent 28%),
+        radial-gradient(circle at 84% 16%, rgba(177, 219, 255, 0.22), transparent 26%),
+        url("./assets/generated/past-life-sky.png") center 56% / cover no-repeat,
+        #18191e;
+    border-color: rgba(233, 195, 150, 0.2);
+    box-shadow:
+        0 42px 90px rgba(8, 10, 16, 0.28),
+        inset 0 1px 0 rgba(255, 255, 255, 0.1);
+}
+
+.past-life__frame::before,
+.past-life__frame::after {
+    content: "";
+    position: absolute;
+    pointer-events: none;
+}
+
+.past-life__frame::before {
+    inset: -18% 22% 10%;
+    border-radius: 50%;
+    background:
+        radial-gradient(circle, color-mix(in srgb, var(--past-life-glow) 150%, transparent), transparent 68%);
+    filter: blur(18px);
+    animation: past-life-glow-pulse 9s ease-in-out infinite;
+}
+
+.past-life__frame::after {
+    inset: 14px;
+    border-radius: calc(var(--radius) - 14px);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    background:
+        radial-gradient(circle at 18% 22%, rgba(255, 255, 255, 0.14) 0 1px, transparent 1.7px),
+        radial-gradient(circle at 82% 18%, rgba(255, 255, 255, 0.12) 0 1px, transparent 1.6px),
+        linear-gradient(180deg, rgba(255, 255, 255, 0.09), rgba(255, 255, 255, 0.01) 34%, rgba(255, 255, 255, 0));
+    opacity: 0.52;
+}
+
+.past-life__layout {
+    position: relative;
+    z-index: 1;
+    display: grid;
+    gap: 1.15rem;
+}
+
+.past-life__prompt,
+.past-life__reveal {
+    display: grid;
+    gap: 0.95rem;
+    align-content: center;
+    justify-items: center;
+    text-align: center;
+}
+
+.past-life__prompt[hidden],
+.past-life__reveal[hidden],
+.past-life__stats[hidden] {
+    display: none;
+}
+
+.past-life__prompt {
+    min-height: clamp(17rem, 34vw, 21rem);
+}
+
+.past-life__title {
+    margin: 0;
+    display: grid;
+    gap: 0.08rem;
+    color: #f8f1e8;
+    font-family: "Cormorant Garamond", serif;
+    font-size: clamp(3rem, 5.3vw, 4.4rem);
+    font-style: italic;
+    font-weight: 600;
+    line-height: 0.86;
+    letter-spacing: -0.08em;
+    text-wrap: balance;
+    max-width: 12ch;
+    text-shadow: 0 16px 42px rgba(8, 11, 18, 0.24), 0 4px 14px rgba(8, 11, 18, 0.18);
+}
+
+.past-life__title-line {
+    display: block;
+}
+
+.past-life__title-line--accent {
+    color: color-mix(in srgb, var(--past-life-accent) 82%, #fff0d8);
+}
+
+.past-life__result {
+    display: grid;
+    gap: 0.3rem;
+}
+
+.past-life__result-title {
+    margin: 0;
+    color: #f9f5ee;
+    font-family: "Space Grotesk", sans-serif;
+    font-size: clamp(1.6rem, 3vw, 2.4rem);
+    line-height: 1;
+    font-weight: 700;
+    letter-spacing: -0.05em;
+    text-wrap: balance;
+    max-width: 16ch;
+    text-shadow: 0 10px 26px rgba(8, 11, 18, 0.24);
+}
+
+.past-life__reveal {
+    justify-items: stretch;
+    width: min(100%, 30rem);
+    margin-inline: auto;
+    padding: clamp(1rem, 2.4vw, 1.25rem);
+    border-radius: 28px;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    background:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.12), rgba(255, 255, 255, 0.04)),
+        rgba(10, 14, 22, 0.28);
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.12),
+        0 28px 60px rgba(8, 10, 16, 0.22);
+    backdrop-filter: blur(14px);
+    animation: past-life-reveal-in 420ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.past-life__button {
+    justify-self: center;
+    min-width: 12rem;
+    border-color: color-mix(in srgb, var(--past-life-accent) 36%, rgba(255, 255, 255, 0.16));
+    color: #1a140f;
+    font-family: "Space Grotesk", sans-serif;
+    font-size: 0.98rem;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    background:
+        linear-gradient(135deg, color-mix(in srgb, var(--past-life-accent) 88%, #fff1dd), color-mix(in srgb, var(--past-life-accent) 50%, #f4a16f));
+    box-shadow:
+        0 18px 34px rgba(4, 6, 11, 0.28),
+        inset 0 1px 0 rgba(255, 255, 255, 0.46);
+}
+
+.past-life__button::before {
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.38), rgba(255, 255, 255, 0));
+}
+
+.past-life__button:hover {
+    transform: translateY(-2px);
+    background:
+        linear-gradient(135deg, color-mix(in srgb, var(--past-life-accent) 94%, #fff8ed), color-mix(in srgb, var(--past-life-accent) 62%, #ffbb8c));
+    box-shadow:
+        0 22px 40px rgba(4, 6, 11, 0.32),
+        inset 0 1px 0 rgba(255, 255, 255, 0.52);
+}
+
+.past-life__button:disabled {
+    cursor: wait;
+    transform: none;
+    animation: past-life-button-wait 620ms ease-in-out infinite alternate;
+}
+
+.past-life__stats {
+    display: grid;
+    gap: 0.72rem;
+}
+
+.past-life__stats-track {
+    overflow: hidden;
+    display: flex;
+    height: 0.72rem;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.08);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.past-life__stats-fill {
+    display: block;
+    height: 100%;
+    min-width: 0;
+}
+
+.past-life__stats-fill--man {
+    background: linear-gradient(90deg, color-mix(in srgb, var(--past-life-man) 86%, white), var(--past-life-man));
+}
+
+.past-life__stats-fill--woman {
+    background: linear-gradient(90deg, color-mix(in srgb, var(--past-life-woman) 84%, white), var(--past-life-woman));
+}
+
+.past-life__stats-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.75rem;
+}
+
+.past-life__stat {
+    display: grid;
+    gap: 0.24rem;
+    padding: 0.82rem 0.88rem 0.8rem;
+    border-radius: 18px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.03));
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.past-life__stat-label {
+    font-family: "Plus Jakarta Sans", sans-serif;
+    font-size: 0.66rem;
+    font-weight: 800;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: rgba(241, 232, 220, 0.62);
+}
+
+.past-life__stat-value {
+    color: #fff7ee;
+    font-family: "Space Grotesk", sans-serif;
+    font-size: 1.5rem;
+    line-height: 1;
+    font-weight: 700;
+    letter-spacing: -0.05em;
+}
+
+@media (max-width: 1024px) {
+    .past-life__prompt {
+        min-height: 15.5rem;
+    }
+}
+
+@media (max-width: 767px) {
+    .past-life__frame {
+        gap: 1rem;
+        padding: 0.9rem;
+    }
+
+    .past-life__frame::after {
+        inset: 10px;
+        border-radius: 18px;
+    }
+
+    .past-life__title {
+        font-size: clamp(2.7rem, 13vw, 4rem);
+        max-width: 11ch;
+    }
+
+    .past-life__prompt {
+        min-height: 13.5rem;
+    }
+
+    .past-life__result-title {
+        font-size: clamp(1.32rem, 7vw, 1.72rem);
+        max-width: 12ch;
+    }
+
+    .past-life__button {
+        width: 100%;
+        justify-self: stretch;
+    }
+
+    .past-life__reveal {
+        width: 100%;
+        padding: 0.92rem;
+        border-radius: 22px;
+    }
+
+    .past-life__stats-grid {
+        gap: 0.55rem;
+    }
+
+    .past-life__stat {
+        padding: 0.72rem 0.76rem;
+        border-radius: 16px;
+    }
+
+    .past-life__stat-value {
+        font-size: 1.34rem;
+    }
+}
+
 body.is-idle-reading-screensaver .is-idle-reading-focus {
     transform: translate3d(0, 0, 0) scale(1);
     transform-origin: center 18%;
@@ -14798,6 +15136,8 @@ body.is-idle-reading-screensaver .is-idle-reading-focus.weather-strip,
 body.is-idle-reading-screensaver .is-idle-reading-focus.science-article,
 body.is-idle-reading-screensaver .is-idle-reading-focus.persona-story,
 body.is-idle-reading-screensaver .is-idle-reading-focus.horoscope-card,
+body.is-idle-reading-screensaver .is-idle-reading-focus.past-life__prompt,
+body.is-idle-reading-screensaver .is-idle-reading-focus.past-life__reveal,
 body.is-idle-reading-screensaver .is-idle-reading-focus.problem-quiz__card,
 body.is-idle-reading-screensaver .is-idle-reading-focus.intake-hero__cover,
 body.is-idle-reading-screensaver .is-idle-reading-focus.problem-stats__chart {

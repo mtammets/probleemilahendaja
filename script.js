@@ -1,11 +1,13 @@
 import {
     createProblemReport,
+    fetchPastLifeReadingStats,
     fetchProblemCategoryStats,
     fetchRecentProblemReports,
     fetchSolvedReportsTotal,
     getOrCreateSessionId,
     isSupabaseConfigured,
     subscribeToReportInserts,
+    submitPastLifeReading,
     submitProblemRating
 } from "./supabase.js";
 import {
@@ -19,6 +21,7 @@ import urgitsFireSecondary from "./assets/Urgits-branch-2.png";
 
 const ENABLE_ADVANCED_PROBLEM_STATS_RPC = String(import.meta.env.VITE_ENABLE_ADVANCED_PROBLEM_STATS_RPC || "").trim() === "true";
 const ENABLE_BROWSER_GEOLOCATION = String(import.meta.env.VITE_ENABLE_BROWSER_GEOLOCATION || "").trim() === "true";
+const ENABLE_IDLE_SCREEN_SAVER = false;
 
 const lorienMockupModules = import.meta.glob("./assets/Lorien mockups/*.{png,jpg,jpeg,webp,avif}", {
     eager: true,
@@ -95,6 +98,16 @@ const personaStoryMoreButton = document.getElementById("personaStoryMoreButton")
 const dailyHoroscopeSection = document.getElementById("dailyHoroscope");
 const horoscopeFeatured = document.getElementById("horoscopeFeatured");
 const horoscopeSignGrid = document.getElementById("horoscopeSignGrid");
+const pastLifeSection = document.getElementById("pastLife");
+const pastLifePrompt = document.getElementById("pastLifePrompt");
+const pastLifeButton = document.getElementById("pastLifeButton");
+const pastLifeReveal = document.getElementById("pastLifeReveal");
+const pastLifeResult = document.getElementById("pastLifeResult");
+const pastLifeStats = document.getElementById("pastLifeStats");
+const pastLifeStatsBarMan = document.getElementById("pastLifeStatsBarMan");
+const pastLifeStatsBarWoman = document.getElementById("pastLifeStatsBarWoman");
+const pastLifeManShare = document.getElementById("pastLifeManShare");
+const pastLifeWomanShare = document.getElementById("pastLifeWomanShare");
 const minefieldBanner = document.getElementById("minefieldBanner");
 const problemQuizSection = document.getElementById("problemQuiz");
 const problemQuizCard = document.getElementById("problemQuizCard");
@@ -217,6 +230,9 @@ let horoscopeStoryCleanup = null;
 let selectedHoroscopeSignId = "";
 let dailyHoroscopePublishedAt = "";
 let isSubmittingNewsletter = false;
+let isSubmittingPastLifeReading = false;
+let pastLifeReadingResponse = null;
+let pastLifeReadingError = "";
 let selectedRating = 0;
 let remoteSolvedCount = null;
 let isGeneratingReport = false;
@@ -323,6 +339,16 @@ const PROBLEM_PREMIUM_CHARACTER_LIMIT = 86;
 const PROBLEM_PREMIUM_SURCHARGE_EUR = 1;
 const PROBLEM_PREMIUM_NEAR_LIMIT_RATIO = 0.78;
 const PROBLEM_PREMIUM_MODAL_SOLVE_DELAY_MS = 1350;
+const PAST_LIFE_REVEAL_DELAY_MS = 1180;
+const PAST_LIFE_FALLBACK_STORAGE_KEY = "probleemilahendaja_past_life_result";
+const PAST_LIFE_COPY = {
+    man: {
+        title: "Sa olid eelmises elus mees!"
+    },
+    woman: {
+        title: "Sa olid eelmises elus naine!"
+    }
+};
 const SOLVER_SKINS = [
     { id: "graphite", label: "Praegune skin" },
     { id: "arcade", label: "Arcade-plakati skin" },
@@ -362,6 +388,15 @@ const IDLE_SCREEN_SAVER_TARGET_SPECS = [
         fallbackTitle: "Iga päev oma märk ja meeleolu.",
         note: "Tugev visuaal, kiire hook ja hetkega loetav rütm.",
         readRatio: 0.36
+    },
+    {
+        selector: "#pastLife .past-life__layout",
+        anchorSelector: ".past-life__title, .past-life__result",
+        titleSelector: ".past-life__title-line--accent, .past-life__result-title",
+        eyebrow: "Eelmise elu test",
+        fallbackTitle: "Üks kahtlaselt ilus nupp ja täiesti küsitav tõde.",
+        note: "Naljakas mikromoment, mis paneb korraks uskuma kõike.",
+        readRatio: 0.24
     },
     {
         selector: "#problemStatsChart",
@@ -1808,6 +1843,252 @@ function setNewsletterSubmitting(isSubmitting) {
     }
 
     newsletterForm?.classList.toggle("is-submitting", isSubmitting);
+}
+
+function normalizePastLifeResultKey(value) {
+    const normalizedValue = typeof value === "string"
+        ? value.trim().toLowerCase()
+        : "";
+
+    if (normalizedValue === "man" || normalizedValue === "woman") {
+        return normalizedValue;
+    }
+
+    return "";
+}
+
+function readPastLifeFallbackResult() {
+    try {
+        return normalizePastLifeResultKey(window.localStorage.getItem(PAST_LIFE_FALLBACK_STORAGE_KEY));
+    } catch (_error) {
+        return "";
+    }
+}
+
+function writePastLifeFallbackResult(resultKey) {
+    try {
+        window.localStorage.setItem(PAST_LIFE_FALLBACK_STORAGE_KEY, resultKey);
+    } catch (_error) {
+        // Ignore storage failures for the playful fallback feature.
+    }
+}
+
+function derivePastLifeFallbackResult(sessionId) {
+    const seed = String(sessionId || "");
+    let hash = 0;
+
+    for (let index = 0; index < seed.length; index += 1) {
+        hash = ((hash * 31) + seed.charCodeAt(index)) | 0;
+    }
+
+    return Math.abs(hash) % 2 === 0 ? "man" : "woman";
+}
+
+function createPastLifeFallbackResponse(sessionId) {
+    const existingResult = readPastLifeFallbackResult();
+    const sessionResult = existingResult || derivePastLifeFallbackResult(sessionId);
+
+    writePastLifeFallbackResult(sessionResult);
+
+    return {
+        sessionResult,
+        totalResponses: 0,
+        manCount: 0,
+        womanCount: 0,
+        manShare: 0,
+        womanShare: 0
+    };
+}
+
+function formatPastLifeShare(value) {
+    const numericValue = Number.isFinite(value) ? Math.max(0, value) : 0;
+    const roundedValue = Math.round(numericValue * 10) / 10;
+
+    if (Math.abs(roundedValue - Math.round(roundedValue)) < 0.05) {
+        return numberFormatter.format(Math.round(roundedValue)) + "%";
+    }
+
+    return roundedValue.toLocaleString("et-EE", {
+        minimumFractionDigits: 1,
+        maximumFractionDigits: 1
+    }) + "%";
+}
+
+function createPastLifeResultFragment() {
+    const fragment = document.createDocumentFragment();
+    const resultKey = normalizePastLifeResultKey(pastLifeReadingResponse?.sessionResult);
+
+    if (pastLifeReadingError) {
+        const title = document.createElement("strong");
+
+        title.className = "past-life__result-title";
+        title.textContent = "Kosmos köhis.";
+        fragment.append(title);
+        return fragment;
+    }
+
+    if (!resultKey) {
+        return fragment;
+    }
+
+    const resultCopy = PAST_LIFE_COPY[resultKey];
+    const title = document.createElement("strong");
+
+    title.className = "past-life__result-title";
+    title.textContent = resultCopy?.title || "Sa olid eelmises elus keegi!";
+    fragment.append(title);
+    return fragment;
+}
+
+function renderPastLifeReading() {
+    if (!pastLifeSection || !pastLifePrompt || !pastLifeButton || !pastLifeReveal || !pastLifeResult) {
+        return;
+    }
+
+    const resultKey = normalizePastLifeResultKey(pastLifeReadingResponse?.sessionResult);
+    const isRevealed = Boolean(resultKey);
+    const totalResponses = Number.isFinite(pastLifeReadingResponse?.totalResponses)
+        ? Math.max(0, pastLifeReadingResponse.totalResponses)
+        : 0;
+    const manCount = Number.isFinite(pastLifeReadingResponse?.manCount)
+        ? Math.max(0, pastLifeReadingResponse.manCount)
+        : 0;
+    const womanCount = Number.isFinite(pastLifeReadingResponse?.womanCount)
+        ? Math.max(0, pastLifeReadingResponse.womanCount)
+        : 0;
+    const manShare = Number.isFinite(pastLifeReadingResponse?.manShare)
+        ? Math.max(0, pastLifeReadingResponse.manShare)
+        : 0;
+    const womanShare = Number.isFinite(pastLifeReadingResponse?.womanShare)
+        ? Math.max(0, pastLifeReadingResponse.womanShare)
+        : 0;
+
+    pastLifeSection.dataset.state = isSubmittingPastLifeReading
+        ? "loading"
+        : isRevealed
+            ? "revealed"
+            : "idle";
+
+    if (isRevealed) {
+        pastLifeSection.dataset.result = resultKey;
+    } else {
+        delete pastLifeSection.dataset.result;
+    }
+
+    pastLifePrompt.hidden = isRevealed;
+    pastLifeReveal.hidden = !isRevealed;
+    pastLifeButton.disabled = isSubmittingPastLifeReading;
+    pastLifeButton.textContent = isSubmittingPastLifeReading ? "Loen randmelt..." : "Vajuta siia";
+
+    pastLifeResult.replaceChildren(createPastLifeResultFragment());
+
+    if (!pastLifeStats) {
+        return;
+    }
+
+    pastLifeStats.hidden = !isRevealed || totalResponses < 1;
+
+    if (pastLifeStats.hidden) {
+        return;
+    }
+
+    if (pastLifeManShare) {
+        pastLifeManShare.textContent = formatPastLifeShare(manShare);
+    }
+
+    if (pastLifeWomanShare) {
+        pastLifeWomanShare.textContent = formatPastLifeShare(womanShare);
+    }
+
+    if (pastLifeStatsBarMan) {
+        pastLifeStatsBarMan.style.width = totalResponses > 0
+            ? ((manCount / totalResponses) * 100).toFixed(2) + "%"
+            : "0%";
+    }
+
+    if (pastLifeStatsBarWoman) {
+        pastLifeStatsBarWoman.style.width = totalResponses > 0
+            ? ((womanCount / totalResponses) * 100).toFixed(2) + "%"
+            : "0%";
+    }
+}
+
+async function refreshPastLifeReading() {
+    if (!pastLifeSection) {
+        return;
+    }
+
+    const sessionId = getOrCreateSessionId();
+
+    pastLifeReadingError = "";
+
+    if (!isSupabaseConfigured) {
+        const fallbackResult = readPastLifeFallbackResult();
+
+        pastLifeReadingResponse = fallbackResult
+            ? createPastLifeFallbackResponse(sessionId)
+            : null;
+        renderPastLifeReading();
+        return;
+    }
+
+    try {
+        pastLifeReadingResponse = await fetchPastLifeReadingStats(sessionId);
+    } catch (error) {
+        console.error("Failed to fetch past life reading stats.", error);
+        const fallbackResult = readPastLifeFallbackResult();
+
+        pastLifeReadingResponse = fallbackResult
+            ? createPastLifeFallbackResponse(sessionId)
+            : null;
+    }
+
+    renderPastLifeReading();
+}
+
+async function revealPastLifeReading() {
+    if (isSubmittingPastLifeReading) {
+        return;
+    }
+
+    const sessionId = getOrCreateSessionId();
+
+    isSubmittingPastLifeReading = true;
+    pastLifeReadingError = "";
+    renderPastLifeReading();
+
+    try {
+        const [payload] = await Promise.all([
+            isSupabaseConfigured
+                ? submitPastLifeReading(sessionId)
+                : Promise.resolve(createPastLifeFallbackResponse(sessionId)),
+            new Promise(function (resolve) {
+                window.setTimeout(resolve, PAST_LIFE_REVEAL_DELAY_MS);
+            })
+        ]);
+
+        pastLifeReadingResponse = payload;
+    } catch (error) {
+        console.error("Failed to reveal past life reading.", error);
+        pastLifeReadingResponse = createPastLifeFallbackResponse(sessionId);
+        pastLifeReadingError = "";
+    } finally {
+        isSubmittingPastLifeReading = false;
+        renderPastLifeReading();
+    }
+}
+
+function initializePastLifeReading() {
+    if (!pastLifeSection || !pastLifeButton || !pastLifeResult) {
+        return;
+    }
+
+    renderPastLifeReading();
+    pastLifeButton.addEventListener("click", function () {
+        void revealPastLifeReading();
+    });
+
+    void refreshPastLifeReading();
 }
 
 function setRemoteSolvedCount(total) {
@@ -4062,6 +4343,10 @@ function hasIdleScreensaverInteractiveFocus() {
 }
 
 function canStartIdleScreensaver() {
+    if (!ENABLE_IDLE_SCREEN_SAVER) {
+        return false;
+    }
+
     if (prefersReducedMotionQuery.matches || document.hidden) {
         return false;
     }
@@ -4436,6 +4721,15 @@ function stopIdleScreensaver() {
 }
 
 function scheduleIdleScreensaver() {
+    if (!ENABLE_IDLE_SCREEN_SAVER) {
+        if (idleScreensaverTimer) {
+            window.clearTimeout(idleScreensaverTimer);
+            idleScreensaverTimer = 0;
+        }
+
+        return;
+    }
+
     if (idleScreensaverTimer) {
         window.clearTimeout(idleScreensaverTimer);
     }
@@ -4501,6 +4795,10 @@ function runIdleScreensaverFrame(now) {
 }
 
 function startIdleScreensaver() {
+    if (!ENABLE_IDLE_SCREEN_SAVER) {
+        return;
+    }
+
     if (isIdleScreensaverActive || !canStartIdleScreensaver()) {
         return;
     }
@@ -4526,6 +4824,17 @@ function startIdleScreensaver() {
 }
 
 function resetIdleScreensaverActivity() {
+    if (!ENABLE_IDLE_SCREEN_SAVER) {
+        stopIdleScreensaver();
+
+        if (idleScreensaverTimer) {
+            window.clearTimeout(idleScreensaverTimer);
+            idleScreensaverTimer = 0;
+        }
+
+        return;
+    }
+
     if (hasIdleScreensaverStateToReset()) {
         stopIdleScreensaver();
     }
@@ -4534,6 +4843,11 @@ function resetIdleScreensaverActivity() {
 }
 
 function initializeIdleScreensaver() {
+    if (!ENABLE_IDLE_SCREEN_SAVER) {
+        stopIdleScreensaver();
+        return;
+    }
+
     if (isPerformanceConstrainedDevice()) {
         stopIdleScreensaver();
         return;
@@ -8434,10 +8748,11 @@ initializeUrgitsBannerRotation();
 initializeDailyCoverStory();
 initializeDailyWeather();
 initializeRecentProblems();
-initializeProblemCategoryStats();
 initializeDailyArticles();
 initializeDailyPersonaStories();
 initializeDailyHoroscope();
+initializePastLifeReading();
+initializeProblemCategoryStats();
 initializeProblemQuiz();
 initializeNewsletterForm();
 initializeIdleScreensaver();
