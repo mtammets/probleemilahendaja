@@ -97,6 +97,7 @@ const PUBLIC_PROBLEM_RESOLUTION_FALLBACK_TEXT = "See teema ei suru enam peale ja
 const PUBLIC_FEED_PROFANITY_REGEX = /\b(?:pers(?:e|se|es|et|ed|ega|ele|el|esse|est|i)?|t(?:ü|y)r(?:a|ad|aga|ale|al|ast|i)?|munn(?:i|e|id|idega|ile|il|ist)?|vitt(?:u|i|e|ud|idega|ile|is|a)?|niku(?:da|n|d|b|s|tud|ga|le)?|pask(?:a|e|i|aks|aga|ale|as|ast|u)?|sit(?:t|a|ad|ane|ase|aks|aga|ale|as|ast)?|hui(?:a|i|d|ga|le|s)?|fuck(?:ing|ed|er|s)?|shit(?:ty|ted|ting|s)?)\b/giu;
 const DAILY_ARTICLE_SOFT_LANGUAGE_REGEX = /\b(?:teekond|hingetõmme|maagia|inspireer|sisemine|süda|hing|transform|muudab kõik|unelmate|täiuslik)\b/iu;
 const EDITORIAL_STATUS_PUBLISHED = "published";
+const RETRIABLE_NETWORK_ERROR_CODES = new Set(["ECONNRESET", "ETIMEDOUT", "ECONNABORTED", "EPIPE", "UND_ERR_SOCKET"]);
 const EDITORIAL_PROMPT_VERSIONS = {
     problem_report: "problem-report-v1",
     problem_public_feed: "problem-public-feed-v1",
@@ -110,6 +111,7 @@ const EDITORIAL_PROMPT_VERSIONS = {
     daily_weather: "daily-weather-v1",
     daily_persona_image: "daily-persona-image-v1",
     daily_weather_image: "daily-weather-image-v1",
+    interview_opening: "interview-opening-v1",
     interview_turn: "interview-turn-v1",
     interview_story: "interview-story-v1"
 };
@@ -1640,10 +1642,65 @@ function buildCoverStoryRecordFromEditorialRow(row) {
         photoBrief: normalizeField(payload.photoBrief, "", 420),
         imageUrl: row.cover_media_url || payload.imageUrl || "",
         imageAlt: payload.imageAlt || "",
+        galleryImages: normalizeCoverStoryGalleryImages(payload.galleryImages || payload.gallery_images),
         publishedAt: getEditorialPublishedAt(row),
         slug: row.slug || "",
         generationSignature: row.generation_signature || "",
         variant: normalizeField(payload.variant, "", 32)
+    };
+}
+
+async function fetchEditorialGalleryImages(editorialItemId, coverImageUrl = "") {
+    if (!supabaseAdmin || !editorialItemId) {
+        return [];
+    }
+
+    const { data, error } = await supabaseAdmin
+        .from("media_assets")
+        .select("public_url, alt_text, metadata")
+        .eq("editorial_item_id", editorialItemId);
+
+    if (error) {
+        throw error;
+    }
+
+    return (Array.isArray(data) ? data : [])
+        .map(function (row, index) {
+            const url = normalizeField(row?.public_url, "", 500);
+
+            if (!url || url === coverImageUrl) {
+                return null;
+            }
+
+            return {
+                slot: Math.max(1, Math.min(4, Number(row?.metadata?.slot) || index + 1)),
+                url,
+                alt: normalizeField(row?.alt_text, "", 180),
+                caption: normalizeField(row?.metadata?.caption, "", 180)
+            };
+        })
+        .filter(Boolean)
+        .sort(function (firstImage, secondImage) {
+            return firstImage.slot - secondImage.slot;
+        });
+}
+
+async function enrichCoverStoryRecordFromEditorialRow(row) {
+    const coverStory = buildCoverStoryRecordFromEditorialRow(row);
+
+    if (coverStory.galleryImages.length > 0) {
+        return coverStory;
+    }
+
+    const galleryImages = await fetchEditorialGalleryImages(row?.id, coverStory.imageUrl);
+
+    if (galleryImages.length === 0) {
+        return coverStory;
+    }
+
+    return {
+        ...coverStory,
+        galleryImages
     };
 }
 
@@ -1854,7 +1911,8 @@ async function enrichDailyCoverStoryFromInterview(story) {
         pullQuote: story?.pullQuote || sourcePayload.pullQuote || sourcePayload.pull_quote || quotes[0] || "",
         photoBrief: story?.photoBrief || sourcePayload.photoBrief,
         imageUrl: story?.imageUrl || sourcePayload.imageUrl || sourcePayload.image_url,
-        imageAlt: story?.imageAlt || sourcePayload.imageAlt || sourcePayload.image_alt
+        imageAlt: story?.imageAlt || sourcePayload.imageAlt || sourcePayload.image_alt,
+        galleryImages: story?.galleryImages || sourcePayload.galleryImages || sourcePayload.gallery_images
     }, story?.publishedAt);
 
     return {
@@ -2053,30 +2111,106 @@ function omitUndefinedProperties(record) {
     }));
 }
 
+function wait(delayMs) {
+    return new Promise(function (resolve) {
+        setTimeout(resolve, delayMs);
+    });
+}
+
+function collectErrorObjects(error) {
+    const chain = [];
+    const queue = [error];
+    const seen = new Set();
+
+    while (queue.length > 0) {
+        const current = queue.shift();
+
+        if (!current || typeof current !== "object" || seen.has(current)) {
+            continue;
+        }
+
+        seen.add(current);
+        chain.push(current);
+
+        if (current.cause) {
+            queue.push(current.cause);
+        }
+
+        if (current.originalError) {
+            queue.push(current.originalError);
+        }
+    }
+
+    return chain;
+}
+
+function isRetriableNetworkError(error) {
+    return collectErrorObjects(error).some(function (entry) {
+        const code = String(entry.code || entry.errno || "").toUpperCase();
+        const message = String(entry.message || "").toLowerCase();
+
+        return RETRIABLE_NETWORK_ERROR_CODES.has(code)
+            || message.includes("fetch failed")
+            || message.includes("econnreset")
+            || message.includes("etimedout")
+            || message.includes("socket hang up")
+            || message.includes("terminated");
+    });
+}
+
+async function retryAsyncOperation(label, operation, options = {}) {
+    const attempts = Math.max(1, Number(options.attempts) || 3);
+    const delayMs = Math.max(0, Number(options.delayMs) || 350);
+    let lastError = null;
+
+    for (let attempt = 1; attempt <= attempts; attempt += 1) {
+        try {
+            return await operation();
+        } catch (error) {
+            lastError = error;
+
+            if (attempt >= attempts || !isRetriableNetworkError(error)) {
+                throw error;
+            }
+
+            console.warn(`${label} failed on attempt ${attempt}/${attempts}, retrying.`, {
+                message: error?.message || String(error),
+                code: error?.code || error?.originalError?.code || ""
+            });
+
+            await wait(delayMs * attempt);
+        }
+    }
+
+    throw lastError;
+}
+
 async function upsertEditorialItemRecord(record) {
     if (!supabaseAdmin) {
         return null;
     }
 
-    const { data, error } = await supabaseAdmin
-        .from("editorial_items")
-        .upsert(omitUndefinedProperties(record), { onConflict: "slug" })
-        .select(`
-            id,
-            slug,
-            content_type,
-            date_key,
-            location_key,
-            generation_signature,
-            style_version,
-            title,
-            summary,
-            payload,
-            cover_media_path,
-            cover_media_url,
-            published_at
-        `)
-        .single();
+    const { data, error } = await retryAsyncOperation("upsertEditorialItemRecord", async function () {
+        return await supabaseAdmin
+            .from("editorial_items")
+            .upsert(omitUndefinedProperties(record), { onConflict: "slug" })
+            .select(`
+                id,
+                slug,
+                content_type,
+                date_key,
+                location_key,
+                generation_signature,
+                style_version,
+                title,
+                summary,
+                payload,
+                cover_media_path,
+                cover_media_url,
+                published_at
+            `)
+            .single();
+    });
 
     if (error) {
         throw error;
@@ -2090,29 +2224,31 @@ async function updateEditorialItemMediaFields(slug, media) {
         return null;
     }
 
-    const { data, error } = await supabaseAdmin
-        .from("editorial_items")
-        .update({
-            cover_media_path: media.storagePath,
-            cover_media_url: media.publicUrl
-        })
-        .eq("slug", slug)
-        .select(`
-            id,
-            slug,
-            content_type,
-            date_key,
-            location_key,
-            generation_signature,
-            style_version,
-            title,
-            summary,
-            payload,
-            cover_media_path,
-            cover_media_url,
-            published_at
-        `)
-        .single();
+    const { data, error } = await retryAsyncOperation("updateEditorialItemMediaFields", async function () {
+        return await supabaseAdmin
+            .from("editorial_items")
+            .update({
+                cover_media_path: media.storagePath,
+                cover_media_url: media.publicUrl
+            })
+            .eq("slug", slug)
+            .select(`
+                id,
+                slug,
+                content_type,
+                date_key,
+                location_key,
+                generation_signature,
+                style_version,
+                title,
+                summary,
+                payload,
+                cover_media_path,
+                cover_media_url,
+                published_at
+            `)
+            .single();
+    });
 
     if (error) {
         throw error;
@@ -2126,14 +2262,16 @@ async function syncDailyWeatherSceneMediaFields(dateKey, media) {
         return;
     }
 
-    const { error } = await supabaseAdmin
-        .from("editorial_items")
-        .update({
-            cover_media_path: media.storagePath,
-            cover_media_url: media.publicUrl
-        })
-        .eq("content_type", "daily_weather")
-        .eq("date_key", dateKey);
+    const { error } = await retryAsyncOperation("syncDailyWeatherSceneMediaFields", async function () {
+        return await supabaseAdmin
+            .from("editorial_items")
+            .update({
+                cover_media_path: media.storagePath,
+                cover_media_url: media.publicUrl
+            })
+            .eq("content_type", "daily_weather")
+            .eq("date_key", dateKey);
+    });
 
     if (error) {
         throw error;
@@ -2152,10 +2290,12 @@ async function uploadEditorialImageAsset(input) {
         input.extension || "jpg"
     );
 
-    const uploadResult = await supabaseAdmin.storage.from(editorialBucketName).upload(storagePath, input.imageBuffer, {
-        upsert: true,
-        contentType: input.mimeType || "image/jpeg",
-        cacheControl: "31536000"
+    const uploadResult = await retryAsyncOperation("uploadEditorialImageAsset:storageUpload", async function () {
+        return await supabaseAdmin.storage.from(editorialBucketName).upload(storagePath, input.imageBuffer, {
+            upsert: true,
+            contentType: input.mimeType || "image/jpeg",
+            cacheControl: "31536000"
+        });
     });
 
     if (uploadResult.error) {
@@ -2163,18 +2303,20 @@ async function uploadEditorialImageAsset(input) {
     }
 
     const publicUrl = getEditorialStoragePublicUrl(storagePath);
-    const { error } = await supabaseAdmin
-        .from("media_assets")
-        .upsert({
-            editorial_item_id: input.itemId || null,
-            storage_bucket: editorialBucketName,
-            storage_path: storagePath,
-            public_url: publicUrl,
-            mime_type: input.mimeType || "image/jpeg",
-            alt_text: normalizeField(input.altText, "", 180),
-            origin: normalizeField(input.origin, "openai", 24),
-            metadata: input.metadata && typeof input.metadata === "object" ? input.metadata : {}
-        }, { onConflict: "storage_path" });
+    const { error } = await retryAsyncOperation("uploadEditorialImageAsset:mediaUpsert", async function () {
+        return await supabaseAdmin
+            .from("media_assets")
+            .upsert({
+                editorial_item_id: input.itemId || null,
+                storage_bucket: editorialBucketName,
+                storage_path: storagePath,
+                public_url: publicUrl,
+                mime_type: input.mimeType || "image/jpeg",
+                alt_text: normalizeField(input.altText, "", 180),
+                origin: normalizeField(input.origin, "openai", 24),
+                metadata: input.metadata && typeof input.metadata === "object" ? input.metadata : {}
+            }, { onConflict: "storage_path" });
+    });
 
     if (error) {
         throw error;
@@ -2191,7 +2333,9 @@ async function doesEditorialAssetExist(storagePath) {
         return false;
     }
 
-    const { data, error } = await supabaseAdmin.storage.from(editorialBucketName).download(storagePath);
+    const { data, error } = await retryAsyncOperation("doesEditorialAssetExist", async function () {
+        return await supabaseAdmin.storage.from(editorialBucketName).download(storagePath);
+    });
 
     if (error) {
         const errorMessage = normalizeField(error?.message, "", 240).toLocaleLowerCase("en-US");
@@ -3563,6 +3707,32 @@ function buildFallbackDailyCoverStory(dateKey) {
     };
 }
 
+function normalizeCoverStoryGalleryImages(value) {
+    const images = Array.isArray(value) ? value : [];
+
+    return images
+        .slice(0, 4)
+        .map(function (image, index) {
+            if (!image || typeof image !== "object") {
+                return null;
+            }
+
+            const url = normalizeField(image.url || image.src, "", 500);
+
+            if (!url) {
+                return null;
+            }
+
+            return {
+                slot: Math.max(1, Math.min(4, Number(image.slot) || index + 1)),
+                url,
+                alt: normalizeField(image.alt, "", 180),
+                caption: normalizeField(image.caption, "", 180)
+            };
+        })
+        .filter(Boolean);
+}
+
 function normalizeDailyCoverStoryPayload(dateKey, payload, publishedAt = new Date().toISOString()) {
     const fallbackStory = buildFallbackDailyCoverStory(dateKey);
 
@@ -3580,7 +3750,8 @@ function normalizeDailyCoverStoryPayload(dateKey, payload, publishedAt = new Dat
         pullQuote: normalizeField(payload.pullQuote || payload.pull_quote, fallbackStory.pullQuote, 220),
         photoBrief: normalizeField(payload.photoBrief, fallbackStory.photoBrief, 420),
         imageUrl: normalizeField(payload.imageUrl || payload.image_url, fallbackStory.imageUrl, 500),
-        imageAlt: normalizeField(payload.imageAlt || payload.image_alt, fallbackStory.imageAlt, 180)
+        imageAlt: normalizeField(payload.imageAlt || payload.image_alt, fallbackStory.imageAlt, 180),
+        galleryImages: normalizeCoverStoryGalleryImages(payload.galleryImages || payload.gallery_images)
     };
 }
 
@@ -3605,7 +3776,8 @@ function normalizeStoredDailyCoverStory(record) {
         pullQuote: record.pullQuote || record.pull_quote,
         photoBrief: record.photoBrief || record.photo_brief,
         imageUrl: record.imageUrl || record.image_url,
-        imageAlt: record.imageAlt || record.image_alt
+        imageAlt: record.imageAlt || record.image_alt,
+        galleryImages: record.galleryImages || record.gallery_images
     }, publishedAt);
 
     return {
@@ -3629,9 +3801,13 @@ async function loadDailyCoverStories() {
 
     try {
         const rows = await fetchPublishedEditorialRows("daily_article", Math.max(DAILY_COVER_STORY_ARCHIVE_LIMIT * 6, 24));
-        dailyCoverStories = rows
-            .filter(isInterviewCoverStoryRow)
-            .map(buildCoverStoryRecordFromEditorialRow)
+        const coverStories = await Promise.all(
+            rows
+                .filter(isInterviewCoverStoryRow)
+                .map(enrichCoverStoryRecordFromEditorialRow)
+        );
+
+        dailyCoverStories = coverStories
             .map(normalizeStoredDailyCoverStory)
             .filter(function (story) {
                 return Boolean(story?.subjectName || story?.imageUrl);
@@ -4058,6 +4234,7 @@ registerInterviewWorkflow({
         interviewerModel,
         interviewStoryModel,
         promptVersions: {
+            interview_opening: EDITORIAL_PROMPT_VERSIONS.interview_opening,
             interview_turn: EDITORIAL_PROMPT_VERSIONS.interview_turn,
             interview_story: EDITORIAL_PROMPT_VERSIONS.interview_story
         },
@@ -4078,6 +4255,7 @@ registerInterviewWorkflow({
         upsertEditorialItemRecord,
         updateEditorialItemMediaFields,
         uploadEditorialImageAsset,
+        retryAsyncOperation,
         getLocalDateKey,
         editorialStatusPublished: EDITORIAL_STATUS_PUBLISHED,
         dailyCoverStoryStyleVersion: DAILY_COVER_STORY_STYLE_VERSION,

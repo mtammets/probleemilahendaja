@@ -77,6 +77,7 @@ const coverStoryFeatureTitle = document.getElementById("coverStoryFeatureTitle")
 const coverStoryFeatureSummary = document.getElementById("coverStoryFeatureSummary");
 const coverStoryFeatureLead = document.getElementById("coverStoryFeatureLead");
 const coverStoryFeatureQuote = document.getElementById("coverStoryFeatureQuote");
+const coverStoryFeatureGallery = document.getElementById("coverStoryFeatureGallery");
 const coverStoryFeatureBody = document.getElementById("coverStoryFeatureBody");
 const coverStoryFeatureSubject = document.getElementById("coverStoryFeatureSubject");
 const newsletterSection = document.getElementById("newsletter");
@@ -320,6 +321,7 @@ const DAILY_PERSONA_STORIES_MOBILE_INITIAL_COUNT = 1;
 const DAILY_PERSONA_STORIES_LOAD_STEP = 1;
 const DAILY_PERSONA_STORIES_REFRESH_INTERVAL = 60 * 60 * 1000;
 const DAILY_PERSONA_REFRESH_SIGNAL_KEY = "probleemilahendaja:daily-persona-refresh";
+const DAILY_COVER_STORY_REFRESH_SIGNAL_KEY = "probleemilahendaja:daily-cover-story-refresh";
 const DAILY_HOROSCOPE_REFRESH_INTERVAL = 60 * 60 * 1000;
 const DAILY_WEATHER_REFRESH_INTERVAL = 20 * 60 * 1000;
 const DAILY_WEATHER_STORAGE_KEY = "probleemilahendaja_daily_weather";
@@ -724,6 +726,10 @@ function renderDailyCoverStoryFeature() {
     const transcriptSummaryText = dailyCoverStory?.transcriptSummary || "";
     const leadText = dailyCoverStory?.lead || (transcriptSummaryText !== summaryText ? transcriptSummaryText : "");
     const quoteText = dailyCoverStory?.pullQuote || "";
+    const galleryImages = (Array.isArray(dailyCoverStory?.galleryImages) ? dailyCoverStory.galleryImages : [])
+        .filter(function (galleryImage) {
+            return galleryImage?.url && galleryImage.url !== dailyCoverStory?.imageUrl;
+        });
     const bodyParagraphs = (dailyCoverStory?.paragraphs || [])
         .filter(Boolean)
         .filter(function (paragraphText, index, paragraphs) {
@@ -740,6 +746,40 @@ function renderDailyCoverStoryFeature() {
     if (coverStoryFeatureQuote) {
         coverStoryFeatureQuote.hidden = !quoteText || quoteText === summaryText || quoteText === leadText;
         coverStoryFeatureQuote.textContent = quoteText || "";
+    }
+
+    if (coverStoryFeatureGallery) {
+        coverStoryFeatureGallery.hidden = galleryImages.length === 0;
+
+        if (galleryImages.length === 0) {
+            coverStoryFeatureGallery.replaceChildren();
+        } else {
+            const galleryFragment = document.createDocumentFragment();
+
+            galleryImages.forEach(function (galleryImage) {
+                const figure = document.createElement("figure");
+                figure.className = "cover-feature__gallery-item";
+
+                const image = document.createElement("img");
+                image.className = "cover-feature__gallery-image";
+                image.src = galleryImage.url;
+                image.alt = galleryImage.alt || `${dailyCoverStory?.subjectName || "Kaane lugu"} lisafoto`;
+                image.loading = "lazy";
+                image.decoding = "async";
+                figure.append(image);
+
+                if (galleryImage.caption) {
+                    const caption = document.createElement("figcaption");
+                    caption.className = "cover-feature__gallery-caption";
+                    caption.textContent = galleryImage.caption;
+                    figure.append(caption);
+                }
+
+                galleryFragment.append(figure);
+            });
+
+            coverStoryFeatureGallery.replaceChildren(galleryFragment);
+        }
     }
 
     if (coverStoryFeatureBody) {
@@ -2539,6 +2579,28 @@ function normalizeDailyCoverStory(record) {
     const subjectName = truncate(sanitizeProblemText(record.subjectName || record.subject_name || ""), 64);
     const imageUrl = sanitizeProblemText(record.imageUrl || record.image_url || "");
     const title = truncate(sanitizeProblemText(record.title || ""), 96);
+    const galleryImages = (Array.isArray(record.galleryImages) ? record.galleryImages : [])
+        .slice(0, 4)
+        .map(function (image, imageIndex) {
+            if (!image || typeof image !== "object") {
+                return null;
+            }
+
+            const url = sanitizeProblemText(image.url || image.src || "");
+
+            if (!url) {
+                return null;
+            }
+
+            return {
+                id: sanitizeProblemText(image.id || `${record.id || record.dateKey || "cover"}-gallery-${imageIndex + 1}`),
+                slot: Math.max(1, Math.min(4, Number(image.slot) || imageIndex + 1)),
+                url,
+                alt: truncate(sanitizeProblemText(image.alt || ""), 180),
+                caption: truncate(sanitizeAdministrativeUiText(sanitizeProblemText(image.caption || "")), 180)
+            };
+        })
+        .filter(Boolean);
 
     if (!subjectName && !imageUrl && !title) {
         return null;
@@ -2555,6 +2617,7 @@ function normalizeDailyCoverStory(record) {
         pullQuote: truncate(sanitizeProblemText(record.pullQuote || record.pull_quote || ""), 220),
         imageUrl,
         imageAlt: truncate(sanitizeProblemText(record.imageAlt || record.image_alt || ""), 180),
+        galleryImages,
         publishedAt: new Date(parseDateToTimestamp(record.publishedAt || record.published_at)).toISOString()
     };
 }
@@ -9002,6 +9065,11 @@ ratingButtons.forEach(function (button) {
 });
 
 window.addEventListener("storage", function (event) {
+    if (event.key === DAILY_COVER_STORY_REFRESH_SIGNAL_KEY) {
+        void refreshDailyCoverStory();
+        return;
+    }
+
     if (event.key === DAILY_PERSONA_REFRESH_SIGNAL_KEY) {
         void refreshDailyPersonaStories();
         return;

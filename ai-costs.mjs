@@ -108,6 +108,13 @@ const FALLBACK_RUN_ESTIMATES = {
         outputTokens: 1100,
         label: "Horoskoop"
     },
+    interview_opening: {
+        model: "gpt-4.1",
+        inputTokens: 800,
+        cachedInputTokens: 0,
+        outputTokens: 120,
+        label: "Intervjuu avafookus"
+    },
     interview_turn: {
         model: "gpt-4.1",
         inputTokens: 2000,

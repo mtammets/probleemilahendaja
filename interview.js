@@ -402,6 +402,8 @@ function renderCoverPreview(interview, storyPayload) {
     const wordmarkLineAccent = document.createElement("span");
     const coverline = document.createElement("div");
     const subject = createPreviewText("p", "intake-coverline__name", storyPayload.subjectName);
+    const title = createPreviewText("h2", "intake-coverline__title", storyPayload.title);
+    const summary = createPreviewText("p", "intake-coverline__summary", storyPayload.summary);
     const counter = document.createElement("div");
     const counterLabel = document.createElement("span");
     const counterValue = document.createElement("strong");
@@ -409,6 +411,11 @@ function renderCoverPreview(interview, storyPayload) {
     const stage = document.createElement("div");
     const stageInput = document.createElement("div");
     const stageButton = document.createElement("div");
+    const story = document.createElement("section");
+    const storyKicker = document.createElement("span");
+    const storyLead = createPreviewText("p", "cover-preview-live__story-lead", storyPayload.lead);
+    const storyQuote = createPreviewText("blockquote", "cover-preview-live__story-quote", storyPayload.pullQuote);
+    const paragraphs = document.createElement("div");
     const today = new Date();
 
     shell.className = "cover-preview cover-preview-live";
@@ -432,6 +439,9 @@ function renderCoverPreview(interview, storyPayload) {
     stage.className = "cover-preview-live__stage-frame";
     stageInput.className = "cover-preview-live__input";
     stageButton.className = "cover-preview-live__button";
+    story.className = "cover-preview-live__story";
+    storyKicker.className = "cover-preview-live__story-kicker";
+    paragraphs.className = "cover-preview-live__story-paragraphs";
 
     if (coverAsset?.previewUrl) {
         hero.style.setProperty("--intake-hero-image", `url("${coverAsset.previewUrl}")`);
@@ -447,17 +457,24 @@ function renderCoverPreview(interview, storyPayload) {
     counterSuffix.textContent = "Probleemi";
     stageInput.textContent = "Kirjuta oma probleem siia...";
     stageButton.textContent = "Lahenda probleem!";
+    storyKicker.textContent = "Loo eelvaade";
 
     folio.append(folioDate, folioIssue);
     wordmarkName.append(wordmarkLinePrimary, wordmarkLineAccent);
     wordmark.append(wordmarkName);
-    coverline.append(subject);
+    coverline.append(subject, title, summary);
     brandCopy.append(kicker, wordmark, coverline);
     brand.append(brandCopy);
     counter.append(counterLabel, counterValue, counterSuffix);
     hero.append(folio, brand, counter);
     stage.append(stageInput, stageButton);
-    frame.append(hero, stage);
+
+    (Array.isArray(storyPayload.paragraphs) ? storyPayload.paragraphs : []).forEach(function (paragraph) {
+        paragraphs.append(createPreviewText("p", "cover-preview-live__story-paragraph", paragraph || "", ""));
+    });
+
+    story.append(storyKicker, storyLead, storyQuote, paragraphs);
+    frame.append(hero, stage, story);
     shell.append(frame);
 
     return shell;

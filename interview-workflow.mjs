@@ -1,5 +1,6 @@
 import Busboy from "busboy";
 import crypto from "node:crypto";
+import os from "node:os";
 import {
     OPENAI_PRICING_SNAPSHOT,
     getFallbackCostForContentType,
@@ -9,6 +10,8 @@ import {
 const ADMIN_SESSION_COOKIE = "probleemilahendaja_admin_session";
 const ADMIN_SESSION_TTL_SECONDS = 60 * 60 * 12;
 const INTERVIEW_TOKEN_TTL_DAYS = 14;
+const MIN_INTERVIEW_USER_TURNS = 3;
+const MAX_INTERVIEW_USER_TURNS = 6;
 const INTERVIEW_UPLOAD_LIMIT_BYTES = 15 * 1024 * 1024;
 const ALLOWED_UPLOAD_MIME_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "image/avif"]);
 const INTERVIEW_STATUS = {
@@ -30,6 +33,7 @@ const AI_RUN_LABELS = {
     problem_public_feed: "Avaliku loendi probleem",
     problem_public_detail: "Probleemi detailvaade",
     problem_resolution_public: "Avalik lahenduse tekst",
+    interview_opening: "Intervjuu avafookus",
     interview_turn: "Intervjuu järelküsimus",
     interview_story: "Persooniloo mustand",
     interview_cover_story: "Kaaneloo mustand",
@@ -47,7 +51,7 @@ const AI_COST_CATEGORIES = [
     {
         id: "interviews",
         label: "Intervjuud ja lood",
-        contentTypes: ["interview_turn", "interview_story", "interview_cover_story"]
+        contentTypes: ["interview_opening", "interview_turn", "interview_story", "interview_cover_story"]
     },
     {
         id: "articles",
@@ -70,6 +74,24 @@ const AI_COST_CATEGORIES = [
         contentTypes: ["daily_weather_image"]
     }
 ];
+
+const localInterfaceHosts = collectLocalInterfaceHosts();
+
+const INTERVIEW_OPENING_JSON_SCHEMA = {
+    type: "object",
+    additionalProperties: false,
+    required: ["editorialFocus", "openingQuestion", "followUpThemes"],
+    properties: {
+        editorialFocus: { type: "string" },
+        openingQuestion: { type: "string" },
+        followUpThemes: {
+            type: "array",
+            minItems: 3,
+            maxItems: 3,
+            items: { type: "string" }
+        }
+    }
+};
 
 const INTERVIEW_TURN_JSON_SCHEMA = {
     type: "object",
@@ -252,6 +274,75 @@ function hashInterviewToken(token) {
 
 function createInterviewToken() {
     return crypto.randomBytes(24).toString("base64url");
+}
+
+function collectLocalInterfaceHosts() {
+    const hosts = new Set(["localhost", "127.0.0.1", "::1"]);
+    const interfaces = os.networkInterfaces();
+
+    Object.values(interfaces).forEach(function (entries) {
+        (Array.isArray(entries) ? entries : []).forEach(function (entry) {
+            const address = compactText(entry?.address).replace(/%.+$/, "").toLowerCase();
+
+            if (address) {
+                hosts.add(address);
+            }
+        });
+    });
+
+    return hosts;
+}
+
+function normalizeHostname(value) {
+    return compactText(value).replace(/^\[|\]$/g, "").replace(/%.+$/, "").toLowerCase();
+}
+
+function isPrivateIpv4Host(hostname) {
+    return /^10\./.test(hostname)
+        || /^192\.168\./.test(hostname)
+        || /^172\.(1[6-9]|2\d|3[0-1])\./.test(hostname);
+}
+
+function isLocalOnlyHostname(hostname) {
+    return hostname === "localhost"
+        || hostname === "0.0.0.0"
+        || hostname === "::"
+        || hostname === "::1"
+        || /^127\./.test(hostname)
+        || isPrivateIpv4Host(hostname)
+        || hostname.endsWith(".local");
+}
+
+function parseAbsoluteBaseUrl(value) {
+    const candidate = compactText(value);
+
+    if (!/^https?:\/\//i.test(candidate)) {
+        return "";
+    }
+
+    try {
+        const url = new URL(candidate);
+        return url.toString().replace(/\/$/, "");
+    } catch (_error) {
+        return "";
+    }
+}
+
+function countInterviewUserTurns(messages) {
+    return (Array.isArray(messages) ? messages : []).filter(function (message) {
+        return message.role === "user";
+    }).length;
+}
+
+function stripTerminalPunctuation(value) {
+    return compactText(value).replace(/[.!?]+$/g, "").trim();
+}
+
+function ensureQuestionSentence(value, fallbackValue = "") {
+    const cleaned = compactText(value).replace(/^alustuseks[:,]?\s*/iu, "");
+    const base = stripTerminalPunctuation(cleaned) || stripTerminalPunctuation(fallbackValue);
+
+    return base ? `${base}?` : "";
 }
 
 function escapeHtml(value) {
@@ -563,6 +654,7 @@ export function registerInterviewWorkflow(options) {
         upsertEditorialItemRecord,
         updateEditorialItemMediaFields,
         uploadEditorialImageAsset,
+        retryAsyncOperation,
         getLocalDateKey,
         editorialStatusPublished,
         dailyCoverStoryStyleVersion,
@@ -572,6 +664,12 @@ export function registerInterviewWorkflow(options) {
         upsertDailyPersonaInMemory,
         removeDailyPersonaFromMemory
     } = helpers;
+
+    const runWithRetry = typeof retryAsyncOperation === "function"
+        ? retryAsyncOperation
+        : async function (_label, operation) {
+            return await operation();
+        };
 
     function ensureAdminConfigured(response) {
         if (!adminAccessCode) {
@@ -687,9 +785,14 @@ export function registerInterviewWorkflow(options) {
         const assets = Array.isArray(data) ? data : [];
 
         return await Promise.all(assets.map(async function (asset) {
-            const { data: signedData, error: signedError } = await supabaseAdmin.storage
-                .from(asset.storage_bucket)
-                .createSignedUrl(asset.storage_path, 60 * 60);
+            const { data: signedData, error: signedError } = await runWithRetry(
+                "fetchInterviewAssets:createSignedUrl",
+                async function () {
+                    return await supabaseAdmin.storage
+                        .from(asset.storage_bucket)
+                        .createSignedUrl(asset.storage_path, 60 * 60);
+                }
+            );
 
             if (signedError) {
                 throw signedError;
@@ -719,6 +822,23 @@ export function registerInterviewWorkflow(options) {
         }
 
         return Array.isArray(data) ? data : [];
+    }
+
+    async function downloadInterviewAssetBuffer(interviewId, asset) {
+        const { data: downloadedFile, error: downloadError } = await runWithRetry(
+            "downloadInterviewAssetBuffer",
+            async function () {
+                return await supabaseAdmin.storage
+                    .from(interviewUploadBucketName)
+                    .download(`interviews/${interviewId}/slot-${asset.slot}`);
+            }
+        );
+
+        if (downloadError) {
+            throw downloadError;
+        }
+
+        return await storageDownloadToBuffer(downloadedFile);
     }
 
     async function fetchEditorialItemById(editorialItemId) {
@@ -786,9 +906,11 @@ export function registerInterviewWorkflow(options) {
                 continue;
             }
 
-            const { error } = await supabaseAdmin.storage
-                .from(bucketName)
-                .remove(uniquePaths);
+            const { error } = await runWithRetry("removeStorageObjects", async function () {
+                return await supabaseAdmin.storage
+                    .from(bucketName)
+                    .remove(uniquePaths);
+            });
 
             if (error) {
                 throw error;
@@ -850,27 +972,290 @@ export function registerInterviewWorkflow(options) {
         return data;
     }
 
+    async function updateInterviewMessage(messageId, values) {
+        const payload = {};
+
+        if (typeof values?.content === "string") {
+            payload.content = compactText(values.content).slice(0, 6000);
+        }
+
+        if (values?.metadata && typeof values.metadata === "object") {
+            payload.metadata = values.metadata;
+        }
+
+        const { data, error } = await supabaseAdmin
+            .from("interview_messages")
+            .update(payload)
+            .eq("id", messageId)
+            .select("id, role, content, metadata, created_at")
+            .single();
+
+        if (error) {
+            throw error;
+        }
+
+        return data;
+    }
+
+    function cleanInterviewBrief(value) {
+        return compactText(value)
+            .replace(/^teda\s+võiks\s+intervjueerida\s+nurga\s+alt\s*/iu, "")
+            .replace(/^intervjueeri(?:da)?\s+(?:teda|seda\s+inimest)\s+nurga\s+alt\s*/iu, "")
+            .replace(/^mis\s+nurga\s+alt\s+seda\s+inimest\s+intervjueerida\??\s*/iu, "")
+            .replace(/^fookus\s*[:\-]\s*/iu, "")
+            .replace(/^nurk\s*[:\-]\s*/iu, "")
+            .replace(/^[`"'“”„]+|[`"'“”„]+$/gu, "")
+            .trim();
+    }
+
+    function buildFallbackInterviewFocusPlan(interview) {
+        const storyKind = getInterviewStoryKind(interview);
+        const cleanedBrief = cleanInterviewBrief(interview.brief || "");
+        const roleMatch = cleanedBrief.match(/^tema\s+kui\s+(.+)$/iu);
+
+        if (roleMatch) {
+            const role = stripTerminalPunctuation(roleMatch[1]);
+
+            return {
+                sourceBrief: compactText(interview.brief || ""),
+                editorialFocus: `sinu elu ja tööd ${role.toLocaleLowerCase("et-EE")} rollis`,
+                openingQuestion: `Kui sa mõtled endale ${role.toLocaleLowerCase("et-EE")} rollis, siis millisest kogemusest peaks see lugu sinu meelest algama?`,
+                followUpThemes: ["teekond", "töö argipäev", "murdehetked"]
+            };
+        }
+
+        if (cleanedBrief) {
+            return {
+                sourceBrief: compactText(interview.brief || ""),
+                editorialFocus: `sinu enda vaadet teemale "${cleanedBrief}"`,
+                openingQuestion: "Kui sa mõtled sellele teemale oma elu või töö kaudu, siis kust see sinu loos kõige ausamalt avaneb?",
+                followUpThemes: ["taust", "pingekohad", "mida see sinus muutis"]
+            };
+        }
+
+        if (storyKind === INTERVIEW_STORY_KIND.cover) {
+            return {
+                sourceBrief: "",
+                editorialFocus: "seda, mis sind inimesena ja oma töö kaudu praegu kõige rohkem kujundab",
+                openingQuestion: "Kui keegi peaks sinu loo täna päriselt lahti kirjutama, siis millisest elu- või tööhetkest peaks ta alustama?",
+                followUpThemes: ["taust", "praegune eluetapp", "pöördepunktid"]
+            };
+        }
+
+        return {
+            sourceBrief: "",
+            editorialFocus: "seda, milline inimene sa praegu oled ja mis kogemused sind on kõige rohkem vorminud",
+            openingQuestion: "Kui keegi tahaks sind praegu ausalt mõista, siis millisest kogemusest või eluetapist peaks ta alustama?",
+            followUpThemes: ["taust", "iseloom", "muutused"]
+        };
+    }
+
+    function normalizeInterviewFocusPlan(plan, interview) {
+        const fallback = buildFallbackInterviewFocusPlan(interview);
+        const rawThemes = Array.isArray(plan?.followUpThemes) ? plan.followUpThemes : [];
+
+        return {
+            sourceBrief: compactText(interview.brief || ""),
+            editorialFocus: stripTerminalPunctuation(
+                normalizeField(plan?.editorialFocus, fallback.editorialFocus, 240)
+            ) || fallback.editorialFocus,
+            openingQuestion: ensureQuestionSentence(
+                normalizeField(plan?.openingQuestion, fallback.openingQuestion, 280),
+                fallback.openingQuestion
+            ),
+            followUpThemes: [0, 1, 2].map(function (index) {
+                return stripTerminalPunctuation(
+                    normalizeField(rawThemes[index], fallback.followUpThemes[index], 80)
+                ) || fallback.followUpThemes[index];
+            })
+        };
+    }
+
+    async function generateInterviewFocusPlan(interview) {
+        const cleanedBrief = cleanInterviewBrief(interview.brief || "");
+
+        if (!openAiClient || !cleanedBrief) {
+            return buildFallbackInterviewFocusPlan(interview);
+        }
+
+        const response = await runWithAiGenerationLog({
+            contentType: "interview_opening",
+            itemSlug: `interview:${interview.id}`,
+            model: interviewerModel,
+            promptVersion: promptVersions.interview_opening || promptVersions.interview_turn,
+            inputPayload: {
+                interviewId: interview.id,
+                storyKind: getInterviewStoryKind(interview),
+                brief: cleanedBrief
+            }
+        }, async function () {
+            return await openAiClient.responses.create({
+                model: interviewerModel,
+                max_output_tokens: 320,
+                instructions: [
+                    "Sa oled tugev eestikeelne ajakirjanik, kes valmistab ette sooja ja intelligentset intervjuud.",
+                    "Sulle antakse toimetuse lühike või kohmakas brief. Sinu töö on tõlgendada see sisuliseks intervjuu fookuseks, mitte korrata briefi sõna-sõnalt.",
+                    "Kui brief on näiteks 'tema kui näitleja', siis ava seda inimese töö, identiteedi, valikute, pinge ja kogemuse kaudu, mitte ära küsi toorelt sama lauset tagasi.",
+                    "editorialFocus peab olema lühike eestikeelne fookusfraas, mis sobib lausesse 'Selle loo fookuses on ...'.",
+                    "openingQuestion peab olema üks loomulik eestikeelne avaküsimus ilma tervituse, sissejuhatuse või koolonita.",
+                    "followUpThemes peab andma 3 lühikest märksõna või teemat, mida vestluses edasi avada.",
+                    "Hoia toon inimlik, konkreetne ja ajakirjalik.",
+                    "Tagasta ainult puhas JSON."
+                ].join(" "),
+                input: [
+                    `Loo tüüp: ${getStoryKindLabel(getInterviewStoryKind(interview))}`,
+                    `Intervjueeritava nimi, kui teada: ${compactText(interview.invite_name || interview.subject_name || "teadmata")}`,
+                    `Toimetuse toores brief: ${cleanedBrief}`
+                ].join("\n\n"),
+                text: {
+                    verbosity: getModelVerbosity(interviewerModel, "low"),
+                    format: {
+                        type: "json_schema",
+                        name: "interview_opening",
+                        strict: true,
+                        schema: INTERVIEW_OPENING_JSON_SCHEMA
+                    }
+                }
+            });
+        });
+
+        if (response.status && response.status !== "completed") {
+            const reason = response.incomplete_details?.reason || response.status;
+            throw new Error(`Interview opening incomplete: ${reason}`);
+        }
+
+        return normalizeInterviewFocusPlan(parseJsonOutput(response.output_text), interview);
+    }
+
+    async function resolveInterviewFocusPlan(interview) {
+        try {
+            return await generateInterviewFocusPlan(interview);
+        } catch (error) {
+            console.error("Failed to generate interview opening focus plan.", error);
+            return buildFallbackInterviewFocusPlan(interview);
+        }
+    }
+
+    function buildInterviewOpeningMessage(interview, focusPlan) {
+        const subjectName = compactText(interview.invite_name || interview.subject_name || "");
+        const storyKindLabel = getStoryKindLabel(getInterviewStoryKind(interview));
+
+        return [
+            subjectName ? `Tere, ${subjectName}.` : "Tere.",
+            `Mina olen ${INTERVIEW_JOURNALIST_NAME}, Probleemilahendaja ajakirjanik.`,
+            `Teen sinuga rahuliku intervjuu, millest võib sündida ${storyKindLabel}.`,
+            focusPlan?.editorialFocus ? `Selle loo fookuses on ${focusPlan.editorialFocus}.` : "",
+            focusPlan?.openingQuestion ? `Alustuseks: ${focusPlan.openingQuestion}` : ""
+        ].filter(Boolean).join(" ");
+    }
+
+    function extractOpeningMessage(messages) {
+        const list = Array.isArray(messages) ? messages : [];
+
+        return list.find(function (message, index) {
+            return message?.role === "assistant"
+                && (message?.metadata?.stage === "opening" || index === 0);
+        }) || null;
+    }
+
+    function extractInterviewFocusPlan(interview, messages) {
+        const openingMessage = extractOpeningMessage(messages);
+        const rawPlan = openingMessage?.metadata?.focusPlan;
+
+        if (rawPlan && typeof rawPlan === "object") {
+            return normalizeInterviewFocusPlan(rawPlan, interview);
+        }
+
+        return buildFallbackInterviewFocusPlan(interview);
+    }
+
+    function shouldRefreshOpeningMessage(interview, messages) {
+        const openingMessage = extractOpeningMessage(messages);
+
+        if (!openingMessage || openingMessage.role !== "assistant") {
+            return false;
+        }
+
+        if (messages.some(function (message) {
+            return message.role === "user";
+        })) {
+            return false;
+        }
+
+        const currentBrief = compactText(interview.brief || "");
+        const storedFocusPlan = openingMessage.metadata?.focusPlan;
+        const storedBrief = compactText(storedFocusPlan?.sourceBrief || "");
+        const legacyLiteralBrief = currentBrief
+            && compactText(openingMessage.content || "").includes(`Toimetus tahab eriti hästi mõista teemat: ${currentBrief}`);
+        const legacyGenericPrompt = /mis küsimus või pinge sind viimasel ajal päriselt saatnud on/i.test(compactText(openingMessage.content || ""));
+
+        return !storedFocusPlan || storedBrief !== currentBrief || legacyLiteralBrief || legacyGenericPrompt;
+    }
+
+    function buildInterviewFocusPromptBlock(focusPlan) {
+        if (!focusPlan) {
+            return "Toimetuslik fookus: puudub";
+        }
+
+        return [
+            `Toimetuslik fookus: ${focusPlan.editorialFocus || "puudub"}`,
+            `Soovitud avaküsimuse suund: ${focusPlan.openingQuestion || "puudub"}`,
+            `Olulised alateemad: ${(Array.isArray(focusPlan.followUpThemes) ? focusPlan.followUpThemes : []).join(", ") || "puuduvad"}`
+        ].join("\n");
+    }
+
+    function buildInterviewClosingMessage() {
+        return "Aitäh. Intervjuu tekstiosa on koos. Järgmine samm on laadida üles kaks pilti, mida saame selle loo juures kasutada.";
+    }
+
+    async function moveInterviewToImages(interview, metadata = {}) {
+        const closingMessage = buildInterviewClosingMessage();
+        await insertInterviewMessage(interview.id, "assistant", closingMessage, {
+            stage: "awaiting_images",
+            ...metadata
+        });
+
+        const updatedInterview = await updateInterview(interview.id, {
+            status: INTERVIEW_STATUS.awaitingImages,
+            completed_at: interview.completed_at || new Date().toISOString()
+        });
+
+        return {
+            assistantMessage: closingMessage,
+            readyForImages: true,
+            interview: updatedInterview
+        };
+    }
+
     async function ensureOpeningAssistantMessage(interview) {
         const messages = await fetchInterviewMessages(interview.id);
 
         if (messages.length > 0) {
+            if (shouldRefreshOpeningMessage(interview, messages)) {
+                const openingMessage = extractOpeningMessage(messages);
+                const focusPlan = await resolveInterviewFocusPlan(interview);
+
+                await updateInterviewMessage(openingMessage.id, {
+                    content: buildInterviewOpeningMessage(interview, focusPlan),
+                    metadata: {
+                        ...(openingMessage.metadata && typeof openingMessage.metadata === "object" ? openingMessage.metadata : {}),
+                        stage: "opening",
+                        focusPlan
+                    }
+                });
+
+                return await fetchInterviewMessages(interview.id);
+            }
+
             return messages;
         }
 
-        const subjectName = compactText(interview.invite_name || interview.subject_name || "");
-        const brief = compactText(interview.brief || "");
-        const storyKindLabel = getStoryKindLabel(getInterviewStoryKind(interview));
-        const openingMessage = [
-            subjectName ? `Tere, ${subjectName}.` : "Tere.",
-            `Mina olen ${INTERVIEW_JOURNALIST_NAME}, Probleemilahendaja ajakirjanik.`,
-            `Teen sinuga rahuliku intervjuu, millest võib sündida ${storyKindLabel}.`,
-            brief
-                ? `Toimetus tahab eriti hästi mõista teemat: ${brief} Alustuseks kirjelda palun, kuidas see olukord sinu jaoks päriselt välja nägi.`
-                : "Alustuseks kirjelda palun oma sõnadega, mis küsimus või pinge sind viimasel ajal päriselt saatnud on."
-        ].join(" ");
+        const focusPlan = await resolveInterviewFocusPlan(interview);
+        const openingMessage = buildInterviewOpeningMessage(interview, focusPlan);
 
         await insertInterviewMessage(interview.id, "assistant", openingMessage, {
-            stage: "opening"
+            stage: "opening",
+            focusPlan
         });
 
         return await fetchInterviewMessages(interview.id);
@@ -886,10 +1271,9 @@ export function registerInterviewWorkflow(options) {
     }
 
     async function generateFollowUpMessage(interview, messages) {
-        const userTurnCount = messages.filter(function (message) {
-            return message.role === "user";
-        }).length;
+        const userTurnCount = countInterviewUserTurns(messages);
         const transcript = buildInterviewTranscript(messages);
+        const focusPlan = extractInterviewFocusPlan(interview, messages);
 
         const response = await runWithAiGenerationLog({
             contentType: "interview_turn",
@@ -908,6 +1292,12 @@ export function registerInterviewWorkflow(options) {
                 instructions: [
                     "Sa oled tugev eestikeelne ajakirjanik, kes teeb sooja ja professionaalse persooniloo eeltööd.",
                     "Sinu eesmärk on koguda ühes realistlikus intervjuus detailid, millest saab hiljem kirjutada usutava ajakirjaliku loo.",
+                    "Admini brief ja fookusplaan kirjeldavad toimetuslikku nurka. Ära korda briefi sõna-sõnalt ega muuda seda kohmakaks probleemiküsimuseks.",
+                    "Hoia kogu intervjuu selgelt samas fookuses ja ava seda inimese kogemuse, valikute, detailide, pingete, tähenduse ja tagajärgede kaudu.",
+                    "Kui fookus puudutab rolli, ametit, loomingut või identiteeti, küsi just selle eluosa kogemuse kohta, mitte abstraktselt probleemidest.",
+                    `Sea sihiks umbes ${MIN_INTERVIEW_USER_TURNS} kuni ${MAX_INTERVIEW_USER_TURNS} sisukat kasutaja vastust kokku.`,
+                    `Kui kasutaja on vastanud juba ${Math.max(MIN_INTERVIEW_USER_TURNS + 1, MAX_INTERVIEW_USER_TURNS - 1)} või rohkem korda ja materjal on tugev, märgi readyForImages = true.`,
+                    `Kui kasutaja vastuseid on juba ${MAX_INTERVIEW_USER_TURNS} või rohkem, märgi readyForImages = true.`,
                     "Küsi alati ainult üks järgmine küsimus korraga.",
                     "Ära kirjuta lugu valmis, ära tee kokkuvõtet ja ära anna nõuandeid.",
                     "Küsi loomulikult selliseid asju nagu: kes inimene on, mis olukord oli, mis täpselt kriipis, millal pinge kõige teravamalt välja tuli, mida ta ise märkas, mis muutus pärast lahendust, kuidas see mõjus igapäevaelule.",
@@ -918,6 +1308,7 @@ export function registerInterviewWorkflow(options) {
                 ].join(" "),
                 input: [
                     `Admini brief: ${compactText(interview.brief || "puudub")}`,
+                    buildInterviewFocusPromptBlock(focusPlan),
                     `Intervjueeritava nimi, kui teada: ${compactText(interview.invite_name || interview.subject_name || "teadmata")}`,
                     `Senine vestlus:\n${transcript}`,
                     `Praegune kasutaja vastuste arv: ${userTurnCount}`
@@ -944,6 +1335,7 @@ export function registerInterviewWorkflow(options) {
 
     async function generatePersonaStoryDraft(interview, messages, assets) {
         const transcript = buildInterviewTranscript(messages);
+        const focusPlan = extractInterviewFocusPlan(interview, messages);
         const assetContext = assets.map(function (asset) {
             return `Foto ${asset.slot}: ${compactText(asset.caption || "kirjeldus puudub")}`;
         }).join("\n");
@@ -966,6 +1358,7 @@ export function registerInterviewWorkflow(options) {
                     "Kasuta ainult vestluses antud infot. Ära leiuta eluloolisi fakte, ametinimetusi ega suuri draamasid juurde.",
                     "Toon peab olema konkreetne, inimlik, rahulik ja usutav nagu hästi toimetatud Eesti digi-ajakirja persoonilugu.",
                     "Lugu peab näitama inimest, üht päris probleemi või pinget, olulist selgusehetke ja seda, mis pärast muutus.",
+                    "Hoia lugu samas toimetuslikus nurgas, mis on sisendis lahti tõlgitud.",
                     "Ära tee reklaami, ära maini AI-d ega loo tegemise protsessi.",
                     "characterMeta peab olema lühike identifitseeriv rida: vanus kui see tuli välja, roll/amet ja koht Eestis. Kui mõni neist puudub, ära leiuta, vaid kasuta ainult teadaolevat.",
                     "title peab olema konkreetne ja ajakirjalik, mitte klikimagnet.",
@@ -983,6 +1376,7 @@ export function registerInterviewWorkflow(options) {
                 ].join(" "),
                 input: [
                     `Admini brief: ${compactText(interview.brief || "puudub")}`,
+                    buildInterviewFocusPromptBlock(focusPlan),
                     `Intervjueeritava nimi, kui teada: ${compactText(interview.invite_name || "teadmata")}`,
                     `Vestluse transkript:\n${transcript}`,
                     `Üles laaditud piltide kontekst:\n${assetContext || "Kirjeldused puuduvad."}`
@@ -1009,6 +1403,7 @@ export function registerInterviewWorkflow(options) {
 
     async function generateCoverStoryDraft(interview, messages, assets) {
         const transcript = buildInterviewTranscript(messages);
+        const focusPlan = extractInterviewFocusPlan(interview, messages);
         const assetContext = assets.map(function (asset) {
             return `Foto ${asset.slot}: ${compactText(asset.caption || "kirjeldus puudub")}`;
         }).join("\n");
@@ -1030,6 +1425,7 @@ export function registerInterviewWorkflow(options) {
                     "Kirjuta eestikeelse intervjuu põhjal tugev ja usutav digiajakirja kaaneloo mustand.",
                     "Kasuta ainult vestluses antud infot. Ära mõtle välja eluloolisi detaile, ameteid ega suuri pöördeid.",
                     "Tulemus peab sobima Probleemilahendaja avalehe kaaneloosse.",
+                    "Hoia lugu samas toimetuslikus nurgas, mis on sisendis lahti tõlgitud.",
                     "subjectName peab olema inimese nimi nii, nagu see vestlusest usutavalt välja tuleb.",
                     "title peab olema lühike, lööv ja ajakirjalik pealkiri.",
                     "summary peab olema üks tugev sissejuhatav coverline, mitte pikk lõik.",
@@ -1044,6 +1440,7 @@ export function registerInterviewWorkflow(options) {
                 ].join(" "),
                 input: [
                     `Admini brief: ${compactText(interview.brief || "puudub")}`,
+                    buildInterviewFocusPromptBlock(focusPlan),
                     `Intervjueeritava nimi, kui teada: ${compactText(interview.invite_name || "teadmata")}`,
                     `Vestluse transkript:\n${transcript}`,
                     `Üles laaditud piltide kontekst:\n${assetContext || "Kirjeldused puuduvad."}`
@@ -1079,10 +1476,23 @@ export function registerInterviewWorkflow(options) {
     }
 
     function resolveBaseUrl(baseUrlFromClient, request) {
-        const explicitBaseUrl = compactText(appBaseUrl || baseUrlFromClient);
+        const configuredBaseUrl = parseAbsoluteBaseUrl(appBaseUrl);
+        const clientBaseUrl = parseAbsoluteBaseUrl(baseUrlFromClient);
 
-        if (/^https?:\/\//i.test(explicitBaseUrl)) {
-            return explicitBaseUrl.replace(/\/$/, "");
+        if (configuredBaseUrl) {
+            const configuredHost = normalizeHostname(new URL(configuredBaseUrl).hostname);
+
+            if (!isLocalOnlyHostname(configuredHost) || localInterfaceHosts.has(configuredHost)) {
+                return configuredBaseUrl;
+            }
+        }
+
+        if (clientBaseUrl) {
+            return clientBaseUrl;
+        }
+
+        if (configuredBaseUrl) {
+            return configuredBaseUrl;
         }
 
         const forwardedProto = compactText(request.headers["x-forwarded-proto"]);
@@ -1305,15 +1715,11 @@ export function registerInterviewWorkflow(options) {
         const storyPayload = interview?.story_payload && typeof interview.story_payload === "object"
             ? interview.story_payload
             : {};
-        const userMessageCount = Array.isArray(messages)
-            ? messages.filter(function (message) {
-                return message.role === "user";
-            }).length
-            : 0;
+        const userMessageCount = countInterviewUserTurns(messages);
         const canMoveToImages = interview?.status === INTERVIEW_STATUS.awaitingImages
             || interview?.status === INTERVIEW_STATUS.readyForReview
             || interview?.status === INTERVIEW_STATUS.published
-            || userMessageCount >= 3
+            || userMessageCount >= MIN_INTERVIEW_USER_TURNS
             || Boolean(messages.find(function (message) {
                 return message.role === "assistant" && message.metadata?.readyForImages;
             }));
@@ -1339,6 +1745,8 @@ export function registerInterviewWorkflow(options) {
             createdAt: interview.created_at || null,
             updatedAt: interview.updated_at || null,
             userMessageCount,
+            minUserMessageCount: MIN_INTERVIEW_USER_TURNS,
+            maxUserMessageCount: MAX_INTERVIEW_USER_TURNS,
             canMoveToImages,
             storyPayload,
             messages,
@@ -2099,7 +2507,8 @@ export function registerInterviewWorkflow(options) {
                         pullQuote: normalizedStory.pullQuote,
                         photoBrief: normalizedStory.photoBrief,
                         imageAlt: normalizedStory.imageAlt,
-                        transcriptSummary: normalizedStory.transcriptSummary
+                        transcriptSummary: normalizedStory.transcriptSummary,
+                        galleryImages: []
                     },
                     source_model: interviewStoryModel,
                     prompt_version: `${promptVersions.interview_story}:cover`,
@@ -2107,16 +2516,14 @@ export function registerInterviewWorkflow(options) {
                     published_at: publishedAt
                 });
 
+                const publicAssets = [];
+
                 for (const asset of assets) {
-                    const { data: downloadedFile, error: downloadError } = await supabaseAdmin.storage
-                        .from(interviewUploadBucketName)
-                        .download(`interviews/${interview.id}/slot-${asset.slot}`);
-
-                    if (downloadError) {
-                        throw downloadError;
-                    }
-
-                    const buffer = await storageDownloadToBuffer(downloadedFile);
+                    const buffer = await downloadInterviewAssetBuffer(interview.id, asset);
+                    const isCoverAsset = asset.slot === coverAssetSlot;
+                    const altText = isCoverAsset
+                        ? normalizeField(normalizedStory.imageAlt, `${normalizedStory.subjectName} kaaneloo portree`, 180)
+                        : normalizeField(`${normalizedStory.subjectName} kaaneloo lisafoto`, `${normalizedStory.subjectName} kaaneloo lisafoto`, 180);
                     const media = await uploadEditorialImageAsset({
                         itemId: itemRow.id,
                         itemSlug: slug,
@@ -2126,9 +2533,7 @@ export function registerInterviewWorkflow(options) {
                         imageBuffer: buffer,
                         mimeType: asset.mimeType,
                         extension: getMimeExtension(asset.mimeType),
-                        altText: asset.slot === coverAssetSlot
-                            ? normalizeField(normalizedStory.imageAlt, `${normalizedStory.subjectName} kaaneloo portree`, 180)
-                            : normalizeField(`${normalizedStory.subjectName} kaaneloo lisafoto`, `${normalizedStory.subjectName} kaaneloo lisafoto`, 180),
+                        altText,
                         origin: "upload",
                         metadata: {
                             interviewId: publishInterview.id,
@@ -2137,10 +2542,47 @@ export function registerInterviewWorkflow(options) {
                         }
                     });
 
-                    if (asset.slot === coverAssetSlot) {
+                    if (!isCoverAsset) {
+                        publicAssets.push({
+                            slot: asset.slot,
+                            url: media.publicUrl,
+                            alt: altText,
+                            caption: normalizeField(asset.caption, "", 180)
+                        });
+                    }
+
+                    if (isCoverAsset) {
                         itemRow = await updateEditorialItemMediaFields(slug, media);
                     }
                 }
+
+                itemRow = await upsertEditorialItemRecord({
+                    slug,
+                    content_type: "daily_article",
+                    date_key: dateKey,
+                    location_key: null,
+                    generation_signature: `interview:${publishInterview.id}`,
+                    status: editorialStatusPublished,
+                    title: normalizedStory.title,
+                    summary: normalizedStory.summary,
+                    payload: {
+                        id: dateKey,
+                        variant: "cover_story",
+                        styleVersion: dailyCoverStoryStyleVersion,
+                        subjectName: normalizedStory.subjectName,
+                        lead: normalizedStory.lead,
+                        paragraphs: normalizedStory.paragraphs,
+                        pullQuote: normalizedStory.pullQuote,
+                        photoBrief: normalizedStory.photoBrief,
+                        imageAlt: normalizedStory.imageAlt,
+                        transcriptSummary: normalizedStory.transcriptSummary,
+                        galleryImages: publicAssets
+                    },
+                    source_model: interviewStoryModel,
+                    prompt_version: `${promptVersions.interview_story}:cover`,
+                    style_version: dailyCoverStoryStyleVersion,
+                    published_at: publishedAt
+                });
 
                 await unlinkPreviousInterviewsFromEditorialItem(itemRow.id, publishInterview.id);
                 upsertDailyCoverStoryInMemory(
@@ -2182,15 +2624,7 @@ export function registerInterviewWorkflow(options) {
                 const publicAssets = [];
 
                 for (const asset of assets) {
-                    const { data: downloadedFile, error: downloadError } = await supabaseAdmin.storage
-                        .from(interviewUploadBucketName)
-                        .download(`interviews/${interview.id}/slot-${asset.slot}`);
-
-                    if (downloadError) {
-                        throw downloadError;
-                    }
-
-                    const buffer = await storageDownloadToBuffer(downloadedFile);
+                    const buffer = await downloadInterviewAssetBuffer(interview.id, asset);
                     const media = await uploadEditorialImageAsset({
                         itemId: itemRow.id,
                         itemSlug: slug,
@@ -2364,16 +2798,42 @@ export function registerInterviewWorkflow(options) {
                 started_at: interview.started_at || new Date().toISOString()
             });
             const messages = await fetchInterviewMessages(interview.id);
-            const followUp = await generateFollowUpMessage(interviewAfterStart, messages);
-            await insertInterviewMessage(interview.id, "assistant", followUp.assistantMessage, {
-                readyForImages: Boolean(followUp.readyForImages)
-            });
+            const userTurnCount = countInterviewUserTurns(messages);
+            let responsePayload;
+
+            if (userTurnCount >= MAX_INTERVIEW_USER_TURNS) {
+                responsePayload = await moveInterviewToImages(interviewAfterStart, {
+                    autoClosed: true,
+                    reason: "max_turns",
+                    userTurnCount
+                });
+            } else {
+                const followUp = await generateFollowUpMessage(interviewAfterStart, messages);
+
+                if (followUp.readyForImages) {
+                    responsePayload = await moveInterviewToImages(interviewAfterStart, {
+                        autoClosed: true,
+                        reason: "ai_ready",
+                        userTurnCount
+                    });
+                } else {
+                    await insertInterviewMessage(interview.id, "assistant", followUp.assistantMessage, {
+                        readyForImages: false
+                    });
+
+                    responsePayload = {
+                        assistantMessage: followUp.assistantMessage,
+                        readyForImages: false,
+                        interview: await fetchInterviewById(interview.id)
+                    };
+                }
+            }
 
             response.json({
-                assistantMessage: followUp.assistantMessage,
-                readyForImages: Boolean(followUp.readyForImages),
+                assistantMessage: responsePayload.assistantMessage,
+                readyForImages: Boolean(responsePayload.readyForImages),
                 interview: serializeInterviewRow(
-                    await fetchInterviewById(interview.id),
+                    responsePayload.interview,
                     await fetchInterviewMessages(interview.id),
                     await fetchInterviewAssets(interview.id)
                 )
@@ -2403,30 +2863,24 @@ export function registerInterviewWorkflow(options) {
             }
 
             const messages = await fetchInterviewMessages(interview.id);
-            const userTurnCount = messages.filter(function (message) {
-                return message.role === "user";
-            }).length;
+            const userTurnCount = countInterviewUserTurns(messages);
 
-            if (userTurnCount < 3) {
+            if (userTurnCount < MIN_INTERVIEW_USER_TURNS) {
                 response.status(400).json({
                     error: "Enne lõpetamist peaks intervjuus olema vähemalt mõned sisukad vastused."
                 });
                 return;
             }
 
-            const closingMessage = "Aitäh. Intervjuu tekstiosa on koos. Järgmine samm on laadida üles kaks pilti, mida saame selle loo juures kasutada.";
-            await insertInterviewMessage(interview.id, "assistant", closingMessage, {
-                stage: "awaiting_images"
-            });
-
-            const updatedInterview = await updateInterview(interview.id, {
-                status: INTERVIEW_STATUS.awaitingImages,
-                completed_at: new Date().toISOString()
+            const moveResult = await moveInterviewToImages(interview, {
+                autoClosed: false,
+                reason: "manual_finish",
+                userTurnCount
             });
 
             response.json({
                 interview: serializeInterviewRow(
-                    updatedInterview,
+                    moveResult.interview,
                     await fetchInterviewMessages(interview.id),
                     await fetchInterviewAssets(interview.id)
                 )
@@ -2473,13 +2927,15 @@ export function registerInterviewWorkflow(options) {
             }
 
             const storagePath = `interviews/${interview.id}/slot-${slot}`;
-            const uploadResult = await supabaseAdmin.storage
-                .from(interviewUploadBucketName)
-                .upload(storagePath, upload.buffer, {
-                    upsert: true,
-                    contentType: upload.mimeType,
-                    cacheControl: "3600"
-                });
+            const uploadResult = await runWithRetry("interviewSessionUpload", async function () {
+                return await supabaseAdmin.storage
+                    .from(interviewUploadBucketName)
+                    .upload(storagePath, upload.buffer, {
+                        upsert: true,
+                        contentType: upload.mimeType,
+                        cacheControl: "3600"
+                    });
+            });
 
             if (uploadResult.error) {
                 throw uploadResult.error;

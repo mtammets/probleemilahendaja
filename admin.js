@@ -57,6 +57,7 @@ const cancelFieldButton = document.getElementById("cancelFieldButton");
 
 const ADMIN_REFRESH_INTERVAL = 5 * 1000;
 const DAILY_PERSONA_REFRESH_SIGNAL_KEY = "probleemilahendaja:daily-persona-refresh";
+const DAILY_COVER_STORY_REFRESH_SIGNAL_KEY = "probleemilahendaja:daily-cover-story-refresh";
 const JOURNALIST_LABEL = "Ajakirjanik Liisi";
 const numberFormatter = new Intl.NumberFormat("et-EE");
 const usdFormatter = new Intl.NumberFormat("en-US", {
@@ -97,8 +98,14 @@ const TAB_IDS = ["preview", "messages", "assets"];
 const FIELD_META = {
     cover: {
         subjectName: { label: "Nimi", hint: "See tekst ilmub kaaneloos nime real.", rows: 2 },
-        title: { label: "Pealkiri", hint: "Seda välja coveris enam ei kuvata.", rows: 3 },
-        summary: { label: "Sissejuhatus", hint: "Seda välja coveris enam ei kuvata.", rows: 4 }
+        title: { label: "Pealkiri", hint: "Kaaneloo pealkiri coveril ja eelvaates.", rows: 3 },
+        summary: { label: "Sissejuhatus", hint: "Lühike coverline või kokkuvõte.", rows: 4 },
+        lead: { label: "Lead", hint: "Avaosa, mis läheb eelvaates põhiteksti ette.", rows: 5 },
+        pullQuote: { label: "Tsitaat", hint: "Tugev lühike tsitaat kaaneloo keskelt.", rows: 4 },
+        "paragraphs.0": { label: "Lõik 1", hint: "Esimene põhiteksti lõik.", rows: 5 },
+        "paragraphs.1": { label: "Lõik 2", hint: "Teine põhiteksti lõik.", rows: 5 },
+        "paragraphs.2": { label: "Lõik 3", hint: "Kolmas põhiteksti lõik.", rows: 5 },
+        "paragraphs.3": { label: "Lõik 4", hint: "Neljas põhiteksti lõik.", rows: 5 }
     },
     persona: {
         theme: { label: "Teema", hint: "Lühike märksõna loosse.", rows: 2 },
@@ -136,6 +143,16 @@ const state = {
 
 let adminRefreshTimer = 0;
 let publicMetricsModulePromise = null;
+
+function broadcastEditorialRefreshSignal() {
+    try {
+        const signal = String(Date.now());
+        window.localStorage.setItem(DAILY_PERSONA_REFRESH_SIGNAL_KEY, signal);
+        window.localStorage.setItem(DAILY_COVER_STORY_REFRESH_SIGNAL_KEY, signal);
+    } catch (_error) {
+        // Ignore storage failures and keep the admin flow working.
+    }
+}
 
 function presentInterviewMessageContent(message = "") {
     return String(message || "")
@@ -782,6 +799,8 @@ function renderCoverPreview(interview, storyPayload) {
     const wordmarkLineAccent = document.createElement("span");
     const coverline = document.createElement("div");
     const subject = buildEditableElement("p", "intake-coverline__name", "subjectName", STORY_KIND.cover, storyPayload.subjectName);
+    const title = buildEditableElement("h2", "intake-coverline__title", "title", STORY_KIND.cover, storyPayload.title);
+    const summary = buildEditableElement("p", "intake-coverline__summary", "summary", STORY_KIND.cover, storyPayload.summary);
     const counter = document.createElement("div");
     const counterLabel = document.createElement("span");
     const counterValue = document.createElement("strong");
@@ -789,6 +808,11 @@ function renderCoverPreview(interview, storyPayload) {
     const stage = document.createElement("div");
     const stageInput = document.createElement("div");
     const stageButton = document.createElement("div");
+    const story = document.createElement("section");
+    const storyKicker = document.createElement("span");
+    const storyLead = buildEditableElement("p", "cover-preview-live__story-lead", "lead", STORY_KIND.cover, storyPayload.lead);
+    const storyQuote = buildEditableElement("blockquote", "cover-preview-live__story-quote", "pullQuote", STORY_KIND.cover, storyPayload.pullQuote);
+    const paragraphs = document.createElement("div");
     const today = new Date();
 
     shell.className = "cover-preview cover-preview-live";
@@ -812,6 +836,9 @@ function renderCoverPreview(interview, storyPayload) {
     stage.className = "cover-preview-live__stage-frame";
     stageInput.className = "cover-preview-live__input";
     stageButton.className = "cover-preview-live__button";
+    story.className = "cover-preview-live__story";
+    storyKicker.className = "cover-preview-live__story-kicker";
+    paragraphs.className = "cover-preview-live__story-paragraphs";
 
     if (coverAsset?.previewUrl) {
         hero.style.setProperty("--intake-hero-image", `url("${coverAsset.previewUrl}")`);
@@ -827,17 +854,26 @@ function renderCoverPreview(interview, storyPayload) {
     counterSuffix.textContent = "Probleemi";
     stageInput.textContent = "Kirjuta oma probleem siia...";
     stageButton.textContent = "Lahenda probleem!";
+    storyKicker.textContent = "Loo eelvaade";
 
     folio.append(folioDate, folioIssue);
     wordmarkName.append(wordmarkLinePrimary, wordmarkLineAccent);
     wordmark.append(wordmarkName);
-    coverline.append(subject);
+    coverline.append(subject, title, summary);
     brandCopy.append(kicker, wordmark, coverline);
     brand.append(brandCopy);
     counter.append(counterLabel, counterValue, counterSuffix);
     hero.append(folio, brand, counter);
     stage.append(stageInput, stageButton);
-    frame.append(hero, stage);
+
+    (Array.isArray(storyPayload.paragraphs) ? storyPayload.paragraphs : []).forEach(function (paragraph, index) {
+        paragraphs.append(
+            buildEditableElement("p", "cover-preview-live__story-paragraph", `paragraphs.${index}`, STORY_KIND.cover, paragraph || "")
+        );
+    });
+
+    story.append(storyKicker, storyLead, storyQuote, paragraphs);
+    frame.append(hero, stage, story);
     shell.append(frame);
 
     return shell;
@@ -1303,7 +1339,7 @@ async function publishSelectedInterview() {
 
     state.selectedInterview = payload.interview || null;
     state.activeFilter = "published";
-    window.localStorage.setItem(DAILY_PERSONA_REFRESH_SIGNAL_KEY, String(Date.now()));
+    broadcastEditorialRefreshSignal();
     setFeedback(adminDetailFeedback, "Lugu avaldati.", false);
     renderInterviewFilters();
     await loadInterviewList();
@@ -1354,6 +1390,7 @@ async function deleteSelectedInterview() {
     state.selectedInterviewId = "";
     state.selectedInterview = null;
     closeFieldEditor();
+    broadcastEditorialRefreshSignal();
     setFeedback(adminDetailFeedback, "Intervjuu kustutati.", false);
     await loadInterviewList();
     void loadAdminMetrics().catch(function () {
@@ -1539,7 +1576,13 @@ createInterviewForm?.addEventListener("submit", async function (event) {
         createInterviewEmail.value = "";
         createInterviewBrief.value = "";
         state.activeFilter = "active";
-        setFeedback(createInterviewFeedback, "Link on valmis ja saadetud.", false);
+        setFeedback(
+            createInterviewFeedback,
+            sendPayload.delivery === "resend"
+                ? "Link on valmis ja saadetud."
+                : "Meilisaatja puudub, kasuta all olevat linki käsitsi.",
+            false
+        );
         renderInterviewFilters();
         await loadInterviewList();
         void loadAdminMetrics().catch(function () {
