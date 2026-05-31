@@ -1968,7 +1968,8 @@ function buildHoroscopeRecordFromEditorialRow(row) {
         dateKey: getEditorialDateKey(row),
         styleVersion: Number(row?.style_version) || DAILY_HOROSCOPE_STYLE_VERSION,
         publishedAt: getEditorialPublishedAt(row),
-        signs: Array.isArray(payload.signs) ? payload.signs : []
+        signs: Array.isArray(payload.signs) ? payload.signs : [],
+        sourceModel: normalizeField(row?.source_model, "fallback", 64)
     };
 }
 
@@ -4692,6 +4693,7 @@ function buildFallbackDailyHoroscope(dateKey) {
         dateKey,
         styleVersion: DAILY_HOROSCOPE_STYLE_VERSION,
         publishedAt: new Date().toISOString(),
+        sourceModel: "fallback",
         signs: HOROSCOPE_SIGNS.map(function (signMeta) {
             const fallbackIndicators = HOROSCOPE_INDICATOR_DEFAULTS[signMeta.id] || {
                 money: 3,
@@ -4739,6 +4741,7 @@ function normalizeDailyHoroscopePayload(dateKey, payload, publishedAt = new Date
         dateKey,
         styleVersion: DAILY_HOROSCOPE_STYLE_VERSION,
         publishedAt,
+        sourceModel: normalizeField(payload?.sourceModel || payload?.source_model, "", 64),
         signs: HOROSCOPE_SIGNS.map(function (signMeta) {
             const matchingPayload = payloadSigns.find(function (entry) {
                 return entry?.sign === signMeta.id;
@@ -4762,7 +4765,8 @@ function normalizeStoredDailyHoroscope(record) {
     const publishedAt = new Date(parseTimestamp(record.publishedAt || record.published_at) || Date.now()).toISOString();
 
     return normalizeDailyHoroscopePayload(dateKey, {
-        signs: record.signs
+        signs: record.signs,
+        sourceModel: record.sourceModel || record.source_model
     }, publishedAt);
 }
 
@@ -4826,7 +4830,7 @@ async function persistDailyHoroscope(horoscope) {
         payload: {
             signs: normalizedHoroscope.signs
         },
-        source_model: client ? horoscopeModel : "fallback",
+        source_model: normalizeField(normalizedHoroscope.sourceModel, client ? horoscopeModel : "fallback", 64),
         prompt_version: EDITORIAL_PROMPT_VERSIONS.daily_horoscope,
         style_version: DAILY_HOROSCOPE_STYLE_VERSION,
         published_at: normalizedHoroscope.publishedAt
@@ -4851,66 +4855,95 @@ async function generateDailyHoroscope(dateKey) {
         return fallbackHoroscope;
     }
 
-    try {
-        const aiResponse = await runWithAiGenerationLog({
-            contentType: "daily_horoscope",
-            itemSlug: buildDailyHoroscopeSlug(dateKey),
-            model: horoscopeModel,
-            promptVersion: EDITORIAL_PROMPT_VERSIONS.daily_horoscope,
-            inputPayload: {
-                dateKey
-            }
-        }, async function () {
-            return await client.responses.create({
-                model: horoscopeModel,
-                max_output_tokens: 2000,
-                reasoning: {
-                    effort: "low"
-                },
-                instructions: [
-                    "Sa kirjutad eestikeelse päevase horoskoobi 12 tähemärgile.",
-                    "Iga tähemärgi tekst peab olema seotud probleemide, hõõrdumise, otsuste, lahtiste otsade või nende lahendamisega.",
-                    "Toon peab olema jutustav, voolav ja horoskoobile omane, aga samal ajal maitsekas ja usutav.",
-                    "See peab lugedes mõjuma nagu päris horoskoobirubriik, mitte nagu juhend, checklist või lahenduste nimekiri.",
-                    "Lauseehitus võib olla horoskoobile omane, näiteks 'täna oled...' või 'päeva peale võib selguda...'.",
-                    "Ära alusta kõiki tähemärke sama mustriga ja väldi korduvat mehhaanilist rütmi.",
-                    "Ära kasuta sõnu või ideid nagu universum, kosmiline energia, retrograad, vibratsioon, hinge teekond, tervenemine, manifestatsioon.",
-                    "Ära maini AI-d, mudelit ega sisu loomise protsessi.",
-                    "Iga märgi title peab olema lühike, kuni umbes 4 sõna.",
-                    "paragraphs peab sisaldama täpselt 3 lühikest lõiku, mis loevad kokku ühe voolava horoskoobina.",
-                    "Esimene lõik peab seadma päeva tooni ja näitama, kuidas lahtised teemad või probleemid sind täna mõjutavad.",
-                    "Teine lõik peab kirjeldama, kus kohas pinge, hõõrdumine või mõni lahendamata küsimus end näitab.",
-                    "Kolmas lõik peab andma elegantse horoskoobilaadse suuna selle kohta, mis juhtub siis, kui teema käsile võtad või õigel hetkel lõpetad.",
-                    "Kirjuta konkreetselt, aga ära muutu käskivaks ega tehniliseks.",
-                    "indicators peab andma kolm päeva näidikut skaalal 1 kuni 5: money, relationships, family.",
-                    "Näidikud peavad sobima sama päeva tooniga, mitte olema juhuslikud.",
-                    "Tagasta ainult puhas JSON."
-                ].join(" "),
-                input: [
-                    `Kuupäev: ${dateKey}`,
-                    "Tähemärgid ja toonid:",
-                    HOROSCOPE_SIGNS.map(function (signMeta) {
-                        return `- ${signMeta.label} (${signMeta.id}): ${signMeta.prompt}`;
-                    }).join("\n")
-                ].join("\n"),
-                text: {
-                    verbosity: "low",
-                    format: {
-                        type: "json_schema",
-                        name: "daily_horoscope",
-                        strict: true,
-                        schema: DAILY_HOROSCOPE_JSON_SCHEMA
-                    }
-                }
-            });
-        });
+    const candidateConfigs = [
+        { model: horoscopeModel, maxOutputTokens: 5000 },
+        { model: horoscopeModel, maxOutputTokens: 7000 },
+        { model: "gpt-4.1", maxOutputTokens: 5000 }
+    ].filter(function (config, index, collection) {
+        return collection.findIndex(function (entry) {
+            return entry.model === config.model && entry.maxOutputTokens === config.maxOutputTokens;
+        }) === index;
+    });
+    let lastError = null;
 
-        const payload = extractJsonObject(aiResponse.output_text);
-        return normalizeDailyHoroscopePayload(dateKey, payload);
-    } catch (error) {
-        console.error("Failed to generate daily horoscope.", error);
-        return fallbackHoroscope;
+    for (const config of candidateConfigs) {
+        try {
+            const aiResponse = await runWithAiGenerationLog({
+                contentType: "daily_horoscope",
+                itemSlug: buildDailyHoroscopeSlug(dateKey),
+                model: config.model,
+                promptVersion: EDITORIAL_PROMPT_VERSIONS.daily_horoscope,
+                inputPayload: {
+                    dateKey,
+                    maxOutputTokens: config.maxOutputTokens
+                }
+            }, async function () {
+                const requestOptions = {
+                    model: config.model,
+                    max_output_tokens: config.maxOutputTokens,
+                    instructions: [
+                        "Sa kirjutad eestikeelse päevase horoskoobi 12 tähemärgile.",
+                        "Iga tähemärgi tekst peab olema seotud probleemide, hõõrdumise, otsuste, lahtiste otsade või nende lahendamisega.",
+                        "Toon peab olema jutustav, voolav ja horoskoobile omane, aga samal ajal maitsekas ja usutav.",
+                        "See peab lugedes mõjuma nagu päris horoskoobirubriik, mitte nagu juhend, checklist või lahenduste nimekiri.",
+                        "Lauseehitus võib olla horoskoobile omane, näiteks 'täna oled...' või 'päeva peale võib selguda...'.",
+                        "Ära alusta kõiki tähemärke sama mustriga ja väldi korduvat mehhaanilist rütmi.",
+                        "Ära kasuta sõnu või ideid nagu universum, kosmiline energia, retrograad, vibratsioon, hinge teekond, tervenemine, manifestatsioon.",
+                        "Ära maini AI-d, mudelit ega sisu loomise protsessi.",
+                        "Iga märgi title peab olema lühike, kuni umbes 4 sõna.",
+                        "paragraphs peab sisaldama täpselt 3 lühikest lõiku, mis loevad kokku ühe voolava horoskoobina.",
+                        "Esimene lõik peab seadma päeva tooni ja näitama, kuidas lahtised teemad või probleemid sind täna mõjutavad.",
+                        "Teine lõik peab kirjeldama, kus kohas pinge, hõõrdumine või mõni lahendamata küsimus end näitab.",
+                        "Kolmas lõik peab andma elegantse horoskoobilaadse suuna selle kohta, mis juhtub siis, kui teema käsile võtad või õigel hetkel lõpetad.",
+                        "Kirjuta konkreetselt, aga ära muutu käskivaks ega tehniliseks.",
+                        "indicators peab andma kolm päeva näidikut skaalal 1 kuni 5: money, relationships, family.",
+                        "Näidikud peavad sobima sama päeva tooniga, mitte olema juhuslikud.",
+                        "Tagasta ainult puhas JSON."
+                    ].join(" "),
+                    input: [
+                        `Kuupäev: ${dateKey}`,
+                        "Tähemärgid ja toonid:",
+                        HOROSCOPE_SIGNS.map(function (signMeta) {
+                            return `- ${signMeta.label} (${signMeta.id}): ${signMeta.prompt}`;
+                        }).join("\n")
+                    ].join("\n"),
+                    text: {
+                        verbosity: "low",
+                        format: {
+                            type: "json_schema",
+                            name: "daily_horoscope",
+                            strict: true,
+                            schema: DAILY_HOROSCOPE_JSON_SCHEMA
+                        }
+                    }
+                };
+
+                if (/^gpt-5/i.test(config.model)) {
+                    requestOptions.reasoning = {
+                        effort: "low"
+                    };
+                }
+
+                return await client.responses.create(requestOptions);
+            });
+
+            if (aiResponse.status && aiResponse.status !== "completed") {
+                const reason = aiResponse.incomplete_details?.reason || aiResponse.status;
+                throw new Error(`Daily horoscope response incomplete: ${reason}`);
+            }
+
+            return {
+                ...normalizeDailyHoroscopePayload(dateKey, aiResponse.output_parsed || extractJsonObject(aiResponse.output_text)),
+                sourceModel: config.model
+            };
+        } catch (error) {
+            lastError = error;
+            console.error(`Failed to generate daily horoscope with model ${config.model} (${config.maxOutputTokens} tokens).`, error);
+        }
     }
+
+    console.error("Failed to generate daily horoscope.", lastError);
+    return fallbackHoroscope;
 }
 
 async function ensureDailyHoroscopeForToday() {
